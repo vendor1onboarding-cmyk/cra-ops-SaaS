@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import DenominationPlanPage from "./pages/DenominationPlan";
@@ -8,8 +9,14 @@ import ATMReplenishmentPage from "./pages/ATMReplenishment";
 import TechnicalIssuesPage from "./pages/TechnicalIssues";
 import EODSummaryPage from "./pages/EODSummary";
 
+import AdminApprovalsPage from "./pages/AdminApprovals";
+import AdminEODDetailPage from "./pages/AdminEODDetail";
+
+import RequireAdmin from "./components/RequireAdmin";
+
 function PrivateRoute({ children }: { children: JSX.Element }) {
   const { profile, loading } = useAuth();
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-sm">
@@ -17,7 +24,9 @@ function PrivateRoute({ children }: { children: JSX.Element }) {
       </div>
     );
   }
+
   if (!profile) return <Navigate to="/login" replace />;
+
   return children;
 }
 
@@ -25,6 +34,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* ----------------- AUTH ----------------- */}
+        <Route path="/login" element={<Login />} />
+
+        {/* ----------------- USER ROUTES ----------------- */}
         <Route
           path="/"
           element={
@@ -33,6 +46,7 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
         <Route
           path="/denomination-plan"
           element={
@@ -41,6 +55,7 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
         <Route
           path="/cash-pickup"
           element={
@@ -49,6 +64,7 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
         <Route
           path="/atm-replenishment"
           element={
@@ -57,6 +73,7 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
         <Route
           path="/technical-issues"
           element={
@@ -65,6 +82,7 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
         <Route
           path="/eod-summary"
           element={
@@ -73,7 +91,28 @@ export default function App() {
             </PrivateRoute>
           }
         />
-        <Route path="/login" element={<Login />} />
+
+        {/* ----------------- ADMIN ROUTES ----------------- */}
+        <Route
+          path="/admin/approvals"
+          element={
+            <RequireAdmin>
+              <AdminApprovalsPage />
+            </RequireAdmin>
+          }
+        />
+
+        {/* 🔴 THIS ROUTE WAS MISSING */}
+        <Route
+          path="/admin/approvals/:assignmentId"
+          element={
+            <RequireAdmin>
+              <AdminEODDetailPage />
+            </RequireAdmin>
+          }
+        />
+
+        {/* ----------------- FALLBACK ----------------- */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

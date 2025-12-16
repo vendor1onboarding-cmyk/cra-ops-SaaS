@@ -7,12 +7,12 @@ export default function Dashboard() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
 
-  // CUSTODIAN VIEW DATA
-  const [todayAssignment, setTodayAssignment] = useState<any>(null);
+  // Custodian data
+  const [assignment, setAssignment] = useState<any>(null);
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [taskSummary, setTaskSummary] = useState<any>(null);
 
-  // ADMIN VIEW DATA
+  // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
   const [issueSummary, setIssueSummary] = useState<any>(null);
 
@@ -28,82 +28,83 @@ export default function Dashboard() {
     }
   }, [profile]);
 
-  // ---------------------------------------------------------------------
-  // CUSTODIAN DASHBOARD
-  // ---------------------------------------------------------------------
-
+  // --------------------------------------------------
+  // CUSTODIAN DASHBOARD (NO DATE DEPENDENCY)
+  // --------------------------------------------------
   async function loadCustodianDashboard() {
     setLoading(true);
 
-    // 1. Fetch today's assignment for this custodian
-    const { data: assign } = await supabase
+    const { data: assign, error } = await supabase
       .from("assignments")
-      .select("*, supervisor:supervisor_id(full_name)")
+      .select("*")
       .eq("custodian_id", profile.id)
-      .eq("assignment_date", today)
-      .single();
+      .in("status", ["open", "submitted"])
+      .order("assignment_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    setTodayAssignment(assign);
-
-    if (assign) {
-      // 2. Fetch route sites for that assignment
-      const { data: rsites } = await supabase
-        .from("route_sites")
-        .select("*, site:site_id(site_code, site_name)")
-        .eq("assignment_id", assign.id)
-        .order("sequence_no");
-
-      setRouteSites(rsites || []);
-
-      // 3. Fetch task status summary (count how many entries exist)
-      const [denoms, pickups, loads, issues] = await Promise.all([
-        supabase
-          .from("denomination_plans")
-          .select("*", { count: "exact" })
-          .eq("assignment_id", assign.id),
-        supabase
-          .from("cash_pickups")
-          .select("*", { count: "exact" })
-          .eq("assignment_id", assign.id),
-        supabase
-          .from("atm_replenishments")
-          .select("*", { count: "exact" })
-          .eq("assignment_id", assign.id),
-        supabase
-          .from("technical_issues")
-          .select("*", { count: "exact" })
-          .eq("assignment_id", assign.id),
-      ]);
-
-      setTaskSummary({
-        denomCount: denoms?.count || 0,
-        pickupCount: pickups?.count || 0,
-        loadCount: loads?.count || 0,
-        issueCount: issues?.count || 0,
-      });
+    if (error || !assign) {
+      setAssignment(null);
+      setRouteSites([]);
+      setTaskSummary(null);
+      setLoading(false);
+      return;
     }
+
+    setAssignment(assign);
+
+    // Route sites
+    const { data: rsites } = await supabase
+      .from("route_sites")
+      .select("*, site:site_id(site_code)")
+      .eq("assignment_id", assign.id)
+      .order("sequence_no");
+
+    setRouteSites(rsites || []);
+
+    // Task summary
+    const [denoms, pickups, loads, issues] = await Promise.all([
+      supabase
+        .from("denomination_plans")
+        .select("*", { count: "exact" })
+        .eq("assignment_id", assign.id),
+      supabase
+        .from("cash_pickups")
+        .select("*", { count: "exact" })
+        .eq("assignment_id", assign.id),
+      supabase
+        .from("atm_replenishments")
+        .select("*", { count: "exact" })
+        .eq("assignment_id", assign.id),
+      supabase
+        .from("technical_issues")
+        .select("*", { count: "exact" })
+        .eq("assignment_id", assign.id),
+    ]);
+
+    setTaskSummary({
+      denomCount: denoms.count || 0,
+      pickupCount: pickups.count || 0,
+      loadCount: loads.count || 0,
+      issueCount: issues.count || 0,
+    });
 
     setLoading(false);
   }
 
-  // ---------------------------------------------------------------------
-  // ADMIN DASHBOARD
-  // ---------------------------------------------------------------------
-
+  // --------------------------------------------------
+  // ADMIN DASHBOARD (DATE-BASED – KEEP AS IS)
+  // --------------------------------------------------
   async function loadAdminDashboard() {
     setLoading(true);
 
-    // 1. Fetch all today's assignments
     const { data: assigns } = await supabase
       .from("assignments")
-      .select(
-        "*, custodian:custodian_id(full_name), supervisor:supervisor_id(full_name)"
-      )
+      .select("*, custodian:custodian_id(full_name)")
       .eq("assignment_date", today);
 
     setAdminAssignments(assigns || []);
 
-    // 2. Issue summary
     const [newIssues, inProgress, resolved] = await Promise.all([
       supabase
         .from("technical_issues")
@@ -120,18 +121,17 @@ export default function Dashboard() {
     ]);
 
     setIssueSummary({
-      new: newIssues?.count || 0,
-      inProgress: inProgress?.count || 0,
-      resolved: resolved?.count || 0,
+      new: newIssues.count || 0,
+      inProgress: inProgress.count || 0,
+      resolved: resolved.count || 0,
     });
 
     setLoading(false);
   }
 
-  // ---------------------------------------------------------------------
-  // UI Rendering
-  // ---------------------------------------------------------------------
-
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
   return (
     <AppLayout>
       {loading && (
@@ -140,7 +140,7 @@ export default function Dashboard() {
 
       {!loading && profile?.role === "custodian" && (
         <CustodianDashboard
-          todayAssignment={todayAssignment}
+          assignment={assignment}
           routeSites={routeSites}
           taskSummary={taskSummary}
         />
@@ -156,75 +156,67 @@ export default function Dashboard() {
   );
 }
 
-//
-// ----------------------------------------------------
-// Custodian Dashboard UI
-// ----------------------------------------------------
-
-function CustodianDashboard({ todayAssignment, routeSites, taskSummary }: any) {
+// --------------------------------------------------
+// Custodian UI
+// --------------------------------------------------
+function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-primary">Today's Assignment</h2>
+      <h2 className="text-lg font-semibold text-primary">Active Assignment</h2>
 
-      {!todayAssignment && (
-        <div className="p-4 bg-yellow-100 border border-yellow-300 rounded-md">
-          No assignment assigned for today.
+      {!assignment && (
+        <div className="p-4 bg-yellow-100 rounded">
+          No active assignment found.
         </div>
       )}
 
-      {todayAssignment && (
-        <div className="p-4 bg-white rounded-lg shadow">
-          <div className="font-semibold">{todayAssignment.title}</div>
-          <div className="text-xs text-slate-600">
-            Supervisor: {todayAssignment.supervisor?.full_name || "-"}
+      {assignment && (
+        <>
+          <div className="p-4 bg-white rounded shadow text-sm">
+            <div className="font-semibold">
+              Assignment ID: {assignment.id}
+            </div>
+            <div>Status: {assignment.status}</div>
           </div>
-          <div className="text-xs">Status: {todayAssignment.status}</div>
-        </div>
+
+          <h3 className="font-semibold">Route Sites</h3>
+          {routeSites.map((rs: any, idx: number) => (
+            <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
+              {idx + 1}. {rs.site?.site_code}
+            </div>
+          ))}
+
+          <h3 className="font-semibold">Tasks Summary</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
+            <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
+            <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
+            <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
+          </div>
+        </>
       )}
-
-      <h3 className="text-md font-semibold">Route Sites</h3>
-      <div className="space-y-2">
-        {routeSites.map((rs: any, index: number) => (
-          <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
-            <div>{index + 1}. {rs.site?.site_code} – {rs.site?.site_name}</div>
-          </div>
-        ))}
-      </div>
-
-      <h3 className="text-md font-semibold">Tasks Summary</h3>
-      <div className="grid grid-cols-2 gap-3">
-        <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
-        <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
-        <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
-        <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
-      </div>
     </div>
   );
 }
 
-//
-// ----------------------------------------------------
-// Admin Dashboard UI
-// ----------------------------------------------------
-
+// --------------------------------------------------
+// Admin UI
+// --------------------------------------------------
 function AdminDashboard({ adminAssignments, issueSummary }: any) {
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-primary">Admin Overview</h2>
 
-      <h3 className="text-md font-semibold">Today's Assignments</h3>
-      <div className="space-y-3">
-        {adminAssignments.map((a: any) => (
-          <div key={a.id} className="p-4 bg-white rounded shadow text-sm">
-            <div className="font-semibold">{a.title}</div>
-            <div>Custodian: {a.custodian?.full_name || "-"}</div>
-            <div>Supervisor: {a.supervisor?.full_name || "-"}</div>
-            <div>Status: {a.status}</div>
-          </div>
-        ))}
-      </div>
+      <h3 className="font-semibold">Today’s Assignments</h3>
+      {adminAssignments.map((a: any) => (
+        <div key={a.id} className="p-4 bg-white rounded shadow text-sm">
+          <div>Assignment ID: {a.id}</div>
+          <div>Custodian: {a.custodian?.full_name}</div>
+          <div>Status: {a.status}</div>
+        </div>
+      ))}
 
-      <h3 className="text-md font-semibold">Issue Summary</h3>
+      <h3 className="font-semibold">Issue Summary</h3>
       <div className="grid grid-cols-3 gap-3">
         <SummaryBox label="New" value={issueSummary?.new} />
         <SummaryBox label="In Progress" value={issueSummary?.inProgress} />
@@ -234,15 +226,11 @@ function AdminDashboard({ adminAssignments, issueSummary }: any) {
   );
 }
 
-//
-// ----------------------------------------------------
-// Small component for summary numbers
-// ----------------------------------------------------
-
+// --------------------------------------------------
 function SummaryBox({ label, value }: any) {
   return (
     <div className="p-4 bg-white rounded shadow text-center">
-      <div className="text-xl font-bold text-primary">{value}</div>
+      <div className="text-xl font-bold text-primary">{value || 0}</div>
       <div className="text-sm text-slate-600">{label}</div>
     </div>
   );

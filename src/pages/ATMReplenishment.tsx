@@ -1,174 +1,249 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
-import { DenominationFields } from "../components/DenominationFields";
 import { useAuth } from "../context/AuthContext";
+import { AppLayout } from "../components/Layout";
 
-export default function ATMReplenishmentPage() {
+type SiteOption = {
+  site_id: number;
+  display_label: string;
+};
+
+export default function ATMReplenishment() {
   const { profile } = useAuth();
-  const [siteId, setSiteId] = useState<number | null>(null);
+
+  const [assignmentId, setAssignmentId] = useState<number | null>(null);
+  const [sites, setSites] = useState<SiteOption[]>([]);
+  const [selectedSite, setSelectedSite] = useState<number | null>(null);
+
   const [timeIn, setTimeIn] = useState("");
   const [timeOut, setTimeOut] = useState("");
-  const [closingBalance, setClosingBalance] = useState(0);
+  const [closingBalance, setClosingBalance] = useState<number>(0);
   const [remarks, setRemarks] = useState("");
-  const [denoms, setDenoms] = useState<Record<string, number>>({});
 
-  const { data: assignment } = useQuery({
-    queryKey: ["current-assignment", profile?.id],
-    queryFn: async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const { data, error } = await supabase
+  const [form, setForm] = useState({
+    denom_2000: 0,
+    denom_500: 0,
+    denom_200: 0,
+    denom_100: 0,
+    denom_50: 0,
+    denom_20: 0,
+    denom_10: 0,
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  // --------------------------------------------------
+  // Load ACTIVE assignment + route sites (NO DATE FILTER)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!profile) return;
+
+    async function loadData() {
+      setLoading(true);
+
+      // 1️⃣ Get active assignment
+      const { data: assignment, error } = await supabase
         .from("assignments")
-        .select("*")
-        .eq("assignment_date", today)
-        .eq("custodian_id", profile?.id)
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!profile && profile.role === "custodian",
-  });
+        .select("id, status")
+        .eq("custodian_id", profile.id)
+        .in("status", ["open", "submitted"])
+        .order("assignment_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-  const { data: sites } = useQuery({
-    queryKey: ["sites"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("sites").select("*");
-      if (error) throw error;
-      return data;
-    },
-  });
+      if (error || !assignment) {
+        setAssignmentId(null);
+        setSites([]);
+        setLoading(false);
+        return;
+      }
 
-  const mutation = useMutation({
-    mutationFn: async () => {
-      if (!assignment || !siteId) return;
+      setAssignmentId(assignment.id);
 
-      const payload = {
-        assignment_id: assignment.id,
-        site_id: siteId,
-        time_in: timeIn ? new Date(timeIn).toISOString() : null,
-        time_out: timeOut ? new Date(timeOut).toISOString() : null,
-        closing_balance: closingBalance,
-        remarks,
-        ...denoms,
-      };
+      // 2️⃣ Load route sites
+      const { data: routeSites } = await supabase
+        .from("route_sites")
+        .select("site_id, site:site_id(site_code, atm_id, bank_name)")
+        .eq("assignment_id", assignment.id)
+        .order("sequence_no");
 
-      const { error } = await supabase
-        .from("atm_replenishments")
-        .insert(payload);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      alert("ATM replenishment saved");
-      setTimeIn("");
-      setTimeOut("");
+      const mappedSites: SiteOption[] =
+        routeSites?.map((r: any) => ({
+          site_id: r.site_id,
+          display_label: `${r.site.site_code} (${r.site.atm_id ?? "ATM"}) - ${
+            r.site.bank_name ?? ""
+          }`,
+        })) || [];
+
+      setSites(mappedSites);
+      setLoading(false);
+    }
+
+    loadData();
+  }, [profile]);
+
+  // --------------------------------------------------
+  // Save ATM replenishment
+  // --------------------------------------------------
+  async function handleSave() {
+    if (!assignmentId || !selectedSite) {
+      setMessage("Assignment or Site missing");
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    const { error } = await supabase.from("atm_replenishments").insert({
+      assignment_id: assignmentId,
+      site_id: selectedSite,
+      time_in: timeIn || null,
+      time_out: timeOut || null,
+      closing_balance: closingBalance,
+      remarks,
+      ...form,
+    });
+
+    if (error) {
+      console.error(error);
+      setMessage("Failed to save ATM replenishment");
+    } else {
+      setMessage("ATM replenishment saved successfully");
+
+      // Reset form
+      setForm({
+        denom_2000: 0,
+        denom_500: 0,
+        denom_200: 0,
+        denom_100: 0,
+        denom_50: 0,
+        denom_20: 0,
+        denom_10: 0,
+      });
       setClosingBalance(0);
       setRemarks("");
-      setDenoms({});
-    },
-  });
+      setTimeIn("");
+      setTimeOut("");
+    }
 
-  const handleDenomChange = (name: string, value: number) => {
-    setDenoms((prev) => ({ ...prev, [name]: value }));
-  };
+    setLoading(false);
+  }
 
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
   return (
     <AppLayout>
-      <div className="max-w-2xl mx-auto pb-20 md:pb-0">
-        <h2 className="text-lg font-semibold mb-2 text-slate-800">
+      <div className="max-w-xl mx-auto space-y-5">
+        <h2 className="text-lg font-semibold text-primary">
           ATM Replenishment
         </h2>
-        {!assignment && profile?.role === "custodian" && (
-          <p className="text-sm text-slate-600">
-            No assignment found for today.
-          </p>
+
+        {!assignmentId && !loading && (
+          <div className="p-4 bg-yellow-100 rounded text-sm">
+            No active assignment found.
+          </div>
         )}
-        {profile?.role !== "custodian" && (
-          <p className="text-xs text-slate-500 mb-4">
-            This is a field-entry view for custodians to log ATM loads.
-          </p>
-        )}
-        {assignment && profile?.role === "custodian" && (
-          <div className="bg-white rounded-xl shadow-sm p-4 space-y-4 border-t-4 border-primary-light">
+
+        {assignmentId && (
+          <>
             <div>
-              <label className="block text-xs mb-1">Site</label>
+              <label className="text-sm block mb-1">Select Site</label>
               <select
-                className="w-full border rounded-lg px-2 py-2 text-sm"
-                value={siteId ?? ""}
-                onChange={(e) =>
-                  setSiteId(
-                    e.target.value ? Number(e.target.value) : null
-                  )
-                }
+                className="w-full border rounded px-3 py-2 text-sm"
+                value={selectedSite ?? ""}
+                onChange={(e) => setSelectedSite(Number(e.target.value))}
               >
-                <option value="">Select site</option>
-                {sites?.map((s: any) => (
-                  <option key={s.id} value={s.id}>
-                    {s.site_code} - {s.city}
+                <option value="">-- Select Site --</option>
+                {sites.map((s) => (
+                  <option key={s.site_id} value={s.site_id}>
+                    {s.display_label}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs mb-1">Time In</label>
+                <label className="text-sm">Time In</label>
                 <input
                   type="datetime-local"
-                  className="w-full border rounded-lg px-2 py-2 text-sm"
+                  className="w-full border rounded px-2 py-1 text-sm"
                   value={timeIn}
                   onChange={(e) => setTimeIn(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-xs mb-1">Time Out</label>
+                <label className="text-sm">Time Out</label>
                 <input
                   type="datetime-local"
-                  className="w-full border rounded-lg px-2 py-2 text-sm"
+                  className="w-full border rounded px-2 py-1 text-sm"
                   value={timeOut}
                   onChange={(e) => setTimeOut(e.target.value)}
                 />
               </div>
             </div>
 
-            <DenominationFields
-              values={denoms}
-              onChange={handleDenomChange}
-            />
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ["denom_2000", 2000],
+                ["denom_500", 500],
+                ["denom_200", 200],
+                ["denom_100", 100],
+                ["denom_50", 50],
+                ["denom_20", 20],
+                ["denom_10", 10],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <label className="text-xs">{label}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    className="w-full border rounded px-2 py-1 text-sm"
+                    value={(form as any)[key]}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        [key]: Number(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
 
             <div>
-              <label className="block text-xs mb-1">
-                Closing balance after load (₹)
-              </label>
+              <label className="text-sm">Closing Balance</label>
               <input
                 type="number"
-                className="w-full border rounded-lg px-2 py-2 text-sm"
+                className="w-full border rounded px-3 py-2 text-sm"
                 value={closingBalance}
-                onChange={(e) =>
-                  setClosingBalance(Number(e.target.value || 0))
-                }
+                onChange={(e) => setClosingBalance(Number(e.target.value))}
               />
             </div>
 
             <div>
-              <label className="block text-xs mb-1">Remarks</label>
+              <label className="text-sm">Remarks</label>
               <textarea
-                className="w-full border rounded-lg px-2 py-2 text-sm"
-                rows={3}
+                className="w-full border rounded px-3 py-2 text-sm"
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
-                placeholder="High demand site, tech issue observed, etc."
               />
             </div>
 
             <button
-              onClick={() => mutation.mutate()}
-              disabled={mutation.isPending}
-              className="w-full py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-60"
+              onClick={handleSave}
+              disabled={loading}
+              className="w-full bg-primary text-white py-2 rounded text-sm"
             >
-              {mutation.isPending ? "Saving..." : "Save Replenishment"}
+              {loading ? "Saving..." : "Save Replenishment"}
             </button>
-          </div>
+
+            {message && (
+              <p className="text-xs text-center text-slate-700">{message}</p>
+            )}
+          </>
         )}
       </div>
     </AppLayout>

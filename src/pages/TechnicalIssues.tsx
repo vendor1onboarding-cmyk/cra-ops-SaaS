@@ -1,149 +1,231 @@
-import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { AppLayout } from "../components/Layout";
+import FileUpload from "../components/FileUpload";
 
-export default function TechnicalIssuesPage() {
+type SiteOption = {
+  site_id: number;
+  display_label: string;
+};
+
+export default function TechnicalIssues() {
   const { profile } = useAuth();
-  const [siteId, setSiteId] = useState<number | null>(null);
+
+  const [assignmentId, setAssignmentId] = useState<number | null>(null);
+  const [sites, setSites] = useState<SiteOption[]>([]);
+  const [selectedSite, setSelectedSite] = useState<number | null>(null);
+
   const [issueType, setIssueType] = useState("");
   const [errorCode, setErrorCode] = useState("");
   const [description, setDescription] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
 
-  const { data: assignment } = useQuery({
-    queryKey: ["current-assignment", profile?.id],
-    queryFn: async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const { data, error } = await supabase
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  // --------------------------------------------------
+  // Load ACTIVE assignment + route sites (NO DATE FILTER)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!profile) return;
+
+    async function loadData() {
+      setLoading(true);
+
+      // 1️⃣ Resolve active assignment
+      const { data: assignment, error } = await supabase
         .from("assignments")
-        .select("*")
-        .eq("assignment_date", today)
-        .eq("custodian_id", profile?.id)
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!profile && profile.role === "custodian",
-  });
+        .select("id")
+        .eq("custodian_id", profile.id)
+        .in("status", ["open", "submitted"])
+        .order("assignment_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-  const { data: sites } = useQuery({
-    queryKey: ["sites"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("sites").select("*");
-      if (error) throw error;
-      return data;
-    },
-  });
+      if (error || !assignment) {
+        setAssignmentId(null);
+        setSites([]);
+        setLoading(false);
+        return;
+      }
 
-  const mutation = useMutation({
-    mutationFn: async () => {
-      if (!assignment || !siteId) return;
+      setAssignmentId(assignment.id);
 
-      const payload = {
-        assignment_id: assignment.id,
-        site_id: siteId,
-        issue_type: issueType,
-        error_code: errorCode,
-        description,
-      };
+      // 2️⃣ Load route sites
+      const { data: routeSites } = await supabase
+        .from("route_sites")
+        .select("site_id, site:site_id(site_code, atm_id, bank_name)")
+        .eq("assignment_id", assignment.id)
+        .order("sequence_no");
 
-      const { error } = await supabase
-        .from("technical_issues")
-        .insert(payload);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      alert("Technical issue logged");
+      const mappedSites: SiteOption[] =
+        routeSites?.map((r: any) => ({
+          site_id: r.site_id,
+          display_label: `${r.site.site_code} (${r.site.atm_id ?? "ATM"}) - ${
+            r.site.bank_name ?? ""
+          }`,
+        })) || [];
+
+      setSites(mappedSites);
+      setLoading(false);
+    }
+
+    loadData();
+  }, [profile]);
+
+  // --------------------------------------------------
+  // Save Technical Issue
+  // --------------------------------------------------
+  async function handleSave() {
+    if (!assignmentId || !selectedSite || !issueType) {
+      setMessage("Assignment, Site, and Issue Type are required");
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    let photoUrl: string | null = null;
+
+    // Upload photo if selected
+    if (photo) {
+      const fileName = `issue-${Date.now()}-${photo.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("issue-photos")
+        .upload(fileName, photo);
+
+      if (uploadError) {
+        setMessage("Photo upload failed");
+        setLoading(false);
+        return;
+      }
+
+      const { data } = supabase.storage
+        .from("issue-photos")
+        .getPublicUrl(fileName);
+
+      photoUrl = data.publicUrl;
+    }
+
+    const { error } = await supabase.from("technical_issues").insert({
+      assignment_id: assignmentId,
+      site_id: selectedSite,
+      issue_type: issueType,
+      error_code: errorCode || null,
+      description,
+      status: "new",
+      photo_url: photoUrl,
+    });
+
+    if (error) {
+      console.error(error);
+      setMessage("Failed to report issue");
+    } else {
+      setMessage("Issue reported successfully");
       setIssueType("");
       setErrorCode("");
       setDescription("");
-    },
-  });
+      setPhoto(null);
+      setSelectedSite(null);
+    }
 
+    setLoading(false);
+  }
+
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
   return (
     <AppLayout>
-      <div className="max-w-2xl mx-auto pb-20 md:pb-0">
-        <h2 className="text-lg font-semibold mb-2 text-slate-800">
-          Technical Support / ATM Issues
+      <div className="max-w-xl mx-auto space-y-5">
+        <h2 className="text-lg font-semibold text-primary">
+          Technical Issue Reporting
         </h2>
-        {!assignment && profile?.role === "custodian" && (
-          <p className="text-sm text-slate-600">
-            No assignment found for today.
-          </p>
+
+        {!assignmentId && !loading && (
+          <div className="p-4 bg-yellow-100 rounded text-sm">
+            No active assignment found.
+          </div>
         )}
-        {profile?.role !== "custodian" && (
-          <p className="text-xs text-slate-500 mb-4">
-            Custodians log on-field issues here. Admin/Supervisor can analyse in reports.
-          </p>
-        )}
-        {assignment && profile?.role === "custodian" && (
-          <div className="bg-white rounded-xl shadow-sm p-4 space-y-4 border-t-4 border-accent">
+
+        {assignmentId && (
+          <>
             <div>
-              <label className="block text-xs mb-1">Site</label>
+              <label className="text-sm block mb-1">Select Site</label>
               <select
-                className="w-full border rounded-lg px-2 py-2 text-sm"
-                value={siteId ?? ""}
-                onChange={(e) =>
-                  setSiteId(
-                    e.target.value ? Number(e.target.value) : null
-                  )
-                }
+                className="w-full border rounded px-3 py-2 text-sm"
+                value={selectedSite ?? ""}
+                onChange={(e) => setSelectedSite(Number(e.target.value))}
               >
-                <option value="">Select site</option>
-                {sites?.map((s: any) => (
-                  <option key={s.id} value={s.id}>
-                    {s.site_code} - {s.city}
+                <option value="">-- Select Site --</option>
+                {sites.map((s) => (
+                  <option key={s.site_id} value={s.site_id}>
+                    {s.display_label}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs mb-1">Issue Type</label>
+              <label className="text-sm block mb-1">Issue Type</label>
               <select
-                className="w-full border rounded-lg px-2 py-2 text-sm"
+                className="w-full border rounded px-3 py-2 text-sm"
                 value={issueType}
                 onChange={(e) => setIssueType(e.target.value)}
               >
-                <option value="">Select</option>
-                <option value="dispenser">Dispenser jam / cassette</option>
-                <option value="power">Power / UPS / mains</option>
-                <option value="hardware">
-                  Hardware (screen, card reader, shutter)
-                </option>
+                <option value="">-- Select Issue Type --</option>
+                <option value="dispenser">Cash Dispenser</option>
+                <option value="power">Power / Electrical</option>
+                <option value="network">Network / Connectivity</option>
+                <option value="hardware">Hardware Fault</option>
                 <option value="other">Other</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-xs mb-1">Error Code</label>
+              <label className="text-sm block mb-1">
+                Error Code (optional)
+              </label>
               <input
-                className="w-full border rounded-lg px-2 py-2 text-sm"
+                className="w-full border rounded px-3 py-2 text-sm"
                 value={errorCode}
                 onChange={(e) => setErrorCode(e.target.value)}
+                placeholder="e.g. ERR-DS-02"
               />
             </div>
 
             <div>
-              <label className="block text-xs mb-1">Description</label>
+              <label className="text-sm block mb-1">Description</label>
               <textarea
-                className="w-full border rounded-lg px-2 py-2 text-sm"
-                rows={4}
+                className="w-full border rounded px-3 py-2 text-sm"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe symptoms, on-screen message, steps taken, etc."
+                placeholder="Describe the issue observed at site"
               />
             </div>
 
+            <div>
+              <FileUpload onSelect={setPhoto} />
+              {photo && (
+                <p className="text-xs text-slate-500">
+                  Selected: {photo.name}
+                </p>
+              )}
+            </div>
+
             <button
-              onClick={() => mutation.mutate()}
-              disabled={mutation.isPending}
-              className="w-full py-2 rounded-lg bg-primary text-white text-sm font-semibold disabled:opacity-60"
+              onClick={handleSave}
+              disabled={loading}
+              className="w-full bg-primary text-white py-2 rounded text-sm"
             >
-              {mutation.isPending ? "Saving..." : "Log Issue"}
+              {loading ? "Submitting..." : "Report Issue"}
             </button>
-          </div>
+
+            {message && (
+              <p className="text-xs text-center text-slate-700">{message}</p>
+            )}
+          </>
         )}
       </div>
     </AppLayout>

@@ -1,160 +1,201 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { AppLayout } from "../components/Layout";
 
-export default function EODSummaryPage() {
+export default function EODSummary() {
   const { profile } = useAuth();
 
-  const { data: assignment } = useQuery({
-    queryKey: ["current-assignment-eod", profile?.id],
-    queryFn: async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      let query = supabase.from("assignments").select("*").eq("assignment_date", today);
+  const [assignmentId, setAssignmentId] = useState<number | null>(null);
+  const [summary, setSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
-      if (profile?.role === "custodian") {
-        query = query.eq("custodian_id", profile.id);
+  // --------------------------------------------------
+  // Load EOD data (NO DATE DEPENDENCY)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!profile) return;
+
+    async function loadEOD() {
+      setLoading(true);
+
+      // 1️⃣ Resolve active assignment
+      const { data: assignment, error } = await supabase
+        .from("assignments")
+        .select("*")
+        .eq("custodian_id", profile.id)
+        .in("status", ["open", "submitted"])
+        .order("assignment_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !assignment) {
+        setSummary(null);
+        setAssignmentId(null);
+        setLoading(false);
+        return;
       }
 
-      const { data, error } = await query.single();
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!profile,
-  });
+      setAssignmentId(assignment.id);
 
-  const { data: cashPickups } = useQuery({
-    queryKey: ["cash-pickups", assignment?.id],
-    queryFn: async () => {
-      if (!assignment) return [];
-      const { data, error } = await supabase
-        .from("cash_pickups")
-        .select("*")
-        .eq("assignment_id", assignment.id);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!assignment,
-  });
+      // 2️⃣ Load all EOD-related data in parallel
+      const [
+        routeSitesRes,
+        denomPlansRes,
+        cashPickupsRes,
+        atmLoadsRes,
+        issuesRes,
+        travelLogsRes,
+      ] = await Promise.all([
+        supabase
+          .from("route_sites")
+          .select("site_id, site:site_id(site_code)")
+          .eq("assignment_id", assignment.id),
 
-  const { data: replenishments } = useQuery({
-    queryKey: ["replenishments", assignment?.id],
-    queryFn: async () => {
-      if (!assignment) return [];
-      const { data, error } = await supabase
-        .from("atm_replenishments")
-        .select("*, sites(site_code)")
-        .eq("assignment_id", assignment.id);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!assignment,
-  });
+        supabase
+          .from("denomination_plans")
+          .select("*")
+          .eq("assignment_id", assignment.id),
 
-  const { data: issues } = useQuery({
-    queryKey: ["issues", assignment?.id],
-    queryFn: async () => {
-      if (!assignment) return [];
-      const { data, error } = await supabase
-        .from("technical_issues")
-        .select("*, sites(site_code)")
-        .eq("assignment_id", assignment.id);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!assignment,
-  });
+        supabase
+          .from("cash_pickups")
+          .select("*")
+          .eq("assignment_id", assignment.id),
 
-  const totalCash = (cashPickups || []).reduce(
-    (sum: number, c: any) => sum + (c.total_amount || 0),
-    0
-  );
+        supabase
+          .from("atm_replenishments")
+          .select("*")
+          .eq("assignment_id", assignment.id),
 
+        supabase
+          .from("technical_issues")
+          .select("*")
+          .eq("assignment_id", assignment.id),
+
+        supabase
+          .from("travel_logs")
+          .select("*")
+          .eq("assignment_id", assignment.id),
+      ]);
+
+      setSummary({
+        assignment,
+        routeSites: routeSitesRes.data || [],
+        denominationCount: denomPlansRes.data?.length || 0,
+        cashPickupCount: cashPickupsRes.data?.length || 0,
+        atmLoadCount: atmLoadsRes.data?.length || 0,
+        issueCount: issuesRes.data?.length || 0,
+        travelCount: travelLogsRes.data?.length || 0,
+      });
+
+      setLoading(false);
+    }
+
+    loadEOD();
+  }, [profile]);
+
+  // --------------------------------------------------
+  // Submit EOD
+  // --------------------------------------------------
+  async function handleSubmit() {
+    if (!assignmentId) return;
+
+    setLoading(true);
+    setMessage(null);
+
+    const { error } = await supabase
+      .from("assignments")
+      .update({ status: "submitted" })
+      .eq("id", assignmentId);
+
+    if (error) {
+      setMessage("Failed to submit EOD");
+    } else {
+      setMessage("EOD submitted successfully");
+      // update local state so button disables immediately
+      setSummary((prev: any) =>
+        prev
+          ? { ...prev, assignment: { ...prev.assignment, status: "submitted" } }
+          : prev
+      );
+    }
+
+    setLoading(false);
+  }
+
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
   return (
     <AppLayout>
-      <div className="max-w-4xl mx-auto pb-20 md:pb-0 space-y-4">
-        <h2 className="text-lg font-semibold text-slate-800">
-          End-of-Day Summary
+      <div className="max-w-xl mx-auto space-y-5">
+        <h2 className="text-lg font-semibold text-primary">
+          End of Day Summary
         </h2>
 
-        {!assignment && (
-          <p className="text-sm text-slate-600">
-            No assignment found for today.
-          </p>
+        {loading && <p className="text-sm">Loading...</p>}
+
+        {!summary && !loading && (
+          <div className="p-4 bg-yellow-100 rounded text-sm">
+            No active assignment found.
+          </div>
         )}
 
-        {assignment && (
+        {summary && (
           <>
-            <div className="bg-white rounded-xl shadow-sm p-4 text-sm border-t-4 border-primary">
-              <p>
-                <span className="font-semibold">Assignment:</span>{" "}
-                {assignment.title || assignment.id}
-              </p>
-              <p>
-                <span className="font-semibold">Date:</span>{" "}
-                {assignment.assignment_date}
-              </p>
-              <p>
-                <span className="font-semibold">Total cash picked:</span> ₹
-                {totalCash || 0}
-              </p>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-4 text-xs">
-              <div className="bg-white rounded-xl shadow-sm p-4">
-                <h3 className="font-semibold text-sm mb-2">
-                  Cash Pickups
-                </h3>
-                {cashPickups && cashPickups.length > 0 ? (
-                  <ul className="space-y-1">
-                    {cashPickups.map((c: any) => (
-                      <li key={c.id}>
-                        • {c.bank_name} {c.branch} – ₹
-                        {c.total_amount} (Var: {c.variance})
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>No cash pickups recorded.</p>
-                )}
+            <div className="bg-white rounded shadow p-4 space-y-2 text-sm">
+              <div>
+                <strong>Assignment:</strong>{" "}
+                {summary.assignment.title || `#${summary.assignment.id}`}
               </div>
-
-              <div className="bg-white rounded-xl shadow-sm p-4">
-                <h3 className="font-semibold text-sm mb-2">
-                  ATM Replenishments
-                </h3>
-                {replenishments && replenishments.length > 0 ? (
-                  <ul className="space-y-1">
-                    {replenishments.map((r: any) => (
-                      <li key={r.id}>
-                        • Site {r.site_id} – Closing ₹{r.closing_balance}{" "}
-                        ({r.remarks || "No remarks"})
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>No replenishment entries.</p>
-                )}
+              <div>
+                <strong>Route Sites:</strong>{" "}
+                {summary.routeSites.length}
+              </div>
+              <div>
+                <strong>Denomination Plans:</strong>{" "}
+                {summary.denominationCount}
+              </div>
+              <div>
+                <strong>Cash Pickups:</strong>{" "}
+                {summary.cashPickupCount}
+              </div>
+              <div>
+                <strong>ATM Replenishments:</strong>{" "}
+                {summary.atmLoadCount}
+              </div>
+              <div>
+                <strong>Technical Issues:</strong>{" "}
+                {summary.issueCount}
+              </div>
+              <div>
+                <strong>Travel Logs:</strong>{" "}
+                {summary.travelCount}
+              </div>
+              <div>
+                <strong>Status:</strong>{" "}
+                <span className="capitalize">
+                  {summary.assignment.status}
+                </span>
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm p-4 text-xs">
-              <h3 className="font-semibold text-sm mb-2">
-                Technical Issues
-              </h3>
-              {issues && issues.length > 0 ? (
-                <ul className="space-y-1">
-                  {issues.map((i: any) => (
-                    <li key={i.id}>
-                      • Site {i.site_id} – {i.issue_type} – Code{" "}
-                      {i.error_code} – {i.status || "new"}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>No issues logged.</p>
-              )}
-            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={
+                loading || summary.assignment.status !== "open"
+              }
+              className="w-full bg-primary text-white py-2 rounded text-sm disabled:opacity-60"
+            >
+              {loading ? "Submitting..." : "Submit End of Day"}
+            </button>
+
+            {message && (
+              <p className="text-xs text-center text-slate-700">
+                {message}
+              </p>
+            )}
           </>
         )}
       </div>

@@ -5,15 +5,18 @@ import { useAuth } from "../context/AuthContext";
 export function AppLayout({ children }: { children: ReactNode }) {
   const { profile, signOut } = useAuth();
   const location = useLocation();
-
   const navItems = [
-    { to: "/", label: "Dashboard" },
-    { to: "/denomination-plan", label: "Denomination" },
-    { to: "/cash-pickup", label: "Cash Pickup" },
-    { to: "/atm-replenishment", label: "ATM Load" },
-    { to: "/technical-issues", label: "Tech Issues" },
-    { to: "/eod-summary", label: "EOD" },
-  ];
+  { to: "/", label: "Dashboard" },
+  { to: "/denomination-plan", label: "Denomination" },
+  { to: "/cash-pickup", label: "Cash Pickup" },
+  { to: "/atm-replenishment", label: "ATM Load" },
+  { to: "/technical-issues", label: "Tech Issues" },
+  { to: "/eod-summary", label: "EOD" },
+];
+
+if (profile?.role === "admin") {
+  navItems.push({ to: "/admin/approvals", label: "EOD Approvals" });
+}
 
   return (
     <div className="min-h-screen flex flex-col">
