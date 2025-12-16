@@ -4,40 +4,64 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 
+type Assignment = {
+  id: number;
+  assignment_date: string;
+  title: string | null;
+  status: string;
+  custodian_id: string;
+  custodian_name?: string;
+};
+
 export default function AdminApprovals() {
   const { profile } = useAuth();
-  const [assignments, setAssignments] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!profile || profile.role !== "admin") return;
 
-    async function loadAssignments() {
+    async function load() {
       setLoading(true);
 
-      const { data, error } = await supabase
+      // 1️⃣ Load submitted assignments ONLY (no joins)
+      const { data: assignmentData, error } = await supabase
         .from("assignments")
-        .select(`
-          id,
-          assignment_date,
-          title,
-          status,
-          custodian_id,
-          profiles:profiles!profiles_pkey(
-            full_name
-          )
-        `)
-        .in("status", ["submitted", "approved", "rejected"])
+        .select("id, assignment_date, title, status, custodian_id")
+        .eq("status", "submitted")
         .order("assignment_date", { ascending: false });
 
-      if (!error) {
-        setAssignments(data || []);
+      if (error || !assignmentData || assignmentData.length === 0) {
+        setAssignments([]);
+        setLoading(false);
+        return;
       }
 
+      // 2️⃣ Load custodian profiles separately
+      const custodianIds = [
+        ...new Set(assignmentData.map((a) => a.custodian_id)),
+      ];
+
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", custodianIds);
+
+      const profileMap = new Map(
+        profiles?.map((p) => [p.id, p.full_name]) || []
+      );
+
+      // 3️⃣ Merge safely
+      const merged = assignmentData.map((a) => ({
+        ...a,
+        custodian_name: profileMap.get(a.custodian_id) || "—",
+      }));
+
+      setAssignments(merged);
       setLoading(false);
     }
 
-    loadAssignments();
+    load();
   }, [profile]);
 
   return (
@@ -77,7 +101,7 @@ export default function AdminApprovals() {
                       {a.title || `Assignment #${a.id}`}
                     </td>
                     <td className="p-3 border">
-                      {a.profiles?.full_name || "—"}
+                      {a.custodian_name}
                     </td>
                     <td className="p-3 border capitalize">
                       {a.status}
@@ -85,7 +109,7 @@ export default function AdminApprovals() {
                     <td className="p-3 border text-center">
                       <Link
                         to={`/admin/approvals/${a.id}`}
-                        className="px-3 py-1 bg-slate-700 text-white rounded text-xs hover:bg-slate-800"
+                        className="px-3 py-1 bg-slate-700 text-white rounded text-xs"
                       >
                         View
                       </Link>
