@@ -12,7 +12,8 @@ export default function EODSummary() {
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load EOD data (NO DATE DEPENDENCY)
+  // Load EOD data – ONLY assignment that HAS route sites
+  // (open OR submitted)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
@@ -20,10 +21,16 @@ export default function EODSummary() {
     async function loadEOD() {
       setLoading(true);
 
-      // 1️⃣ Resolve active assignment
       const { data: assignment, error } = await supabase
         .from("assignments")
-        .select("*")
+        .select(`
+          id,
+          title,
+          status,
+          route_sites!inner (
+            site_id
+          )
+        `)
         .eq("custodian_id", profile.id)
         .in("status", ["open", "submitted"])
         .order("assignment_date", { ascending: false })
@@ -39,7 +46,9 @@ export default function EODSummary() {
 
       setAssignmentId(assignment.id);
 
-      // 2️⃣ Load all EOD-related data in parallel
+      // --------------------------------------------------
+      // Load all EOD-related data in parallel
+      // --------------------------------------------------
       const [
         routeSitesRes,
         denomPlansRes,
@@ -113,10 +122,12 @@ export default function EODSummary() {
       setMessage("Failed to submit EOD");
     } else {
       setMessage("EOD submitted successfully");
-      // update local state so button disables immediately
       setSummary((prev: any) =>
         prev
-          ? { ...prev, assignment: { ...prev.assignment, status: "submitted" } }
+          ? {
+              ...prev,
+              assignment: { ...prev.assignment, status: "submitted" },
+            }
           : prev
       );
     }

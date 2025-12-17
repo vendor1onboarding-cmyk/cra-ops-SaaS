@@ -31,7 +31,8 @@ export default function DenominationPlan() {
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load active assignment + route sites
+  // Load ACTIVE assignment that HAS route sites
+  // (open OR submitted)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
@@ -39,10 +40,19 @@ export default function DenominationPlan() {
     async function loadAssignmentAndSites() {
       setLoading(true);
 
-      // 1️⃣ Resolve active assignment
       const { data: assignment, error } = await supabase
         .from("assignments")
-        .select("id, status")
+        .select(`
+          id,
+          route_sites!inner (
+            site_id,
+            site:site_id (
+              site_code,
+              atm_id,
+              bank_name
+            )
+          )
+        `)
         .eq("custodian_id", profile.id)
         .in("status", ["open", "submitted"])
         .order("assignment_date", { ascending: false })
@@ -58,15 +68,8 @@ export default function DenominationPlan() {
 
       setAssignmentId(assignment.id);
 
-      // 2️⃣ Load route sites
-      const { data: routeSites } = await supabase
-        .from("route_sites")
-        .select("site_id, site:site_id(site_code, atm_id, bank_name)")
-        .eq("assignment_id", assignment.id)
-        .order("sequence_no");
-
       const mappedSites: SiteOption[] =
-        routeSites?.map((r: any) => ({
+        assignment.route_sites.map((r: any) => ({
           site_id: r.site_id,
           display_label: `${r.site.site_code} (${r.site.atm_id ?? "ATM"}) - ${r.site.bank_name ?? ""}`,
         })) || [];
@@ -79,7 +82,7 @@ export default function DenominationPlan() {
   }, [profile]);
 
   // --------------------------------------------------
-  // Load existing denomination plan when site changes
+  // Load existing plan when site changes
   // --------------------------------------------------
   useEffect(() => {
     if (!assignmentId || !selectedSite) return;
@@ -105,7 +108,6 @@ export default function DenominationPlan() {
           has_source_report: data.has_source_report,
         });
       } else {
-        // Reset form
         setForm({
           denom_2000: 0,
           denom_500: 0,
@@ -124,7 +126,7 @@ export default function DenominationPlan() {
   }, [assignmentId, selectedSite]);
 
   // --------------------------------------------------
-  // Save denomination plan (UPSERT)
+  // Save plan
   // --------------------------------------------------
   async function handleSave() {
     if (!assignmentId || !selectedSite) return;
@@ -132,19 +134,21 @@ export default function DenominationPlan() {
     setLoading(true);
     setMessage(null);
 
-    const { error } = await supabase.from("denomination_plans").upsert(
-      {
-        assignment_id: assignmentId,
-        site_id: selectedSite,
-        ...form,
-      },
-      {
-        onConflict: "assignment_id,site_id",
-      }
-    );
+    const { error } = await supabase
+      .from("denomination_plans")
+      .upsert(
+        {
+          assignment_id: assignmentId,
+          site_id: selectedSite,
+          ...form,
+        },
+        { onConflict: "assignment_id,site_id" }
+      );
 
     setMessage(
-      error ? "Failed to save denomination plan" : "Denomination plan saved successfully"
+      error
+        ? "Failed to save denomination plan"
+        : "Denomination plan saved successfully"
     );
 
     setLoading(false);
@@ -223,28 +227,6 @@ export default function DenominationPlan() {
                 <div className="text-sm font-semibold">
                   Total Amount: ₹{totalAmount.toLocaleString()}
                 </div>
-
-                <div>
-                  <label className="text-sm block mb-1">Remarks</label>
-                  <textarea
-                    className="w-full border rounded px-3 py-2 text-sm"
-                    value={form.remarks}
-                    onChange={(e) =>
-                      setForm({ ...form, remarks: e.target.value })
-                    }
-                  />
-                </div>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.has_source_report}
-                    onChange={(e) =>
-                      setForm({ ...form, has_source_report: e.target.checked })
-                    }
-                  />
-                  Source report available
-                </label>
 
                 <button
                   onClick={handleSave}

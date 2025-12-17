@@ -34,18 +34,30 @@ export default function ATMReplenishment() {
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load ACTIVE assignment + route sites (NO DATE FILTER)
+  // Load ACTIVE assignment that HAS route sites
+  // (open OR submitted)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
 
-    async function loadData() {
+    async function loadAssignmentAndSites() {
       setLoading(true);
 
-      // 1️⃣ Get active assignment
       const { data: assignment, error } = await supabase
         .from("assignments")
-        .select("id, status")
+        .select(
+          `
+          id,
+          route_sites!inner (
+            site_id,
+            site:site_id (
+              site_code,
+              atm_id,
+              bank_name
+            )
+          )
+        `
+        )
         .eq("custodian_id", profile.id)
         .in("status", ["open", "submitted"])
         .order("assignment_date", { ascending: false })
@@ -61,26 +73,17 @@ export default function ATMReplenishment() {
 
       setAssignmentId(assignment.id);
 
-      // 2️⃣ Load route sites
-      const { data: routeSites } = await supabase
-        .from("route_sites")
-        .select("site_id, site:site_id(site_code, atm_id, bank_name)")
-        .eq("assignment_id", assignment.id)
-        .order("sequence_no");
-
       const mappedSites: SiteOption[] =
-        routeSites?.map((r: any) => ({
+        assignment.route_sites.map((r: any) => ({
           site_id: r.site_id,
-          display_label: `${r.site.site_code} (${r.site.atm_id ?? "ATM"}) - ${
-            r.site.bank_name ?? ""
-          }`,
+          display_label: `${r.site.site_code} (${r.site.atm_id ?? "ATM"}) - ${r.site.bank_name ?? ""}`,
         })) || [];
 
       setSites(mappedSites);
       setLoading(false);
     }
 
-    loadData();
+    loadAssignmentAndSites();
   }, [profile]);
 
   // --------------------------------------------------

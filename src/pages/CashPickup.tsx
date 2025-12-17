@@ -25,7 +25,7 @@ export default function CashPickup() {
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load active assignment (NOT date-based)
+  // Load ACTIVE assignment that HAS route sites
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
@@ -33,9 +33,14 @@ export default function CashPickup() {
     async function loadAssignment() {
       const { data: assignment, error } = await supabase
         .from("assignments")
-        .select("id, status")
+        .select(
+          `
+          id,
+          route_sites!inner ( id )
+        `
+        )
         .eq("custodian_id", profile.id)
-        .in("status", ["open", "submitted"])
+        .eq("status", "open")
         .order("assignment_date", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -109,7 +114,9 @@ export default function CashPickup() {
   return (
     <AppLayout>
       <div className="max-w-xl mx-auto space-y-5">
-        <h2 className="text-lg font-semibold text-primary">Cash Pickup</h2>
+        <h2 className="text-lg font-semibold text-primary">
+          Cash Pickup
+        </h2>
 
         {!assignmentId && (
           <div className="p-4 bg-yellow-100 rounded text-sm">
@@ -198,7 +205,9 @@ export default function CashPickup() {
             </button>
 
             {message && (
-              <p className="text-xs text-center text-slate-700">{message}</p>
+              <p className="text-xs text-center text-slate-700">
+                {message}
+              </p>
             )}
           </>
         )}
