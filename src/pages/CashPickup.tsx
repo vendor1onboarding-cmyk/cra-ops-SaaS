@@ -67,7 +67,7 @@ export default function CashPickup() {
   const variance = totalAmount - expectedAmount;
 
   // --------------------------------------------------
-  // Save (UPSERT – one pickup per bank per assignment)
+  // Save (UPSERT – one pickup per bank per day)
   // --------------------------------------------------
   async function handleSave() {
     if (!assignmentId || !bankName) {
@@ -78,21 +78,23 @@ export default function CashPickup() {
     setLoading(true);
     setMessage(null);
 
-    const { error } = await supabase.from("cash_pickups").upsert(
-      {
-        assignment_id: assignmentId,
-        bank_name: bankName,
-        branch,
-        pickup_time: new Date().toISOString(),
-        expected_amount: expectedAmount,
-        total_amount: totalAmount,
-        variance,
-        ...form,
-      },
-      {
-        onConflict: "assignment_id,bank_name",
-      }
-    );
+    const { error } = await supabase
+      .from("cash_pickups")
+      .upsert(
+        {
+          assignment_id: assignmentId,
+          bank_name: bankName,
+          branch,
+          pickup_time: new Date().toISOString(),
+          expected_amount: expectedAmount,
+          total_amount: totalAmount,
+          variance,
+          ...form,
+        },
+        {
+          onConflict: "assignment_id,bank_name",
+        }
+      );
 
     if (error) {
       console.error(error);
@@ -143,12 +145,16 @@ export default function CashPickup() {
             </div>
 
             <div>
-              <label className="text-sm block mb-1">Expected Amount</label>
+              <label className="text-sm block mb-1">
+                Expected Amount
+              </label>
               <input
                 type="number"
                 className="w-full border rounded px-3 py-2 text-sm"
                 value={expectedAmount}
-                onChange={(e) => setExpectedAmount(Number(e.target.value))}
+                onChange={(e) =>
+                  setExpectedAmount(Number(e.target.value))
+                }
               />
             </div>
 
@@ -176,4 +182,40 @@ export default function CashPickup() {
                       })
                     }
                   />
-                </div
+                </div>
+              ))}
+            </div>
+
+            <div className="text-sm font-semibold">
+              Total Amount: ₹{totalAmount.toLocaleString()}
+            </div>
+
+            <div
+              className={`text-sm font-semibold ${
+                variance === 0
+                  ? "text-green-600"
+                  : "text-red-600"
+              }`}
+            >
+              Variance: ₹{variance.toLocaleString()}
+            </div>
+
+            <button
+              onClick={handleSave}
+              disabled={loading}
+              className="w-full bg-primary text-white py-2 rounded text-sm"
+            >
+              {loading ? "Saving..." : "Save Cash Pickup"}
+            </button>
+
+            {message && (
+              <p className="text-xs text-center text-slate-700">
+                {message}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </AppLayout>
+  );
+}
