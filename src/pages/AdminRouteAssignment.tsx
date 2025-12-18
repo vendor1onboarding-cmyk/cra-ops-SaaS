@@ -19,19 +19,31 @@ type Site = {
   city: string | null;
 };
 
+type Custodian = {
+  id: string;
+  full_name: string;
+};
+
 export default function AdminRouteAssignment() {
   const { profile } = useAuth();
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
+  const [custodians, setCustodians] = useState<Custodian[]>([]);
+
   const [selectedAssignment, setSelectedAssignment] = useState<number | null>(null);
   const [selectedSites, setSelectedSites] = useState<number[]>([]);
+
+  // Create assignment
+  const [selectedCustodian, setSelectedCustodian] = useState<string>("");
+  const [assignmentDate, setAssignmentDate] = useState<string>("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load assignments + sites (ADMIN ONLY)
+  // Load base data (ADMIN ONLY)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile || profile.role !== "admin") return;
@@ -39,49 +51,40 @@ export default function AdminRouteAssignment() {
     async function loadData() {
       setLoading(true);
 
-      // 1️⃣ Load assignments (NO joins)
-      const { data: assignmentsData, error } = await supabase
+      // Assignments (exclude rejected)
+      const { data: assignmentsData } = await supabase
         .from("assignments")
         .select("id, assignment_date, status, custodian_id")
         .not("status", "eq", "rejected")
         .order("assignment_date", { ascending: false });
 
-      if (error) {
-        console.error("Failed to load assignments", error);
-        setAssignments([]);
-        setLoading(false);
-        return;
-      }
-
-      // 2️⃣ Load custodian names separately
-      const custodianIds = Array.from(
-        new Set(assignmentsData.map(a => a.custodian_id))
-      );
-
-      const { data: profilesData } = await supabase
+      // Custodians
+      const { data: custodianProfiles } = await supabase
         .from("profiles")
         .select("id, full_name")
-        .in("id", custodianIds);
+        .eq("role", "custodian");
 
-      const profileMap = new Map(
-        profilesData?.map(p => [p.id, p.full_name]) || []
-      );
-
-      // 3️⃣ Merge assignments + custodian name
-      const mergedAssignments: Assignment[] = assignmentsData.map(a => ({
-        ...a,
-        custodian: {
-          full_name: profileMap.get(a.custodian_id) || "Custodian",
-        },
-      }));
-
-      // 4️⃣ Load sites
+      // Sites
       const { data: sitesData } = await supabase
         .from("sites")
         .select("id, site_code, atm_id, bank_name, city")
         .order("site_code");
 
+      // Map custodian name
+      const custodianMap = new Map(
+        custodianProfiles?.map(c => [c.id, c.full_name]) || []
+      );
+
+      const mergedAssignments =
+        assignmentsData?.map(a => ({
+          ...a,
+          custodian: {
+            full_name: custodianMap.get(a.custodian_id) || "Custodian",
+          },
+        })) || [];
+
       setAssignments(mergedAssignments);
+      setCustodians(custodianProfiles || []);
       setSites(sitesData || []);
       setLoading(false);
     }
@@ -90,7 +93,7 @@ export default function AdminRouteAssignment() {
   }, [profile]);
 
   // --------------------------------------------------
-  // Load existing route when assignment changes
+  // Load route when assignment selected
   // --------------------------------------------------
   useEffect(() => {
     if (!selectedAssignment) return;
@@ -109,6 +112,44 @@ export default function AdminRouteAssignment() {
   }, [selectedAssignment]);
 
   // --------------------------------------------------
+  // Create Assignment (Option B)
+  // --------------------------------------------------
+  async function createAssignment() {
+    if (!selectedCustodian || !assignmentDate) {
+      setMessage("Select custodian and date");
+      return;
+    }
+
+    // Soft check – one per day
+    const existing = assignments.find(
+      a =>
+        a.custodian_id === selectedCustodian &&
+        a.assignment_date === assignmentDate
+    );
+
+    if (existing) {
+      setMessage("Assignment already exists for this custodian and date");
+      return;
+    }
+
+    const { error } = await supabase.from("assignments").insert({
+      custodian_id: selectedCustodian,
+      assignment_date: assignmentDate,
+      status: "open",
+      title: "Daily Route",
+    });
+
+    if (error) {
+      setMessage("Failed to create assignment");
+    } else {
+      setMessage("Assignment created successfully");
+      setSelectedCustodian("");
+      setAssignmentDate("");
+      window.location.reload(); // simple & safe refresh
+    }
+  }
+
+  // --------------------------------------------------
   // Toggle site selection
   // --------------------------------------------------
   function toggleSite(siteId: number) {
@@ -120,26 +161,31 @@ export default function AdminRouteAssignment() {
   }
 
   // --------------------------------------------------
-  // Save route
+  // Save route (Option A – only OPEN)
   // --------------------------------------------------
   async function saveRoute() {
-    if (!selectedAssignment || selectedSites.length === 0) {
-      setMessage("Select an assignment and at least one site.");
+    const assignment = assignments.find(a => a.id === selectedAssignment);
+
+    if (!assignment || assignment.status !== "open") {
+      setMessage("Route can be assigned only for OPEN assignments");
+      return;
+    }
+
+    if (selectedSites.length === 0) {
+      setMessage("Select at least one site");
       return;
     }
 
     setSaving(true);
     setMessage(null);
 
-    // Clear existing route
     await supabase
       .from("route_sites")
       .delete()
-      .eq("assignment_id", selectedAssignment);
+      .eq("assignment_id", assignment.id);
 
-    // Insert new route
     const inserts = selectedSites.map((siteId, idx) => ({
-      assignment_id: selectedAssignment,
+      assignment_id: assignment.id,
       site_id: siteId,
       sequence_no: idx + 1,
     }));
@@ -149,10 +195,9 @@ export default function AdminRouteAssignment() {
       .insert(inserts);
 
     if (error) {
-      console.error(error);
-      setMessage("Failed to save route. Try again.");
+      setMessage("Failed to save route");
     } else {
-      setMessage("Route assigned successfully.");
+      setMessage("Route assigned successfully");
     }
 
     setSaving(false);
@@ -165,18 +210,50 @@ export default function AdminRouteAssignment() {
     <AppLayout>
       <div className="max-w-6xl mx-auto space-y-6">
         <h2 className="text-xl font-semibold text-primary">
-          Admin – Route Assignment
+          Admin – Assignment & Route Management
         </h2>
 
-        {loading && <p className="text-sm">Loading data…</p>}
+        {loading && <p>Loading…</p>}
 
         {!loading && (
           <>
-            {/* Assignment Selector */}
+            {/* Create Assignment */}
             <div className="bg-white p-4 rounded shadow space-y-2">
-              <label className="text-sm font-medium">Select Assignment</label>
+              <h3 className="font-semibold">Create Assignment</h3>
+
               <select
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full border px-3 py-2"
+                value={selectedCustodian}
+                onChange={e => setSelectedCustodian(e.target.value)}
+              >
+                <option value="">Select Custodian</option>
+                {custodians.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.full_name}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="date"
+                className="w-full border px-3 py-2"
+                value={assignmentDate}
+                onChange={e => setAssignmentDate(e.target.value)}
+              />
+
+              <button
+                onClick={createAssignment}
+                className="bg-primary text-white px-4 py-2 rounded text-sm"
+              >
+                Create Assignment
+              </button>
+            </div>
+
+            {/* Assignment Selector */}
+            <div className="bg-white p-4 rounded shadow">
+              <label className="font-medium">Select Assignment</label>
+              <select
+                className="w-full border px-3 py-2 mt-2"
                 value={selectedAssignment ?? ""}
                 onChange={e =>
                   setSelectedAssignment(
@@ -193,25 +270,23 @@ export default function AdminRouteAssignment() {
               </select>
             </div>
 
-            {/* Sites List */}
+            {/* Route Assignment */}
             {selectedAssignment && (
               <div className="bg-white p-4 rounded shadow">
-                <h3 className="text-sm font-semibold mb-2">
-                  Select Sites
-                </h3>
+                <h3 className="font-semibold mb-2">Assign Route</h3>
 
-                <div className="max-h-80 overflow-y-auto border rounded">
+                <div className="max-h-72 overflow-y-auto border">
                   {sites.map(site => (
                     <label
                       key={site.id}
-                      className="flex items-center gap-2 px-3 py-2 border-b text-sm cursor-pointer hover:bg-slate-50"
+                      className="flex items-center gap-2 px-3 py-2 border-b"
                     >
                       <input
                         type="checkbox"
                         checked={selectedSites.includes(site.id)}
                         onChange={() => toggleSite(site.id)}
                       />
-                      <span className="font-medium">{site.site_code}</span>
+                      <span>{site.site_code}</span>
                       <span className="text-xs text-slate-500">
                         {site.city} | {site.bank_name}
                       </span>
@@ -222,14 +297,12 @@ export default function AdminRouteAssignment() {
                 <button
                   disabled={saving}
                   onClick={saveRoute}
-                  className="mt-4 px-4 py-2 bg-primary text-white rounded text-sm disabled:opacity-60"
+                  className="mt-4 bg-primary text-white px-4 py-2 rounded"
                 >
-                  {saving ? "Saving…" : "Save Route"}
+                  Save Route
                 </button>
 
-                {message && (
-                  <p className="mt-2 text-sm text-blue-600">{message}</p>
-                )}
+                {message && <p className="mt-2 text-sm text-blue-600">{message}</p>}
               </div>
             )}
           </>
