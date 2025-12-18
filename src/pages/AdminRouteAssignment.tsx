@@ -34,9 +34,13 @@ export default function AdminRouteAssignment() {
   const [selectedAssignment, setSelectedAssignment] = useState<number | null>(null);
   const [selectedSites, setSelectedSites] = useState<number[]>([]);
 
-  // Create assignment
+  // Assignment creation
   const [selectedCustodian, setSelectedCustodian] = useState<string>("");
   const [assignmentDate, setAssignmentDate] = useState<string>("");
+
+  // District auto assign
+  const [districts, setDistricts] = useState<string[]>([]);
+  const [selectedDistrict, setSelectedDistrict] = useState<string>("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -70,6 +74,11 @@ export default function AdminRouteAssignment() {
         .select("id, site_code, atm_id, bank_name, city")
         .order("site_code");
 
+      // Build district list
+      const uniqueDistricts = Array.from(
+        new Set((sitesData || []).map(s => s.city).filter(Boolean))
+      );
+
       // Map custodian name
       const custodianMap = new Map(
         custodianProfiles?.map(c => [c.id, c.full_name]) || []
@@ -86,6 +95,7 @@ export default function AdminRouteAssignment() {
       setAssignments(mergedAssignments);
       setCustodians(custodianProfiles || []);
       setSites(sitesData || []);
+      setDistricts(uniqueDistricts);
       setLoading(false);
     }
 
@@ -120,7 +130,6 @@ export default function AdminRouteAssignment() {
       return;
     }
 
-    // Soft check – one per day
     const existing = assignments.find(
       a =>
         a.custodian_id === selectedCustodian &&
@@ -145,7 +154,7 @@ export default function AdminRouteAssignment() {
       setMessage("Assignment created successfully");
       setSelectedCustodian("");
       setAssignmentDate("");
-      window.location.reload(); // simple & safe refresh
+      window.location.reload();
     }
   }
 
@@ -161,7 +170,7 @@ export default function AdminRouteAssignment() {
   }
 
   // --------------------------------------------------
-  // Save route (Option A – only OPEN)
+  // Save route (manual)
   // --------------------------------------------------
   async function saveRoute() {
     const assignment = assignments.find(a => a.id === selectedAssignment);
@@ -194,10 +203,46 @@ export default function AdminRouteAssignment() {
       .from("route_sites")
       .insert(inserts);
 
+    setMessage(error ? "Failed to save route" : "Route assigned successfully");
+    setSaving(false);
+  }
+
+  // --------------------------------------------------
+  // AUTO ASSIGN BY DISTRICT (NEW)
+  // --------------------------------------------------
+  async function autoAssignByDistrict() {
+    if (!selectedAssignment || !selectedDistrict) {
+      setMessage("Select assignment and district");
+      return;
+    }
+
+    const assignment = assignments.find(a => a.id === selectedAssignment);
+    if (!assignment || assignment.status !== "open") {
+      setMessage("Auto-assign allowed only for OPEN assignments");
+      return;
+    }
+
+    setSaving(true);
+    setMessage(null);
+
+    const { error } = await supabase.rpc("auto_assign_route_by_district", {
+      p_assignment_id: selectedAssignment,
+      p_district: selectedDistrict,
+    });
+
     if (error) {
-      setMessage("Failed to save route");
+      setMessage(error.message);
     } else {
-      setMessage("Route assigned successfully");
+      setMessage("Route auto-assigned by district");
+
+      // Reload route
+      const { data } = await supabase
+        .from("route_sites")
+        .select("site_id, sequence_no")
+        .eq("assignment_id", selectedAssignment)
+        .order("sequence_no");
+
+      setSelectedSites(data?.map(r => r.site_id) || []);
     }
 
     setSaving(false);
@@ -272,9 +317,38 @@ export default function AdminRouteAssignment() {
 
             {/* Route Assignment */}
             {selectedAssignment && (
-              <div className="bg-white p-4 rounded shadow">
-                <h3 className="font-semibold mb-2">Assign Route</h3>
+              <div className="bg-white p-4 rounded shadow space-y-4">
+                <h3 className="font-semibold">Assign Route</h3>
 
+                {/* Auto Assign */}
+                <div className="border p-3 rounded space-y-2">
+                  <label className="text-sm font-medium">
+                    Auto-assign by District
+                  </label>
+
+                  <select
+                    className="w-full border px-3 py-2"
+                    value={selectedDistrict}
+                    onChange={e => setSelectedDistrict(e.target.value)}
+                  >
+                    <option value="">Select District</option>
+                    {districts.map(d => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={autoAssignByDistrict}
+                    disabled={saving}
+                    className="bg-slate-700 text-white px-4 py-2 rounded text-sm"
+                  >
+                    Auto Assign Route
+                  </button>
+                </div>
+
+                {/* Manual Assign */}
                 <div className="max-h-72 overflow-y-auto border">
                   {sites.map(site => (
                     <label
@@ -297,12 +371,14 @@ export default function AdminRouteAssignment() {
                 <button
                   disabled={saving}
                   onClick={saveRoute}
-                  className="mt-4 bg-primary text-white px-4 py-2 rounded"
+                  className="bg-primary text-white px-4 py-2 rounded"
                 >
                   Save Route
                 </button>
 
-                {message && <p className="mt-2 text-sm text-blue-600">{message}</p>}
+                {message && (
+                  <p className="text-sm text-blue-600">{message}</p>
+                )}
               </div>
             )}
           </>
