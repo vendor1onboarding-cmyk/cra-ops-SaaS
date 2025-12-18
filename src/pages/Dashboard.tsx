@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import { getActiveAssignmentWithSites } from "../utils/getActiveAssignmentWithSites";
 
 export default function Dashboard() {
   const { profile } = useAuth();

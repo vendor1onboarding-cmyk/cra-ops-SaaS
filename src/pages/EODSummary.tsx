@@ -7,107 +7,121 @@ export default function EODSummary() {
   const { profile } = useAuth();
 
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
-  const [summary, setSummary] = useState<any>(null);
+  const [assignmentStatus, setAssignmentStatus] = useState<string | null>(null);
+
+  const [counts, setCounts] = useState({
+    denominationPlans: 0,
+    cashPickups: 0,
+    atmLoads: 0,
+    issues: 0,
+  });
+
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load EOD data – ONLY assignment that HAS route sites
-  // (open OR submitted)
+  // Load ACTIVE assignment (safe fallback version)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
 
-    async function loadEOD() {
+    async function loadAssignment() {
       setLoading(true);
 
-      const { data: assignment, error } = await supabase
+      let assignment: any = null;
+
+      // 1️⃣ Try latest OPEN assignment with route sites
+      const { data: primary } = await supabase
         .from("assignments")
         .select(`
           id,
-          title,
           status,
-          route_sites!inner (
-            site_id
-          )
+          route_sites ( id )
         `)
         .eq("custodian_id", profile.id)
-        .in("status", ["open", "submitted"])
+        .eq("status", "open")
         .order("assignment_date", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (error || !assignment) {
-        setSummary(null);
+      if (primary && primary.route_sites?.length > 0) {
+        assignment = primary;
+      }
+
+      // 2️⃣ Fallback: any OPEN/SUBMITTED assignment that has route sites
+      if (!assignment) {
+        const { data: fallback } = await supabase
+          .from("assignments")
+          .select(`
+            id,
+            status,
+            route_sites ( id )
+          `)
+          .eq("custodian_id", profile.id)
+          .in("status", ["open", "submitted"])
+          .order("assignment_date", { ascending: false });
+
+        assignment =
+          fallback?.find((a: any) => a.route_sites?.length > 0) || null;
+      }
+
+      if (!assignment) {
         setAssignmentId(null);
+        setAssignmentStatus(null);
         setLoading(false);
         return;
       }
 
       setAssignmentId(assignment.id);
+      setAssignmentStatus(assignment.status);
 
       // --------------------------------------------------
-      // Load all EOD-related data in parallel
+      // Load summary counts (NO business logic change)
       // --------------------------------------------------
       const [
-        routeSitesRes,
-        denomPlansRes,
-        cashPickupsRes,
-        atmLoadsRes,
-        issuesRes,
-        travelLogsRes,
+        denom,
+        pickup,
+        atm,
+        issues,
       ] = await Promise.all([
         supabase
-          .from("route_sites")
-          .select("site_id, site:site_id(site_code)")
-          .eq("assignment_id", assignment.id),
-
-        supabase
           .from("denomination_plans")
-          .select("*")
+          .select("id", { count: "exact", head: true })
           .eq("assignment_id", assignment.id),
 
         supabase
           .from("cash_pickups")
-          .select("*")
+          .select("id", { count: "exact", head: true })
           .eq("assignment_id", assignment.id),
 
         supabase
           .from("atm_replenishments")
-          .select("*")
+          .select("id", { count: "exact", head: true })
           .eq("assignment_id", assignment.id),
 
         supabase
           .from("technical_issues")
-          .select("*")
-          .eq("assignment_id", assignment.id),
-
-        supabase
-          .from("travel_logs")
-          .select("*")
+          .select("id", { count: "exact", head: true })
           .eq("assignment_id", assignment.id),
       ]);
 
-      setSummary({
-        assignment,
-        routeSites: routeSitesRes.data || [],
-        denominationCount: denomPlansRes.data?.length || 0,
-        cashPickupCount: cashPickupsRes.data?.length || 0,
-        atmLoadCount: atmLoadsRes.data?.length || 0,
-        issueCount: issuesRes.data?.length || 0,
-        travelCount: travelLogsRes.data?.length || 0,
+      setCounts({
+        denominationPlans: denom.count || 0,
+        cashPickups: pickup.count || 0,
+        atmLoads: atm.count || 0,
+        issues: issues.count || 0,
       });
 
       setLoading(false);
     }
 
-    loadEOD();
+    loadAssignment();
   }, [profile]);
 
   // --------------------------------------------------
   // Submit EOD
   // --------------------------------------------------
-  async function handleSubmit() {
+  async function submitEOD() {
     if (!assignmentId) return;
 
     setLoading(true);
@@ -119,17 +133,11 @@ export default function EODSummary() {
       .eq("id", assignmentId);
 
     if (error) {
+      console.error(error);
       setMessage("Failed to submit EOD");
     } else {
+      setAssignmentStatus("submitted");
       setMessage("EOD submitted successfully");
-      setSummary((prev: any) =>
-        prev
-          ? {
-              ...prev,
-              assignment: { ...prev.assignment, status: "submitted" },
-            }
-          : prev
-      );
     }
 
     setLoading(false);
@@ -145,62 +153,56 @@ export default function EODSummary() {
           End of Day Summary
         </h2>
 
-        {loading && <p className="text-sm">Loading...</p>}
-
-        {!summary && !loading && (
+        {!assignmentId && !loading && (
           <div className="p-4 bg-yellow-100 rounded text-sm">
             No active assignment found.
           </div>
         )}
 
-        {summary && (
+        {assignmentId && (
           <>
             <div className="bg-white rounded shadow p-4 space-y-2 text-sm">
-              <div>
-                <strong>Assignment:</strong>{" "}
-                {summary.assignment.title || `#${summary.assignment.id}`}
+              <div className="flex justify-between">
+                <span>Denomination Plans</span>
+                <span className="font-semibold">
+                  {counts.denominationPlans}
+                </span>
               </div>
-              <div>
-                <strong>Route Sites:</strong>{" "}
-                {summary.routeSites.length}
+              <div className="flex justify-between">
+                <span>Cash Pickups</span>
+                <span className="font-semibold">
+                  {counts.cashPickups}
+                </span>
               </div>
-              <div>
-                <strong>Denomination Plans:</strong>{" "}
-                {summary.denominationCount}
+              <div className="flex justify-between">
+                <span>ATM Loads</span>
+                <span className="font-semibold">
+                  {counts.atmLoads}
+                </span>
               </div>
-              <div>
-                <strong>Cash Pickups:</strong>{" "}
-                {summary.cashPickupCount}
-              </div>
-              <div>
-                <strong>ATM Replenishments:</strong>{" "}
-                {summary.atmLoadCount}
-              </div>
-              <div>
-                <strong>Technical Issues:</strong>{" "}
-                {summary.issueCount}
-              </div>
-              <div>
-                <strong>Travel Logs:</strong>{" "}
-                {summary.travelCount}
-              </div>
-              <div>
-                <strong>Status:</strong>{" "}
-                <span className="capitalize">
-                  {summary.assignment.status}
+              <div className="flex justify-between">
+                <span>Technical Issues</span>
+                <span className="font-semibold">
+                  {counts.issues}
                 </span>
               </div>
             </div>
 
-            <button
-              onClick={handleSubmit}
-              disabled={
-                loading || summary.assignment.status !== "open"
-              }
-              className="w-full bg-primary text-white py-2 rounded text-sm disabled:opacity-60"
-            >
-              {loading ? "Submitting..." : "Submit End of Day"}
-            </button>
+            {assignmentStatus === "open" && (
+              <button
+                onClick={submitEOD}
+                disabled={loading}
+                className="w-full bg-primary text-white py-2 rounded text-sm"
+              >
+                {loading ? "Submitting..." : "Submit End of Day"}
+              </button>
+            )}
+
+            {assignmentStatus === "submitted" && (
+              <div className="p-3 bg-green-100 rounded text-sm text-green-800">
+                EOD already submitted. Awaiting admin approval.
+              </div>
+            )}
 
             {message && (
               <p className="text-xs text-center text-slate-700">

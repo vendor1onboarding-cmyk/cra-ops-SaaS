@@ -34,8 +34,7 @@ export default function ATMReplenishment() {
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load ACTIVE assignment that HAS route sites
-  // (open OR submitted)
+  // Load ACTIVE assignment (safe fallback version)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
@@ -43,12 +42,14 @@ export default function ATMReplenishment() {
     async function loadAssignmentAndSites() {
       setLoading(true);
 
-      const { data: assignment, error } = await supabase
+      let assignment: any = null;
+
+      // 1️⃣ Try latest OPEN assignment with route sites
+      const { data: primary } = await supabase
         .from("assignments")
-        .select(
-          `
+        .select(`
           id,
-          route_sites!inner (
+          route_sites (
             site_id,
             site:site_id (
               site_code,
@@ -56,15 +57,41 @@ export default function ATMReplenishment() {
               bank_name
             )
           )
-        `
-        )
+        `)
         .eq("custodian_id", profile.id)
-        .in("status", ["open", "submitted"])
+        .eq("status", "open")
         .order("assignment_date", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (error || !assignment) {
+      if (primary && primary.route_sites?.length > 0) {
+        assignment = primary;
+      }
+
+      // 2️⃣ Fallback: any OPEN/SUBMITTED assignment that has route sites
+      if (!assignment) {
+        const { data: fallback } = await supabase
+          .from("assignments")
+          .select(`
+            id,
+            route_sites (
+              site_id,
+              site:site_id (
+                site_code,
+                atm_id,
+                bank_name
+              )
+            )
+          `)
+          .eq("custodian_id", profile.id)
+          .in("status", ["open", "submitted"])
+          .order("assignment_date", { ascending: false });
+
+        assignment =
+          fallback?.find((a: any) => a.route_sites?.length > 0) || null;
+      }
+
+      if (!assignment) {
         setAssignmentId(null);
         setSites([]);
         setLoading(false);
@@ -244,7 +271,9 @@ export default function ATMReplenishment() {
             </button>
 
             {message && (
-              <p className="text-xs text-center text-slate-700">{message}</p>
+              <p className="text-xs text-center text-slate-700">
+                {message}
+              </p>
             )}
           </>
         )}

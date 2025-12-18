@@ -15,7 +15,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
 ];
 
 if (profile?.role === "admin") {
-  navItems.push({ to: "/admin/approvals", label: "EOD Approvals" });
+  navItems.push(
+  { to: "/admin/route-assignment", label: "Route Assignment" },
+  { to: "/admin/approvals", label: "EOD Approvals" });
 }
 
   return (

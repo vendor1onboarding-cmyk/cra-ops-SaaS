@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import AdminRouteAssignmentPage from "./pages/AdminRouteAssignment";
+
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -111,6 +113,15 @@ export default function App() {
             </RequireAdmin>
           }
         />
+		{/* ----------------- ADMIN ROUTES ASSIGNMENT----------------- */}
+		<Route
+  path="/admin/route-assignment"
+  element={
+    <RequireAdmin>
+      <AdminRouteAssignmentPage />
+    </RequireAdmin>
+  }
+/>
 
         {/* ----------------- FALLBACK ----------------- */}
         <Route path="*" element={<Navigate to="/" replace />} />

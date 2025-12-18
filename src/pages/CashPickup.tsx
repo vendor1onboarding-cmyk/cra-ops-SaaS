@@ -25,27 +25,48 @@ export default function CashPickup() {
   const [message, setMessage] = useState<string | null>(null);
 
   // --------------------------------------------------
-  // Load ACTIVE assignment that HAS route sites
+  // Load ACTIVE assignment (safe fallback version)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
 
     async function loadAssignment() {
-      const { data: assignment, error } = await supabase
+      let assignment: any = null;
+
+      // 1️⃣ Try latest OPEN assignment with route sites
+      const { data: primary } = await supabase
         .from("assignments")
-        .select(
-          `
+        .select(`
           id,
-          route_sites!inner ( id )
-        `
-        )
+          route_sites ( id )
+        `)
         .eq("custodian_id", profile.id)
         .eq("status", "open")
         .order("assignment_date", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (error || !assignment) {
+      if (primary && primary.route_sites?.length > 0) {
+        assignment = primary;
+      }
+
+      // 2️⃣ Fallback: find any OPEN/SUBMITTED assignment that has route sites
+      if (!assignment) {
+        const { data: fallback } = await supabase
+          .from("assignments")
+          .select(`
+            id,
+            route_sites ( id )
+          `)
+          .eq("custodian_id", profile.id)
+          .in("status", ["open", "submitted"])
+          .order("assignment_date", { ascending: false });
+
+        assignment =
+          fallback?.find((a: any) => a.route_sites?.length > 0) || null;
+      }
+
+      if (!assignment) {
         setAssignmentId(null);
         return;
       }
