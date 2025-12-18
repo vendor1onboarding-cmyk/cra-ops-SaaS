@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
-import { getActiveAssignmentWithSites } from "../utils/getActiveAssignmentWithSites";
 
 export default function Dashboard() {
   const { profile } = useAuth();
@@ -30,18 +29,18 @@ export default function Dashboard() {
   }, [profile]);
 
   // --------------------------------------------------
-  // CUSTODIAN DASHBOARD (NO DATE DEPENDENCY)
+  // CUSTODIAN DASHBOARD (DATE-FIRST, NO FALLBACK)
   // --------------------------------------------------
   async function loadCustodianDashboard() {
     setLoading(true);
 
+    // 1️⃣ Fetch TODAY's assignment only
     const { data: assign, error } = await supabase
       .from("assignments")
       .select("*")
       .eq("custodian_id", profile.id)
-      .in("status", ["open", "submitted"])
-      .order("assignment_date", { ascending: false })
-      .limit(1)
+      .eq("assignment_date", today)
+      .eq("status", "open")
       .maybeSingle();
 
     if (error || !assign) {
@@ -54,7 +53,7 @@ export default function Dashboard() {
 
     setAssignment(assign);
 
-    // Route sites
+    // 2️⃣ Fetch route sites (may be empty)
     const { data: rsites } = await supabase
       .from("route_sites")
       .select("*, site:site_id(site_code)")
@@ -63,23 +62,23 @@ export default function Dashboard() {
 
     setRouteSites(rsites || []);
 
-    // Task summary
+    // 3️⃣ Task summary
     const [denoms, pickups, loads, issues] = await Promise.all([
       supabase
         .from("denomination_plans")
-        .select("*", { count: "exact" })
+        .select("*", { count: "exact", head: true })
         .eq("assignment_id", assign.id),
       supabase
         .from("cash_pickups")
-        .select("*", { count: "exact" })
+        .select("*", { count: "exact", head: true })
         .eq("assignment_id", assign.id),
       supabase
         .from("atm_replenishments")
-        .select("*", { count: "exact" })
+        .select("*", { count: "exact", head: true })
         .eq("assignment_id", assign.id),
       supabase
         .from("technical_issues")
-        .select("*", { count: "exact" })
+        .select("*", { count: "exact", head: true })
         .eq("assignment_id", assign.id),
     ]);
 
@@ -94,7 +93,7 @@ export default function Dashboard() {
   }
 
   // --------------------------------------------------
-  // ADMIN DASHBOARD (DATE-BASED – KEEP AS IS)
+  // ADMIN DASHBOARD (KEEP AS IS – DATE BASED)
   // --------------------------------------------------
   async function loadAdminDashboard() {
     setLoading(true);
@@ -109,15 +108,15 @@ export default function Dashboard() {
     const [newIssues, inProgress, resolved] = await Promise.all([
       supabase
         .from("technical_issues")
-        .select("*", { count: "exact" })
+        .select("*", { count: "exact", head: true })
         .eq("status", "new"),
       supabase
         .from("technical_issues")
-        .select("*", { count: "exact" })
+        .select("*", { count: "exact", head: true })
         .eq("status", "in_progress"),
       supabase
         .from("technical_issues")
-        .select("*", { count: "exact" })
+        .select("*", { count: "exact", head: true })
         .eq("status", "resolved"),
     ]);
 
@@ -136,7 +135,9 @@ export default function Dashboard() {
   return (
     <AppLayout>
       {loading && (
-        <div className="text-center text-sm text-slate-500">Loading...</div>
+        <div className="text-center text-sm text-slate-500">
+          Loading...
+        </div>
       )}
 
       {!loading && profile?.role === "custodian" && (
@@ -147,12 +148,14 @@ export default function Dashboard() {
         />
       )}
 
-      {!loading && (profile?.role === "admin" || profile?.role === "supervisor") && (
-        <AdminDashboard
-          adminAssignments={adminAssignments}
-          issueSummary={issueSummary}
-        />
-      )}
+      {!loading &&
+        (profile?.role === "admin" ||
+          profile?.role === "supervisor") && (
+          <AdminDashboard
+            adminAssignments={adminAssignments}
+            issueSummary={issueSummary}
+          />
+        )}
     </AppLayout>
   );
 }
@@ -163,11 +166,13 @@ export default function Dashboard() {
 function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-primary">Active Assignment</h2>
+      <h2 className="text-lg font-semibold text-primary">
+        Today’s Assignment
+      </h2>
 
       {!assignment && (
         <div className="p-4 bg-yellow-100 rounded">
-          No active assignment found.
+          No assignment created for today.
         </div>
       )}
 
@@ -181,18 +186,40 @@ function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
           </div>
 
           <h3 className="font-semibold">Route Sites</h3>
+
+          {routeSites.length === 0 && (
+            <div className="p-3 bg-slate-100 rounded text-sm">
+              Route not assigned yet.
+            </div>
+          )}
+
           {routeSites.map((rs: any, idx: number) => (
-            <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
+            <div
+              key={rs.id}
+              className="p-3 bg-white rounded shadow text-sm"
+            >
               {idx + 1}. {rs.site?.site_code}
             </div>
           ))}
 
           <h3 className="font-semibold">Tasks Summary</h3>
           <div className="grid grid-cols-2 gap-3">
-            <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
-            <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
-            <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
-            <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
+            <SummaryBox
+              label="Denomination Plans"
+              value={taskSummary?.denomCount}
+            />
+            <SummaryBox
+              label="Cash Pickup"
+              value={taskSummary?.pickupCount}
+            />
+            <SummaryBox
+              label="ATM Loads"
+              value={taskSummary?.loadCount}
+            />
+            <SummaryBox
+              label="Issues Logged"
+              value={taskSummary?.issueCount}
+            />
           </div>
         </>
       )}
@@ -206,7 +233,9 @@ function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
 function AdminDashboard({ adminAssignments, issueSummary }: any) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-primary">Admin Overview</h2>
+      <h2 className="text-lg font-semibold text-primary">
+        Admin Overview
+      </h2>
 
       <h3 className="font-semibold">Today’s Assignments</h3>
       {adminAssignments.map((a: any) => (
@@ -220,8 +249,14 @@ function AdminDashboard({ adminAssignments, issueSummary }: any) {
       <h3 className="font-semibold">Issue Summary</h3>
       <div className="grid grid-cols-3 gap-3">
         <SummaryBox label="New" value={issueSummary?.new} />
-        <SummaryBox label="In Progress" value={issueSummary?.inProgress} />
-        <SummaryBox label="Resolved" value={issueSummary?.resolved} />
+        <SummaryBox
+          label="In Progress"
+          value={issueSummary?.inProgress}
+        />
+        <SummaryBox
+          label="Resolved"
+          value={issueSummary?.resolved}
+        />
       </div>
     </div>
   );
@@ -231,7 +266,9 @@ function AdminDashboard({ adminAssignments, issueSummary }: any) {
 function SummaryBox({ label, value }: any) {
   return (
     <div className="p-4 bg-white rounded shadow text-center">
-      <div className="text-xl font-bold text-primary">{value || 0}</div>
+      <div className="text-xl font-bold text-primary">
+        {value || 0}
+      </div>
       <div className="text-sm text-slate-600">{label}</div>
     </div>
   );

@@ -24,47 +24,22 @@ export default function CashPickup() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const today = new Date().toISOString().split("T")[0];
+
   // --------------------------------------------------
-  // Load ACTIVE assignment (safe fallback version)
+  // Load TODAY's assignment ONLY (NO FALLBACK)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
 
-    async function loadAssignment() {
-      let assignment: any = null;
-
-      // 1️⃣ Try latest OPEN assignment with route sites
-      const { data: primary } = await supabase
+    async function loadTodayAssignment() {
+      const { data: assignment } = await supabase
         .from("assignments")
-        .select(`
-          id,
-          route_sites ( id )
-        `)
+        .select("id")
         .eq("custodian_id", profile.id)
+        .eq("assignment_date", today)
         .eq("status", "open")
-        .order("assignment_date", { ascending: false })
-        .limit(1)
         .maybeSingle();
-
-      if (primary && primary.route_sites?.length > 0) {
-        assignment = primary;
-      }
-
-      // 2️⃣ Fallback: find any OPEN/SUBMITTED assignment that has route sites
-      if (!assignment) {
-        const { data: fallback } = await supabase
-          .from("assignments")
-          .select(`
-            id,
-            route_sites ( id )
-          `)
-          .eq("custodian_id", profile.id)
-          .in("status", ["open", "submitted"])
-          .order("assignment_date", { ascending: false });
-
-        assignment =
-          fallback?.find((a: any) => a.route_sites?.length > 0) || null;
-      }
 
       if (!assignment) {
         setAssignmentId(null);
@@ -74,7 +49,7 @@ export default function CashPickup() {
       setAssignmentId(assignment.id);
     }
 
-    loadAssignment();
+    loadTodayAssignment();
   }, [profile]);
 
   // --------------------------------------------------
@@ -141,7 +116,7 @@ export default function CashPickup() {
 
         {!assignmentId && (
           <div className="p-4 bg-yellow-100 rounded text-sm">
-            No active assignment found.
+            No assignment available for today.
           </div>
         )}
 
@@ -201,38 +176,4 @@ export default function CashPickup() {
                       })
                     }
                   />
-                </div>
-              ))}
-            </div>
-
-            <div className="text-sm font-semibold">
-              Total Amount: ₹{totalAmount.toLocaleString()}
-            </div>
-
-            <div
-              className={`text-sm font-semibold ${
-                variance === 0 ? "text-green-600" : "text-red-600"
-              }`}
-            >
-              Variance: ₹{variance.toLocaleString()}
-            </div>
-
-            <button
-              onClick={handleSave}
-              disabled={loading}
-              className="w-full bg-primary text-white py-2 rounded text-sm"
-            >
-              {loading ? "Saving..." : "Save Cash Pickup"}
-            </button>
-
-            {message && (
-              <p className="text-xs text-center text-slate-700">
-                {message}
-              </p>
-            )}
-          </>
-        )}
-      </div>
-    </AppLayout>
-  );
-}
+                </div
