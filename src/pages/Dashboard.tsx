@@ -3,6 +3,8 @@ import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 
+const DENOMS = [2000, 500, 200, 100, 50, 20, 10];
+
 export default function Dashboard() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -11,6 +13,7 @@ export default function Dashboard() {
   const [assignment, setAssignment] = useState<any>(null);
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [taskSummary, setTaskSummary] = useState<any>(null);
+  const [cashUtil, setCashUtil] = useState<any>(null);
 
   // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
@@ -29,13 +32,13 @@ export default function Dashboard() {
   }, [profile]);
 
   // --------------------------------------------------
-  // CUSTODIAN DASHBOARD (DATE-FIRST, NO FALLBACK)
+  // CUSTODIAN DASHBOARD (DATE-FIRST)
   // --------------------------------------------------
   async function loadCustodianDashboard() {
     setLoading(true);
 
-    // 1️⃣ Fetch TODAY's assignment only
-    const { data: assign, error } = await supabase
+    // 1️⃣ Fetch TODAY's assignment
+    const { data: assign } = await supabase
       .from("assignments")
       .select("*")
       .eq("custodian_id", profile.id)
@@ -43,17 +46,18 @@ export default function Dashboard() {
       .eq("status", "open")
       .maybeSingle();
 
-    if (error || !assign) {
+    if (!assign) {
       setAssignment(null);
       setRouteSites([]);
       setTaskSummary(null);
+      setCashUtil(null);
       setLoading(false);
       return;
     }
 
     setAssignment(assign);
 
-    // 2️⃣ Fetch route sites (may be empty)
+    // 2️⃣ Route sites
     const { data: rsites } = await supabase
       .from("route_sites")
       .select("*, site:site_id(site_code)")
@@ -64,22 +68,10 @@ export default function Dashboard() {
 
     // 3️⃣ Task summary
     const [denoms, pickups, loads, issues] = await Promise.all([
-      supabase
-        .from("denomination_plans")
-        .select("*", { count: "exact", head: true })
-        .eq("assignment_id", assign.id),
-      supabase
-        .from("cash_pickups")
-        .select("*", { count: "exact", head: true })
-        .eq("assignment_id", assign.id),
-      supabase
-        .from("atm_replenishments")
-        .select("*", { count: "exact", head: true })
-        .eq("assignment_id", assign.id),
-      supabase
-        .from("technical_issues")
-        .select("*", { count: "exact", head: true })
-        .eq("assignment_id", assign.id),
+      supabase.from("denomination_plans").select("*", { count: "exact", head: true }).eq("assignment_id", assign.id),
+      supabase.from("cash_pickups").select("*", { count: "exact", head: true }).eq("assignment_id", assign.id),
+      supabase.from("atm_replenishments").select("*", { count: "exact", head: true }).eq("assignment_id", assign.id),
+      supabase.from("technical_issues").select("*", { count: "exact", head: true }).eq("assignment_id", assign.id),
     ]);
 
     setTaskSummary({
@@ -89,11 +81,91 @@ export default function Dashboard() {
       issueCount: issues.count || 0,
     });
 
+    // 4️⃣ Cash Utilization (core logic)
+    await loadCashUtilization(assign.id, rsites || []);
+
     setLoading(false);
   }
 
   // --------------------------------------------------
-  // ADMIN DASHBOARD (KEEP AS IS – DATE BASED)
+  // CASH UTILIZATION LOGIC
+  // --------------------------------------------------
+  async function loadCashUtilization(assignmentId: number, rsites: any[]) {
+    // Cash picked
+    const { data: pickups } = await supabase
+      .from("cash_pickups")
+      .select("*")
+      .eq("assignment_id", assignmentId);
+
+    // ATM loads
+    const { data: loads } = await supabase
+      .from("atm_replenishments")
+      .select("*")
+      .eq("assignment_id", assignmentId);
+
+    // Planned denomination (for remaining)
+    const { data: plans } = await supabase
+      .from("denomination_plans")
+      .select("*")
+      .eq("assignment_id", assignmentId);
+
+    const totalPicked = pickups?.reduce((s, p) => s + (p.total_amount || 0), 0) || 0;
+    const totalLoaded = loads?.reduce(
+      (s, l) =>
+        s +
+        DENOMS.reduce(
+          (ds, d) => ds + (l[`denom_${d}`] || 0) * d,
+          0
+        ),
+      0
+    ) || 0;
+
+    const denomPicked: any = {};
+    const denomLoaded: any = {};
+
+    DENOMS.forEach(d => {
+      denomPicked[d] =
+        pickups?.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0) || 0;
+      denomLoaded[d] =
+        loads?.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0) || 0;
+    });
+
+    const denomInHand: any = {};
+    DENOMS.forEach(d => {
+      denomInHand[d] = denomPicked[d] - denomLoaded[d];
+    });
+
+    const loadedSiteIds = new Set(loads?.map(l => l.site_id));
+    const totalSites = rsites.length;
+    const loadedSites = loadedSiteIds.size;
+    const remainingSites = totalSites - loadedSites;
+
+    const remainingCash =
+      plans?.reduce(
+        (s, p) =>
+          s +
+          DENOMS.reduce(
+            (ds, d) => ds + (p[`denom_${d}`] || 0) * d,
+            0
+          ),
+        0
+      ) - totalLoaded;
+
+    setCashUtil({
+      totalSites,
+      loadedSites,
+      remainingSites,
+      totalPicked,
+      totalLoaded,
+      cashInHand: totalPicked - totalLoaded,
+      remainingCash,
+      buffer: totalPicked - totalLoaded - remainingCash,
+      denomInHand,
+    });
+  }
+
+  // --------------------------------------------------
+  // ADMIN DASHBOARD (UNCHANGED)
   // --------------------------------------------------
   async function loadAdminDashboard() {
     setLoading(true);
@@ -106,18 +178,9 @@ export default function Dashboard() {
     setAdminAssignments(assigns || []);
 
     const [newIssues, inProgress, resolved] = await Promise.all([
-      supabase
-        .from("technical_issues")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "new"),
-      supabase
-        .from("technical_issues")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "in_progress"),
-      supabase
-        .from("technical_issues")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "resolved"),
+      supabase.from("technical_issues").select("*", { count: "exact", head: true }).eq("status", "new"),
+      supabase.from("technical_issues").select("*", { count: "exact", head: true }).eq("status", "in_progress"),
+      supabase.from("technical_issues").select("*", { count: "exact", head: true }).eq("status", "resolved"),
     ]);
 
     setIssueSummary({
@@ -134,28 +197,20 @@ export default function Dashboard() {
   // --------------------------------------------------
   return (
     <AppLayout>
-      {loading && (
-        <div className="text-center text-sm text-slate-500">
-          Loading...
-        </div>
-      )}
+      {loading && <div className="text-center text-sm text-slate-500">Loading...</div>}
 
       {!loading && profile?.role === "custodian" && (
         <CustodianDashboard
           assignment={assignment}
           routeSites={routeSites}
           taskSummary={taskSummary}
+          cashUtil={cashUtil}
         />
       )}
 
-      {!loading &&
-        (profile?.role === "admin" ||
-          profile?.role === "supervisor") && (
-          <AdminDashboard
-            adminAssignments={adminAssignments}
-            issueSummary={issueSummary}
-          />
-        )}
+      {!loading && (profile?.role === "admin" || profile?.role === "supervisor") && (
+        <AdminDashboard adminAssignments={adminAssignments} issueSummary={issueSummary} />
+      )}
     </AppLayout>
   );
 }
@@ -163,12 +218,10 @@ export default function Dashboard() {
 // --------------------------------------------------
 // Custodian UI
 // --------------------------------------------------
-function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
+function CustodianDashboard({ assignment, routeSites, taskSummary, cashUtil }: any) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-primary">
-        Today’s Assignment
-      </h2>
+      <h2 className="text-lg font-semibold text-primary">Today’s Assignment</h2>
 
       {!assignment && (
         <div className="p-4 bg-yellow-100 rounded">
@@ -179,9 +232,7 @@ function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
       {assignment && (
         <>
           <div className="p-4 bg-white rounded shadow text-sm">
-            <div className="font-semibold">
-              Assignment ID: {assignment.id}
-            </div>
+            <div className="font-semibold">Assignment ID: {assignment.id}</div>
             <div>Status: {assignment.status}</div>
           </div>
 
@@ -194,33 +245,20 @@ function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
           )}
 
           {routeSites.map((rs: any, idx: number) => (
-            <div
-              key={rs.id}
-              className="p-3 bg-white rounded shadow text-sm"
-            >
+            <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
               {idx + 1}. {rs.site?.site_code}
             </div>
           ))}
 
           <h3 className="font-semibold">Tasks Summary</h3>
           <div className="grid grid-cols-2 gap-3">
-            <SummaryBox
-              label="Denomination Plans"
-              value={taskSummary?.denomCount}
-            />
-            <SummaryBox
-              label="Cash Pickup"
-              value={taskSummary?.pickupCount}
-            />
-            <SummaryBox
-              label="ATM Loads"
-              value={taskSummary?.loadCount}
-            />
-            <SummaryBox
-              label="Issues Logged"
-              value={taskSummary?.issueCount}
-            />
+            <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
+            <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
+            <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
+            <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
           </div>
+
+          {cashUtil && <CashUtilization cashUtil={cashUtil} />}
         </>
       )}
     </div>
@@ -228,14 +266,46 @@ function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
 }
 
 // --------------------------------------------------
-// Admin UI
+function CashUtilization({ cashUtil }: any) {
+  return (
+    <div className="space-y-4">
+      <h3 className="font-semibold">Cash Utilization – Today</h3>
+
+      <div className="grid grid-cols-3 gap-3 text-sm">
+        <SummaryBox label="Total Sites" value={cashUtil.totalSites} />
+        <SummaryBox label="Loaded" value={cashUtil.loadedSites} />
+        <SummaryBox label="Remaining" value={cashUtil.remainingSites} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <SummaryBox label="Cash Picked" value={`₹${cashUtil.totalPicked.toLocaleString()}`} />
+        <SummaryBox label="Cash Loaded" value={`₹${cashUtil.totalLoaded.toLocaleString()}`} />
+        <SummaryBox label="Cash In Hand" value={`₹${cashUtil.cashInHand.toLocaleString()}`} />
+        <SummaryBox label="Cash Required" value={`₹${cashUtil.remainingCash.toLocaleString()}`} />
+      </div>
+
+      <div className={`p-3 rounded text-sm ${cashUtil.buffer >= 0 ? "bg-green-100" : "bg-red-100"}`}>
+        Buffer / Shortfall: ₹{cashUtil.buffer.toLocaleString()}
+      </div>
+
+      <div className="bg-white rounded shadow p-3 text-sm">
+        <div className="font-semibold mb-2">Denomination In Hand</div>
+        {Object.entries(cashUtil.denomInHand).map(([d, c]: any) => (
+          <div key={d} className="flex justify-between">
+            <span>₹{d} × {c}</span>
+            <span>₹{(Number(d) * c).toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --------------------------------------------------
 function AdminDashboard({ adminAssignments, issueSummary }: any) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-primary">
-        Admin Overview
-      </h2>
+      <h2 className="text-lg font-semibold text-primary">Admin Overview</h2>
 
       <h3 className="font-semibold">Today’s Assignments</h3>
       {adminAssignments.map((a: any) => (
@@ -249,14 +319,8 @@ function AdminDashboard({ adminAssignments, issueSummary }: any) {
       <h3 className="font-semibold">Issue Summary</h3>
       <div className="grid grid-cols-3 gap-3">
         <SummaryBox label="New" value={issueSummary?.new} />
-        <SummaryBox
-          label="In Progress"
-          value={issueSummary?.inProgress}
-        />
-        <SummaryBox
-          label="Resolved"
-          value={issueSummary?.resolved}
-        />
+        <SummaryBox label="In Progress" value={issueSummary?.inProgress} />
+        <SummaryBox label="Resolved" value={issueSummary?.resolved} />
       </div>
     </div>
   );
@@ -267,7 +331,7 @@ function SummaryBox({ label, value }: any) {
   return (
     <div className="p-4 bg-white rounded shadow text-center">
       <div className="text-xl font-bold text-primary">
-        {value || 0}
+        {value ?? 0}
       </div>
       <div className="text-sm text-slate-600">{label}</div>
     </div>
