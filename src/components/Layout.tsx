@@ -2,6 +2,21 @@ import { ReactNode, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+/**
+ * Simple emoji icons to avoid new dependencies.
+ * Can be replaced later with HeroIcons / Lucide if needed.
+ */
+const ICONS: Record<string, string> = {
+  Dashboard: "📊",
+  Denomination: "💰",
+  "Cash Pickup": "🏦",
+  "ATM Load": "🏧",
+  "Tech Issues": "⚠️",
+  EOD: "🧾",
+  "Route Assignment": "🗺️",
+  "EOD Approvals": "✅",
+};
+
 export function AppLayout({ children }: { children: ReactNode }) {
   const { profile, signOut } = useAuth();
   const location = useLocation();
@@ -26,34 +41,46 @@ export function AppLayout({ children }: { children: ReactNode }) {
   function NavLinks({ onClick }: { onClick?: () => void }) {
     return (
       <ul className="space-y-1 text-sm">
-        {navItems.map((item) => (
-          <li key={item.to}>
-            <Link
-              to={item.to}
-              onClick={onClick}
-              className={`flex items-center justify-between px-4 py-3 rounded ${
-                location.pathname === item.to
-                  ? "bg-primary text-white"
-                  : "hover:bg-slate-100 text-slate-700"
-              }`}
-            >
-              <span>{item.label}</span>
-            </Link>
-          </li>
-        ))}
+        {navItems.map((item) => {
+          const active = location.pathname === item.to;
+          return (
+            <li key={item.to}>
+              <Link
+                to={item.to}
+                onClick={onClick}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg ${
+                  active
+                    ? "bg-primary text-white"
+                    : "hover:bg-slate-100 text-slate-700"
+                }`}
+              >
+                <span className="text-lg">
+                  {ICONS[item.label] || "•"}
+                </span>
+                <span className="flex-1">{item.label}</span>
+
+                {/* Optional future badge placeholder */}
+                {active && (
+                  <span className="w-2 h-2 rounded-full bg-accent" />
+                )}
+              </Link>
+            </li>
+          );
+        })}
       </ul>
     );
   }
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* HEADER */}
-      <header className="bg-primary text-white px-4 py-3 flex justify-between items-center shadow-md">
-        <div className="flex items-center gap-2">
-          {/* Mobile menu button */}
+      {/* STICKY HEADER */}
+      <header className="sticky top-0 z-40 bg-primary text-white px-4 py-3 flex justify-between items-center shadow-md">
+        <div className="flex items-center gap-3">
+          {/* Mobile / Tablet Menu Button */}
           <button
-            className="md:hidden text-xl"
+            className="md:hidden text-2xl"
             onClick={() => setMobileMenuOpen(true)}
+            aria-label="Open menu"
           >
             ☰
           </button>
@@ -61,17 +88,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-primary shadow">
             ST
           </div>
+
           <div>
-            <h1 className="text-lg font-semibold">Sruthi CRA Ops</h1>
+            <h1 className="text-base font-semibold leading-tight">
+              Sruthi CRA Ops
+            </h1>
             <p className="text-[11px] opacity-80">
-              Cash Replenishment & Field Support Partner
+              Cash Replenishment & Field Support
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3 text-xs md:text-sm">
           {profile && (
-            <span className="text-right hidden sm:block">
+            <span className="hidden sm:block text-right">
               <span className="font-semibold">
                 {profile.full_name || "User"}
               </span>
@@ -81,7 +111,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </span>
           )}
           <button
-            className="border border-white/60 px-3 py-1 rounded-md text-[11px] md:text-xs hover:bg-white/10"
+            className="border border-white/60 px-3 py-1 rounded-md text-[11px] hover:bg-white/10"
             onClick={() => signOut()}
           >
             Logout
@@ -89,9 +119,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* DESKTOP LAYOUT */}
+      {/* DESKTOP / TABLET */}
       <div className="flex flex-1">
-        <nav className="hidden md:block w-60 bg-white border-r p-3">
+        <nav className="hidden md:block w-64 bg-white border-r p-3">
           <NavLinks />
         </nav>
 
@@ -105,10 +135,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div className="fixed inset-0 z-50 bg-black/40">
           <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl p-4 overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="font-semibold text-primary">Menu</h2>
+              <h2 className="font-semibold text-primary text-base">
+                Menu
+              </h2>
               <button
-                className="text-xl"
+                className="text-2xl"
                 onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close menu"
               >
                 ✕
               </button>
@@ -118,6 +151,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
+
+      {/* PWA READY HOOK (no popup yet) */}
+      <meta name="theme-color" content="#0f172a" />
     </div>
   );
 }
