@@ -17,32 +17,20 @@ export default function Dashboard() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
 
-  // Custodian state
   const [assignment, setAssignment] = useState<any>(null);
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [cashUtil, setCashUtil] = useState<any>(null);
   const [siteLoads, setSiteLoads] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
 
-  // Admin state
-  const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
-
   const today = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
-    if (!profile) return;
-
-    if (profile.role === "custodian") {
-      loadCustodianDashboard();
-    } else if (profile.role === "admin" || profile.role === "supervisor") {
-      loadAdminDashboard();
-    }
+    if (!profile || profile.role !== "custodian") return;
+    loadDashboard();
   }, [profile]);
 
-  // --------------------------------------------------
-  // CUSTODIAN DASHBOARD (UNCHANGED LOGIC)
-  // --------------------------------------------------
-  async function loadCustodianDashboard() {
+  async function loadDashboard() {
     setLoading(true);
 
     const { data: assign } = await supabase
@@ -128,59 +116,19 @@ export default function Dashboard() {
     });
   }
 
-  // --------------------------------------------------
-  // ADMIN / SUPERVISOR DASHBOARD (FIXED)
-  // --------------------------------------------------
-  async function loadAdminDashboard() {
-    setLoading(true);
-
-    // 1️⃣ Load assignments (NO REST JOIN)
-    const { data: assigns, error } = await supabase
-      .from("assignments")
-      .select("id, assignment_date, status, custodian_id")
-      .eq("assignment_date", today);
-
-    if (error) {
-      console.error("Admin dashboard load failed", error);
-      setAdminAssignments([]);
-      setLoading(false);
-      return;
-    }
-
-    // 2️⃣ Load custodian names
-    const custodianIds = Array.from(
-      new Set(assigns.map(a => a.custodian_id))
-    );
-
-    const { data: profilesData } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .in("id", custodianIds);
-
-    const profileMap = new Map(
-      profilesData?.map(p => [p.id, p.full_name]) || []
-    );
-
-    // 3️⃣ Merge
-    const merged = assigns.map(a => ({
-      ...a,
-      custodian_name: profileMap.get(a.custodian_id) || "Custodian",
-    }));
-
-    setAdminAssignments(merged);
-    setLoading(false);
+  function printCashReport() {
+    window.print();
   }
 
-  // --------------------------------------------------
-  // UI
-  // --------------------------------------------------
   return (
     <AppLayout>
       {loading && <div className="text-center text-sm">Loading…</div>}
 
-      {!loading && profile?.role === "custodian" && assignment && (
-        <div className="space-y-6">
-          <h2 className="text-lg font-semibold">Cash Utilization – Today</h2>
+      {!loading && assignment && (
+        <div className="space-y-6 print:p-6">
+          <h2 className="text-lg font-semibold">
+            Cash Utilization – Today
+          </h2>
 
           {cashUtil && (
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -191,6 +139,7 @@ export default function Dashboard() {
             </div>
           )}
 
+          {/* ROUTE SITES */}
           <div className="bg-white rounded shadow p-4">
             <h3 className="font-semibold mb-2">Route Sites</h3>
             {routeSites.map((rs: any, idx: number) => (
@@ -199,26 +148,76 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-        </div>
-      )}
 
-      {!loading && (profile?.role === "admin" || profile?.role === "supervisor") && (
-        <div className="max-w-4xl mx-auto space-y-4">
-          <h2 className="text-lg font-semibold">Admin Dashboard – Today</h2>
+          {/* SITE-WISE LOADED DENOMINATIONS */}
+          <div className="bg-white rounded shadow p-4">
+            <h3 className="font-semibold mb-3">
+              Site-wise Loaded Denominations
+            </h3>
 
-          {adminAssignments.length === 0 && (
-            <div className="p-4 bg-yellow-100 rounded text-sm">
-              No assignments for today.
-            </div>
-          )}
+            {siteLoads.length === 0 && (
+              <div className="text-sm text-slate-500">
+                No ATM loads done yet.
+              </div>
+            )}
 
-          {adminAssignments.map(a => (
-            <div key={a.id} className="p-4 bg-white rounded shadow text-sm">
-              <div><strong>Assignment ID:</strong> {a.id}</div>
-              <div><strong>Custodian:</strong> {a.custodian_name}</div>
-              <div><strong>Status:</strong> {a.status}</div>
-            </div>
-          ))}
+            {siteLoads.map((l: any) => {
+              const siteTotal = DENOMS.reduce(
+                (s, d) => s + (l[`denom_${d}`] || 0) * d,
+                0
+              );
+
+              const plan = plans.find(p => p.site_id === l.site_id);
+              const plannedTotal = plan
+                ? DENOMS.reduce((s, d) => s + (plan[`denom_${d}`] || 0) * d, 0)
+                : 0;
+
+              const variance = siteTotal - plannedTotal;
+              const mismatch = plan
+                ? DENOMS.some(d => (plan[`denom_${d}`] || 0) !== (l[`denom_${d}`] || 0))
+                : false;
+
+              return (
+                <details key={l.id} className="mb-2 border rounded">
+                  <summary className="cursor-pointer px-3 py-2 bg-slate-50 text-sm font-medium">
+                    {formatSite(l.site)} | Loaded ₹{siteTotal.toLocaleString()}
+                  </summary>
+
+                  <div className="p-3 text-sm space-y-2">
+                    <div
+                      className={`font-semibold ${
+                        variance === 0 ? "text-green-600" : "text-red-600"
+                      }`}
+                    >
+                      Planned ₹{plannedTotal.toLocaleString()} | Variance ₹{variance.toLocaleString()}
+                    </div>
+
+                    {mismatch && (
+                      <div className="p-2 bg-red-100 text-red-800 rounded text-xs">
+                        ⚠️ Denomination mismatch detected
+                      </div>
+                    )}
+
+                    {DENOMS.map(d => (
+                      <div key={d} className="flex justify-between text-xs">
+                        <span>₹{d}</span>
+                        <span>
+                          Planned {plan?.[`denom_${d}`] || 0} | Loaded {l[`denom_${d}`] || 0}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={printCashReport}
+            className="bg-primary text-white px-4 py-2 rounded text-sm print:hidden"
+          >
+            🖨️ Print Cash Report
+          </button>
         </div>
       )}
     </AppLayout>
