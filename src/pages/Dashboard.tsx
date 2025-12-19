@@ -37,7 +37,6 @@ export default function Dashboard() {
   async function loadCustodianDashboard() {
     setLoading(true);
 
-    // 1️⃣ Fetch TODAY's assignment
     const { data: assign } = await supabase
       .from("assignments")
       .select("*")
@@ -57,7 +56,6 @@ export default function Dashboard() {
 
     setAssignment(assign);
 
-    // 2️⃣ Route sites
     const { data: rsites } = await supabase
       .from("route_sites")
       .select("*, site:site_id(site_code)")
@@ -66,7 +64,6 @@ export default function Dashboard() {
 
     setRouteSites(rsites || []);
 
-    // 3️⃣ Task summary
     const [denoms, pickups, loads, issues] = await Promise.all([
       supabase.from("denomination_plans").select("*", { count: "exact", head: true }).eq("assignment_id", assign.id),
       supabase.from("cash_pickups").select("*", { count: "exact", head: true }).eq("assignment_id", assign.id),
@@ -81,9 +78,7 @@ export default function Dashboard() {
       issueCount: issues.count || 0,
     });
 
-    // 4️⃣ Cash Utilization (core logic)
     await loadCashUtilization(assign.id, rsites || []);
-
     setLoading(false);
   }
 
@@ -91,65 +86,42 @@ export default function Dashboard() {
   // CASH UTILIZATION LOGIC
   // --------------------------------------------------
   async function loadCashUtilization(assignmentId: number, rsites: any[]) {
-    // Cash picked
-    const { data: pickups } = await supabase
-      .from("cash_pickups")
-      .select("*")
-      .eq("assignment_id", assignmentId);
-
-    // ATM loads
-    const { data: loads } = await supabase
-      .from("atm_replenishments")
-      .select("*")
-      .eq("assignment_id", assignmentId);
-
-    // Planned denomination (for remaining)
-    const { data: plans } = await supabase
-      .from("denomination_plans")
-      .select("*")
-      .eq("assignment_id", assignmentId);
+    const { data: pickups } = await supabase.from("cash_pickups").select("*").eq("assignment_id", assignmentId);
+    const { data: loads } = await supabase.from("atm_replenishments").select("*").eq("assignment_id", assignmentId);
+    const { data: plans } = await supabase.from("denomination_plans").select("*").eq("assignment_id", assignmentId);
 
     const totalPicked = pickups?.reduce((s, p) => s + (p.total_amount || 0), 0) || 0;
-    const totalLoaded = loads?.reduce(
-      (s, l) =>
-        s +
-        DENOMS.reduce(
-          (ds, d) => ds + (l[`denom_${d}`] || 0) * d,
-          0
-        ),
-      0
-    ) || 0;
 
-    const denomPicked: any = {};
-    const denomLoaded: any = {};
-
-    DENOMS.forEach(d => {
-      denomPicked[d] =
-        pickups?.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0) || 0;
-      denomLoaded[d] =
-        loads?.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0) || 0;
-    });
+    const totalLoaded =
+      loads?.reduce(
+        (s, l) =>
+          s +
+          DENOMS.reduce((ds, d) => ds + (l[`denom_${d}`] || 0) * d, 0),
+        0
+      ) || 0;
 
     const denomInHand: any = {};
     DENOMS.forEach(d => {
-      denomInHand[d] = denomPicked[d] - denomLoaded[d];
+      const picked = pickups?.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0) || 0;
+      const loaded = loads?.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0) || 0;
+      denomInHand[d] = picked - loaded;
     });
 
-    const loadedSiteIds = new Set(loads?.map(l => l.site_id));
+    const loadedSites = new Set(loads?.map(l => l.site_id)).size;
     const totalSites = rsites.length;
-    const loadedSites = loadedSiteIds.size;
     const remainingSites = totalSites - loadedSites;
 
     const remainingCash =
       plans?.reduce(
         (s, p) =>
           s +
-          DENOMS.reduce(
-            (ds, d) => ds + (p[`denom_${d}`] || 0) * d,
-            0
-          ),
+          DENOMS.reduce((ds, d) => ds + (p[`denom_${d}`] || 0) * d, 0),
         0
       ) - totalLoaded;
+
+    const cashInHand = totalPicked - totalLoaded;
+    const avgPerSite = remainingSites > 0 ? remainingCash / remainingSites : 0;
+    const sitesCovered = avgPerSite > 0 ? Math.floor(cashInHand / avgPerSite) : remainingSites;
 
     setCashUtil({
       totalSites,
@@ -157,11 +129,16 @@ export default function Dashboard() {
       remainingSites,
       totalPicked,
       totalLoaded,
-      cashInHand: totalPicked - totalLoaded,
+      cashInHand,
       remainingCash,
-      buffer: totalPicked - totalLoaded - remainingCash,
+      buffer: cashInHand - remainingCash,
       denomInHand,
+      sitesCovered,
     });
+  }
+
+  function printCashReport() {
+    window.print();
   }
 
   // --------------------------------------------------
@@ -205,6 +182,7 @@ export default function Dashboard() {
           routeSites={routeSites}
           taskSummary={taskSummary}
           cashUtil={cashUtil}
+          onPrint={printCashReport}
         />
       )}
 
@@ -218,16 +196,12 @@ export default function Dashboard() {
 // --------------------------------------------------
 // Custodian UI
 // --------------------------------------------------
-function CustodianDashboard({ assignment, routeSites, taskSummary, cashUtil }: any) {
+function CustodianDashboard({ assignment, routeSites, taskSummary, cashUtil, onPrint }: any) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print:p-6">
       <h2 className="text-lg font-semibold text-primary">Today’s Assignment</h2>
 
-      {!assignment && (
-        <div className="p-4 bg-yellow-100 rounded">
-          No assignment created for today.
-        </div>
-      )}
+      {!assignment && <div className="p-4 bg-yellow-100 rounded">No assignment created for today.</div>}
 
       {assignment && (
         <>
@@ -237,13 +211,7 @@ function CustodianDashboard({ assignment, routeSites, taskSummary, cashUtil }: a
           </div>
 
           <h3 className="font-semibold">Route Sites</h3>
-
-          {routeSites.length === 0 && (
-            <div className="p-3 bg-slate-100 rounded text-sm">
-              Route not assigned yet.
-            </div>
-          )}
-
+          {routeSites.length === 0 && <div className="p-3 bg-slate-100 rounded text-sm">Route not assigned yet.</div>}
           {routeSites.map((rs: any, idx: number) => (
             <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
               {idx + 1}. {rs.site?.site_code}
@@ -258,7 +226,7 @@ function CustodianDashboard({ assignment, routeSites, taskSummary, cashUtil }: a
             <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
           </div>
 
-          {cashUtil && <CashUtilization cashUtil={cashUtil} />}
+          {cashUtil && <CashUtilization cashUtil={cashUtil} onPrint={onPrint} />}
         </>
       )}
     </div>
@@ -266,10 +234,23 @@ function CustodianDashboard({ assignment, routeSites, taskSummary, cashUtil }: a
 }
 
 // --------------------------------------------------
-function CashUtilization({ cashUtil }: any) {
+function CashUtilization({ cashUtil, onPrint }: any) {
   return (
     <div className="space-y-4">
       <h3 className="font-semibold">Cash Utilization – Today</h3>
+
+      {/* Predictive Warning */}
+      <div
+        className={`p-3 rounded text-sm font-semibold ${
+          cashUtil.sitesCovered < cashUtil.remainingSites
+            ? "bg-red-100 text-red-800"
+            : "bg-green-100 text-green-800"
+        }`}
+      >
+        {cashUtil.sitesCovered < cashUtil.remainingSites
+          ? `⚠️ You may run out of cash after ${cashUtil.sitesCovered} more site(s)`
+          : "✅ Cash in hand is sufficient for remaining sites"}
+      </div>
 
       <div className="grid grid-cols-3 gap-3 text-sm">
         <SummaryBox label="Total Sites" value={cashUtil.totalSites} />
@@ -297,6 +278,13 @@ function CashUtilization({ cashUtil }: any) {
           </div>
         ))}
       </div>
+
+      <button
+        onClick={onPrint}
+        className="bg-primary text-white px-4 py-2 rounded text-sm print:hidden"
+      >
+        🖨️ Print Cash Report
+      </button>
     </div>
   );
 }
@@ -330,9 +318,7 @@ function AdminDashboard({ adminAssignments, issueSummary }: any) {
 function SummaryBox({ label, value }: any) {
   return (
     <div className="p-4 bg-white rounded shadow text-center">
-      <div className="text-xl font-bold text-primary">
-        {value ?? 0}
-      </div>
+      <div className="text-xl font-bold text-primary">{value ?? 0}</div>
       <div className="text-sm text-slate-600">{label}</div>
     </div>
   );
