@@ -8,6 +8,14 @@ type SiteOption = {
   display_label: string;
 };
 
+function formatSite(site: any) {
+  if (!site) return "Unknown Site";
+  const bank = site.bank_name || "Bank";
+  const address = site.address || site.site_code || "Location";
+  const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
+  return `${bank} – ${address}${atm}`;
+}
+
 export default function DenominationPlan() {
   const { profile } = useAuth();
 
@@ -33,7 +41,7 @@ export default function DenominationPlan() {
   const today = new Date().toISOString().split("T")[0];
 
   // --------------------------------------------------
-  // Load TODAY's assignment only (NO FALLBACK)
+  // Load TODAY's assignment and sites (DATE-FIRST)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
@@ -47,10 +55,11 @@ export default function DenominationPlan() {
           id,
           route_sites (
             site_id,
-            site:site_id (
+            site:site_id(
               site_code,
-              atm_id,
-              bank_name
+              bank_name,
+              address,
+              atm_id
             )
           )
         `)
@@ -71,7 +80,7 @@ export default function DenominationPlan() {
       const mappedSites: SiteOption[] =
         assignment.route_sites?.map((r: any) => ({
           site_id: r.site_id,
-          display_label: `${r.site.site_code} (${r.site.atm_id ?? "ATM"}) - ${r.site.bank_name ?? ""}`,
+          display_label: formatSite(r.site),
         })) || [];
 
       setSites(mappedSites);
@@ -210,7 +219,7 @@ export default function DenominationPlan() {
                     ["denom_10", 10],
                   ].map(([key, label]) => (
                     <div key={key}>
-                      <label className="text-xs">{label}</label>
+                      <label className="text-xs">₹{label}</label>
                       <input
                         type="number"
                         min={0}

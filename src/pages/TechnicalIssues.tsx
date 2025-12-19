@@ -9,6 +9,14 @@ type SiteOption = {
   display_label: string;
 };
 
+function formatSite(site: any) {
+  if (!site) return "Unknown Site";
+  const bank = site.bank_name || "Bank";
+  const address = site.address || site.site_code || "Location";
+  const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
+  return `${bank} – ${address}${atm}`;
+}
+
 export default function TechnicalIssues() {
   const { profile } = useAuth();
 
@@ -24,8 +32,10 @@ export default function TechnicalIssues() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const today = new Date().toISOString().split("T")[0];
+
   // --------------------------------------------------
-  // Load ACTIVE assignment (safe fallback version)
+  // Load TODAY's assignment and sites (DATE-FIRST)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
@@ -33,54 +43,24 @@ export default function TechnicalIssues() {
     async function loadAssignmentAndSites() {
       setLoading(true);
 
-      let assignment: any = null;
-
-      // 1️⃣ Try latest OPEN assignment with route sites
-      const { data: primary } = await supabase
+      const { data: assignment } = await supabase
         .from("assignments")
         .select(`
           id,
           route_sites (
             site_id,
-            site:site_id (
+            site:site_id(
               site_code,
-              atm_id,
-              bank_name
+              bank_name,
+              address,
+              atm_id
             )
           )
         `)
         .eq("custodian_id", profile.id)
+        .eq("assignment_date", today)
         .eq("status", "open")
-        .order("assignment_date", { ascending: false })
-        .limit(1)
         .maybeSingle();
-
-      if (primary && primary.route_sites?.length > 0) {
-        assignment = primary;
-      }
-
-      // 2️⃣ Fallback: any OPEN/SUBMITTED assignment that has route sites
-      if (!assignment) {
-        const { data: fallback } = await supabase
-          .from("assignments")
-          .select(`
-            id,
-            route_sites (
-              site_id,
-              site:site_id (
-                site_code,
-                atm_id,
-                bank_name
-              )
-            )
-          `)
-          .eq("custodian_id", profile.id)
-          .in("status", ["open", "submitted"])
-          .order("assignment_date", { ascending: false });
-
-        assignment =
-          fallback?.find((a: any) => a.route_sites?.length > 0) || null;
-      }
 
       if (!assignment) {
         setAssignmentId(null);
@@ -92,9 +72,9 @@ export default function TechnicalIssues() {
       setAssignmentId(assignment.id);
 
       const mappedSites: SiteOption[] =
-        assignment.route_sites.map((r: any) => ({
+        assignment.route_sites?.map((r: any) => ({
           site_id: r.site_id,
-          display_label: `${r.site.site_code} (${r.site.atm_id ?? "ATM"}) - ${r.site.bank_name ?? ""}`,
+          display_label: formatSite(r.site),
         })) || [];
 
       setSites(mappedSites);
@@ -175,7 +155,7 @@ export default function TechnicalIssues() {
 
         {!assignmentId && !loading && (
           <div className="p-4 bg-yellow-100 rounded text-sm">
-            No active assignment found.
+            No assignment available for today or route not assigned yet.
           </div>
         )}
 

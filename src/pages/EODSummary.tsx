@@ -3,7 +3,16 @@ import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 
-export default function Dashboard() {
+// 🔹 Standard site label formatter (same as other screens)
+function formatSite(site: any) {
+  if (!site) return "Unknown Site";
+  const bank = site.bank_name || "Bank";
+  const address = site.address || site.site_code || "Location";
+  const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
+  return `${bank} – ${address}${atm}`;
+}
+
+export default function EODSummary() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
 
@@ -22,25 +31,23 @@ export default function Dashboard() {
     if (!profile) return;
 
     if (profile.role === "custodian") {
-      loadCustodianDashboard();
+      loadCustodianEOD();
     } else if (profile.role === "admin" || profile.role === "supervisor") {
       loadAdminDashboard();
     }
   }, [profile]);
 
   // --------------------------------------------------
-  // CUSTODIAN DASHBOARD (DATE-FIRST, NO FALLBACK)
+  // CUSTODIAN EOD SUMMARY (DATE-FIRST)
   // --------------------------------------------------
-  async function loadCustodianDashboard() {
+  async function loadCustodianEOD() {
     setLoading(true);
 
-    // 1️⃣ Fetch TODAY's assignment only
     const { data: assign, error } = await supabase
       .from("assignments")
       .select("*")
       .eq("custodian_id", profile.id)
       .eq("assignment_date", today)
-      .eq("status", "open")
       .maybeSingle();
 
     if (error || !assign) {
@@ -53,16 +60,24 @@ export default function Dashboard() {
 
     setAssignment(assign);
 
-    // 2️⃣ Fetch route sites (may be empty)
+    // 🔹 Fetch route sites with full site metadata
     const { data: rsites } = await supabase
       .from("route_sites")
-      .select("*, site:site_id(site_code)")
+      .select(`
+        *,
+        site:site_id(
+          site_code,
+          bank_name,
+          address,
+          atm_id
+        )
+      `)
       .eq("assignment_id", assign.id)
       .order("sequence_no");
 
     setRouteSites(rsites || []);
 
-    // 3️⃣ Task summary
+    // Task summary
     const [denoms, pickups, loads, issues] = await Promise.all([
       supabase
         .from("denomination_plans")
@@ -93,7 +108,7 @@ export default function Dashboard() {
   }
 
   // --------------------------------------------------
-  // ADMIN DASHBOARD (KEEP AS IS – DATE BASED)
+  // ADMIN / SUPERVISOR VIEW (UNCHANGED)
   // --------------------------------------------------
   async function loadAdminDashboard() {
     setLoading(true);
@@ -141,7 +156,7 @@ export default function Dashboard() {
       )}
 
       {!loading && profile?.role === "custodian" && (
-        <CustodianDashboard
+        <CustodianEOD
           assignment={assignment}
           routeSites={routeSites}
           taskSummary={taskSummary}
@@ -163,11 +178,11 @@ export default function Dashboard() {
 // --------------------------------------------------
 // Custodian UI
 // --------------------------------------------------
-function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
+function CustodianEOD({ assignment, routeSites, taskSummary }: any) {
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-primary">
-        Today’s Assignment
+        End of Day Summary – Today
       </h2>
 
       {!assignment && (
@@ -198,7 +213,7 @@ function CustodianDashboard({ assignment, routeSites, taskSummary }: any) {
               key={rs.id}
               className="p-3 bg-white rounded shadow text-sm"
             >
-              {idx + 1}. {rs.site?.site_code}
+              {idx + 1}. {formatSite(rs.site)}
             </div>
           ))}
 

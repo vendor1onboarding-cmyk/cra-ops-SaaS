@@ -3,6 +3,15 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 
+// 🔹 Standard site formatter (same as rest of app)
+function formatSite(site: any) {
+  if (!site) return "Unknown Site";
+  const bank = site.bank_name || "Bank";
+  const address = site.address || site.site_code || "Location";
+  const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
+  return `${bank} – ${address}${atm}`;
+}
+
 export default function AdminEODDetail() {
   const { assignmentId } = useParams();
   const navigate = useNavigate();
@@ -43,13 +52,29 @@ export default function AdminEODDetail() {
       ] = await Promise.all([
         supabase
           .from("route_sites")
-          .select("sequence_no, site:site_id(site_code, bank_name)")
+          .select(`
+            sequence_no,
+            site:site_id(
+              site_code,
+              bank_name,
+              address,
+              atm_id
+            )
+          `)
           .eq("assignment_id", assignmentId)
           .order("sequence_no"),
 
         supabase
           .from("denomination_plans")
-          .select("*, site:site_id(site_code)")
+          .select(`
+            *,
+            site:site_id(
+              site_code,
+              bank_name,
+              address,
+              atm_id
+            )
+          `)
           .eq("assignment_id", assignmentId),
 
         supabase
@@ -59,12 +84,28 @@ export default function AdminEODDetail() {
 
         supabase
           .from("atm_replenishments")
-          .select("*, site:site_id(site_code)")
+          .select(`
+            *,
+            site:site_id(
+              site_code,
+              bank_name,
+              address,
+              atm_id
+            )
+          `)
           .eq("assignment_id", assignmentId),
 
         supabase
           .from("technical_issues")
-          .select("*, site:site_id(site_code)")
+          .select(`
+            *,
+            site:site_id(
+              site_code,
+              bank_name,
+              address,
+              atm_id
+            )
+          `)
           .eq("assignment_id", assignmentId),
 
         supabase
@@ -121,7 +162,7 @@ export default function AdminEODDetail() {
         <Section title="Route Sites">
           {data.routeSites.map((r: any, i: number) => (
             <div key={i}>
-              {r.sequence_no}. {r.site.site_code} – {r.site.bank_name}
+              {r.sequence_no}. {formatSite(r.site)}
             </div>
           ))}
         </Section>
@@ -129,7 +170,7 @@ export default function AdminEODDetail() {
         <Section title="Denomination Plans">
           {data.denominations.map((d: any, i: number) => (
             <div key={i}>
-              {d.site.site_code} | ₹2000:{d.denom_2000} ₹500:{d.denom_500}
+              {formatSite(d.site)} | ₹2000:{d.denom_2000} ₹500:{d.denom_500}
             </div>
           ))}
         </Section>
@@ -145,7 +186,7 @@ export default function AdminEODDetail() {
         <Section title="ATM Replenishments">
           {data.atmLoads.map((a: any, i: number) => (
             <div key={i}>
-              {a.site.site_code} – Closing ₹{a.closing_balance}
+              {formatSite(a.site)} – Closing ₹{a.closing_balance}
             </div>
           ))}
         </Section>
@@ -153,12 +194,13 @@ export default function AdminEODDetail() {
         <Section title="Technical Issues">
           {data.issues.map((t: any, i: number) => (
             <div key={i}>
-              {t.site.site_code} – {t.issue_type}
+              {formatSite(t.site)} – {t.issue_type}
               {t.photo_url && (
                 <div>
                   <a
                     href={t.photo_url}
                     target="_blank"
+                    rel="noreferrer"
                     className="text-blue-600 underline text-xs"
                   >
                     View Photo
@@ -190,14 +232,21 @@ export default function AdminEODDetail() {
   );
 }
 
+// --------------------------------------------------
+// Safe Section wrapper
+// --------------------------------------------------
 function Section({ title, children }: any) {
+  const hasContent = Array.isArray(children)
+    ? children.length > 0
+    : !!children;
+
   return (
     <div className="bg-white p-4 rounded shadow space-y-1">
       <h3 className="font-semibold">{title}</h3>
-      {children.length === 0 ? (
-        <p className="text-slate-500 text-xs">No records</p>
-      ) : (
+      {hasContent ? (
         children
+      ) : (
+        <p className="text-slate-500 text-xs">No records</p>
       )}
     </div>
   );

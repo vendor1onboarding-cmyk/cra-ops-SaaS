@@ -16,6 +16,7 @@ type Site = {
   site_code: string;
   atm_id: string | null;
   bank_name: string | null;
+  address?: string | null;
   city: string | null;
 };
 
@@ -23,6 +24,14 @@ type Custodian = {
   id: string;
   full_name: string;
 };
+
+// 🔹 Centralized site formatter (UI only)
+function formatSite(site: Site) {
+  const bank = site.bank_name || "Bank";
+  const address = site.address || site.site_code || "Location";
+  const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
+  return `${bank} – ${address}${atm}`;
+}
 
 export default function AdminRouteAssignment() {
   const { profile } = useAuth();
@@ -68,10 +77,10 @@ export default function AdminRouteAssignment() {
         .select("id, full_name")
         .eq("role", "custodian");
 
-      // Sites
+      // Sites (⚠️ include address)
       const { data: sitesData } = await supabase
         .from("sites")
-        .select("id, site_code, atm_id, bank_name, city")
+        .select("id, site_code, atm_id, bank_name, address, city")
         .order("site_code");
 
       // Build district list
@@ -122,7 +131,7 @@ export default function AdminRouteAssignment() {
   }, [selectedAssignment]);
 
   // --------------------------------------------------
-  // Create Assignment (Option B)
+  // Create Assignment (Option B – unchanged)
   // --------------------------------------------------
   async function createAssignment() {
     if (!selectedCustodian || !assignmentDate) {
@@ -170,7 +179,7 @@ export default function AdminRouteAssignment() {
   }
 
   // --------------------------------------------------
-  // Save route (manual)
+  // Save route (manual – unchanged)
   // --------------------------------------------------
   async function saveRoute() {
     const assignment = assignments.find(a => a.id === selectedAssignment);
@@ -208,7 +217,7 @@ export default function AdminRouteAssignment() {
   }
 
   // --------------------------------------------------
-  // AUTO ASSIGN BY DISTRICT (NEW)
+  // AUTO ASSIGN BY DISTRICT (RPC – unchanged)
   // --------------------------------------------------
   async function autoAssignByDistrict() {
     if (!selectedAssignment || !selectedDistrict) {
@@ -235,7 +244,6 @@ export default function AdminRouteAssignment() {
     } else {
       setMessage("Route auto-assigned by district");
 
-      // Reload route
       const { data } = await supabase
         .from("route_sites")
         .select("site_id, sequence_no")
@@ -360,10 +368,7 @@ export default function AdminRouteAssignment() {
                         checked={selectedSites.includes(site.id)}
                         onChange={() => toggleSite(site.id)}
                       />
-                      <span>{site.site_code}</span>
-                      <span className="text-xs text-slate-500">
-                        {site.city} | {site.bank_name}
-                      </span>
+                      <span>{formatSite(site)}</span>
                     </label>
                   ))}
                 </div>
