@@ -23,8 +23,8 @@ export default function ATMReplenishment() {
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [selectedSite, setSelectedSite] = useState<number | null>(null);
 
-  const [timeIn, setTimeIn] = useState("");
-  const [timeOut, setTimeOut] = useState("");
+  const [timeIn, setTimeIn] = useState<string>("");
+  const [timeOut, setTimeOut] = useState<string>("");
   const [closingBalance, setClosingBalance] = useState<number>(0);
   const [remarks, setRemarks] = useState("");
 
@@ -43,9 +43,9 @@ export default function ATMReplenishment() {
 
   const today = new Date().toISOString().split("T")[0];
 
-  // --------------------------------------------------
-  // Load TODAY's assignment and sites (DATE-FIRST)
-  // --------------------------------------------------
+  /* --------------------------------------------------
+     Load TODAY's assignment and sites
+     -------------------------------------------------- */
   useEffect(() => {
     if (!profile) return;
 
@@ -93,57 +93,95 @@ export default function ATMReplenishment() {
     loadAssignmentAndSites();
   }, [profile]);
 
-  // --------------------------------------------------
-  // Save ATM replenishment
-  // --------------------------------------------------
+  /* --------------------------------------------------
+     Auto set Time In when site selected
+     -------------------------------------------------- */
+  useEffect(() => {
+    if (selectedSite && !timeIn) {
+      setTimeIn(new Date().toISOString().slice(0, 16));
+    }
+  }, [selectedSite]);
+
+  /* --------------------------------------------------
+     Derived validation
+     -------------------------------------------------- */
+  const totalNotes =
+    form.denom_2000 +
+    form.denom_500 +
+    form.denom_200 +
+    form.denom_100 +
+    form.denom_50 +
+    form.denom_20 +
+    form.denom_10;
+
+  const canSave =
+    !loading &&
+    !!assignmentId &&
+    !!selectedSite &&
+    totalNotes > 0;
+
+  /* --------------------------------------------------
+     Save ATM replenishment (HARD GUARDED)
+     -------------------------------------------------- */
   async function handleSave() {
+    setMessage(null);
+
     if (!assignmentId || !selectedSite) {
       setMessage("Assignment or Site missing");
       return;
     }
 
-    setLoading(true);
-    setMessage(null);
+    if (totalNotes === 0) {
+      setMessage("Please enter at least one denomination before saving.");
+      return;
+    }
 
-    const { error } = await supabase.from("atm_replenishments").insert({
-      assignment_id: assignmentId,
-      site_id: selectedSite,
-      time_in: timeIn || null,
-      time_out: timeOut || null,
-      closing_balance: closingBalance,
-      remarks,
-      ...form,
-    });
+    setLoading(true);
+
+    const finalTimeOut = new Date().toISOString().slice(0, 16);
+
+    const { error } = await supabase
+      .from("atm_replenishments")
+      .insert({
+        assignment_id: assignmentId,
+        site_id: selectedSite,
+        time_in: timeIn || null,
+        time_out: finalTimeOut,
+        closing_balance: closingBalance,
+        remarks,
+        ...form,
+      });
 
     if (error) {
       console.error(error);
       setMessage("Failed to save ATM replenishment");
-    } else {
-      setMessage("ATM replenishment saved successfully");
-
-      // Reset form
-      setForm({
-        denom_2000: 0,
-        denom_500: 0,
-        denom_200: 0,
-        denom_100: 0,
-        denom_50: 0,
-        denom_20: 0,
-        denom_10: 0,
-      });
-      setClosingBalance(0);
-      setRemarks("");
-      setTimeIn("");
-      setTimeOut("");
-      setSelectedSite(null);
+      setLoading(false);
+      return;
     }
 
+    // Reset form safely
+    setForm({
+      denom_2000: 0,
+      denom_500: 0,
+      denom_200: 0,
+      denom_100: 0,
+      denom_50: 0,
+      denom_20: 0,
+      denom_10: 0,
+    });
+    setClosingBalance(0);
+    setRemarks("");
+    setTimeIn("");
+    setTimeOut("");
+    setSelectedSite(null);
+
     setLoading(false);
+    setMessage("ATM replenishment saved successfully");
   }
 
-  // --------------------------------------------------
-  // UI
-  // --------------------------------------------------
+  /* --------------------------------------------------
+     UI
+     -------------------------------------------------- */
   return (
     <AppLayout>
       <div className="max-w-xl mx-auto space-y-5">
@@ -194,6 +232,7 @@ export default function ATMReplenishment() {
                       className="w-full border rounded px-2 py-1 text-sm"
                       value={timeOut}
                       onChange={(e) => setTimeOut(e.target.value)}
+                      disabled
                     />
                   </div>
                 </div>
@@ -249,14 +288,18 @@ export default function ATMReplenishment() {
 
                 <button
                   onClick={handleSave}
-                  disabled={loading}
-                  className="w-full bg-primary text-white py-2 rounded text-sm"
+                  disabled={!canSave}
+                  className={`w-full py-2 rounded text-sm ${
+                    canSave
+                      ? "bg-primary text-white"
+                      : "bg-slate-300 text-slate-500 cursor-not-allowed"
+                  }`}
                 >
                   {loading ? "Saving..." : "Save Replenishment"}
                 </button>
 
                 {message && (
-                  <p className="text-xs text-center text-slate-700">
+                  <p className="text-xs text-center mt-2 text-red-600">
                     {message}
                   </p>
                 )}
