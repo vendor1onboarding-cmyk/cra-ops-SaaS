@@ -3,7 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 
-// 🔹 Standard site label formatter (same as other screens)
+// 🔹 Standard site label formatter
 function formatSite(site: any) {
   if (!site) return "Unknown Site";
   const bank = site.bank_name || "Bank";
@@ -20,6 +20,8 @@ export default function EODSummary() {
   const [assignment, setAssignment] = useState<any>(null);
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [taskSummary, setTaskSummary] = useState<any>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState<string | null>(null);
 
   // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
@@ -38,19 +40,19 @@ export default function EODSummary() {
   }, [profile]);
 
   // --------------------------------------------------
-  // CUSTODIAN EOD SUMMARY (DATE-FIRST)
+  // CUSTODIAN EOD SUMMARY
   // --------------------------------------------------
   async function loadCustodianEOD() {
     setLoading(true);
 
-    const { data: assign, error } = await supabase
+    const { data: assign } = await supabase
       .from("assignments")
       .select("*")
       .eq("custodian_id", profile.id)
       .eq("assignment_date", today)
       .maybeSingle();
 
-    if (error || !assign) {
+    if (!assign) {
       setAssignment(null);
       setRouteSites([]);
       setTaskSummary(null);
@@ -60,7 +62,6 @@ export default function EODSummary() {
 
     setAssignment(assign);
 
-    // 🔹 Fetch route sites with full site metadata
     const { data: rsites } = await supabase
       .from("route_sites")
       .select(`
@@ -77,7 +78,6 @@ export default function EODSummary() {
 
     setRouteSites(rsites || []);
 
-    // Task summary
     const [denoms, pickups, loads, issues] = await Promise.all([
       supabase
         .from("denomination_plans")
@@ -105,6 +105,30 @@ export default function EODSummary() {
     });
 
     setLoading(false);
+  }
+
+  // --------------------------------------------------
+  // SUBMIT EOD (NEW)
+  // --------------------------------------------------
+  async function submitEOD() {
+    if (!assignment) return;
+
+    setSubmitting(true);
+    setSubmitMsg(null);
+
+    const { error } = await supabase
+      .from("assignments")
+      .update({ status: "submitted" })
+      .eq("id", assignment.id);
+
+    if (error) {
+      setSubmitMsg("Failed to submit EOD. Please try again.");
+    } else {
+      setSubmitMsg("EOD submitted successfully. Awaiting admin approval.");
+      setAssignment({ ...assignment, status: "submitted" });
+    }
+
+    setSubmitting(false);
   }
 
   // --------------------------------------------------
@@ -160,6 +184,9 @@ export default function EODSummary() {
           assignment={assignment}
           routeSites={routeSites}
           taskSummary={taskSummary}
+          onSubmit={submitEOD}
+          submitting={submitting}
+          submitMsg={submitMsg}
         />
       )}
 
@@ -178,7 +205,14 @@ export default function EODSummary() {
 // --------------------------------------------------
 // Custodian UI
 // --------------------------------------------------
-function CustodianEOD({ assignment, routeSites, taskSummary }: any) {
+function CustodianEOD({
+  assignment,
+  routeSites,
+  taskSummary,
+  onSubmit,
+  submitting,
+  submitMsg,
+}: any) {
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-primary">
@@ -201,13 +235,6 @@ function CustodianEOD({ assignment, routeSites, taskSummary }: any) {
           </div>
 
           <h3 className="font-semibold">Route Sites</h3>
-
-          {routeSites.length === 0 && (
-            <div className="p-3 bg-slate-100 rounded text-sm">
-              Route not assigned yet.
-            </div>
-          )}
-
           {routeSites.map((rs: any, idx: number) => (
             <div
               key={rs.id}
@@ -236,6 +263,25 @@ function CustodianEOD({ assignment, routeSites, taskSummary }: any) {
               value={taskSummary?.issueCount}
             />
           </div>
+
+          {/* 🔹 EOD SUBMIT BUTTON (NEW) */}
+          {assignment.status === "open" && (
+            <div className="pt-4">
+              <button
+                onClick={onSubmit}
+                disabled={submitting}
+                className="w-full bg-primary text-white py-2 rounded"
+              >
+                {submitting ? "Submitting..." : "Submit End of Day Report"}
+              </button>
+            </div>
+          )}
+
+          {submitMsg && (
+            <p className="text-sm text-center text-green-700">
+              {submitMsg}
+            </p>
+          )}
         </>
       )}
     </div>
