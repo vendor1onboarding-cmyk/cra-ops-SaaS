@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 /**
  * Supported denominations only
@@ -19,6 +19,7 @@ function formatSite(site: any) {
 
 export default function Dashboard() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
   /* ================= Custodian State ================= */
@@ -28,6 +29,9 @@ export default function Dashboard() {
   const [loads, setLoads] = useState<any[]>([]);
   const [cashUtil, setCashUtil] = useState<any>(null);
   const [denomSummary, setDenomSummary] = useState<any>(null);
+
+  /* 🟢 ATM Draft Indicator */
+  const [atmDraft, setAtmDraft] = useState<any>(null);
 
   /* ================= Admin State ================= */
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
@@ -102,6 +106,25 @@ export default function Dashboard() {
 
     computeCashUtil(pickupsRes.data || [], loadsRes.data || []);
     computeDenominationSummary(pickupsRes.data || [], loadsRes.data || []);
+
+    /* 🟢 Detect ATM Draft */
+    const draftKeyPrefix = `atm_draft_${assign.id}_`;
+    const draftKey = Object.keys(localStorage).find(k =>
+      k.startsWith(draftKeyPrefix)
+    );
+
+    if (draftKey) {
+      const draft = JSON.parse(localStorage.getItem(draftKey)!);
+      const site = routeSitesRes.data?.find(
+        (r: any) => r.site_id === draft.siteId
+      );
+      setAtmDraft({
+        siteLabel: site ? formatSite(site.site) : "ATM",
+        timeIn: draft.timeIn,
+      });
+    } else {
+      setAtmDraft(null);
+    }
 
     setLoading(false);
   }
@@ -201,6 +224,27 @@ export default function Dashboard() {
       {!loading && profile?.role === "custodian" && assignment && (
         <div className="space-y-6">
           <h2 className="text-lg font-semibold">Custodian Dashboard – Today</h2>
+
+          {/* 🟢 ATM Draft Indicator */}
+          {atmDraft && (
+            <div className="bg-yellow-100 border border-yellow-300 p-3 rounded text-sm">
+              <div className="font-semibold">
+                ⏳ ATM Load In Progress
+              </div>
+              <div className="text-xs mt-1">
+                {atmDraft.siteLabel}
+              </div>
+              <div className="text-xs">
+                Started at: {atmDraft.timeIn}
+              </div>
+              <button
+                onClick={() => navigate("/atm-replenishment")}
+                className="mt-2 text-xs text-blue-700 underline"
+              >
+                Resume ATM Load →
+              </button>
+            </div>
+          )}
 
           {/* ATM COUNTS */}
           <div className="grid grid-cols-3 gap-3 text-sm">
@@ -327,8 +371,17 @@ export default function Dashboard() {
           <h2 className="text-lg font-semibold">Admin Dashboard</h2>
 
           <div className="flex gap-3 text-sm">
-            <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} className="border px-2 py-1 rounded" />
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border px-2 py-1 rounded">
+            <input
+              type="date"
+              value={filterDate}
+              onChange={e => setFilterDate(e.target.value)}
+              className="border px-2 py-1 rounded"
+            />
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="border px-2 py-1 rounded"
+            >
               <option value="all">All</option>
               <option value="open">Open</option>
               <option value="submitted">Submitted</option>

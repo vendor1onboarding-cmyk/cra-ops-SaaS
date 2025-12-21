@@ -81,6 +81,18 @@ export default function ATMReplenishment() {
           label: formatSite(r.site),
         }))
       );
+
+      /* 🔑 AUTO-RESUME DRAFT (if exists) */
+      const draftKeyPrefix = `atm_draft_${data.id}_`;
+      const draftKey = Object.keys(localStorage).find(k =>
+        k.startsWith(draftKeyPrefix)
+      );
+
+      if (draftKey) {
+        const parsed = JSON.parse(localStorage.getItem(draftKey)!);
+        setSelectedSite(parsed.siteId);
+        setTimeIn(parsed.timeIn);
+      }
     }
 
     load();
@@ -149,6 +161,7 @@ export default function ATMReplenishment() {
     setLoading(true);
 
     const finalTimeOut = getISTDateTimeLocal();
+    setTimeOut(finalTimeOut); // 👈 show it in UI (even though disabled)
 
     const { error } = await supabase
       .from("atm_replenishments")

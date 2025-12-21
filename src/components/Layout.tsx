@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
@@ -22,6 +22,23 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  /* ---------------- OFFLINE STATE ---------------- */
+  const [offline, setOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const onOnline = () => setOffline(false);
+    const onOffline = () => setOffline(true);
+
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
+
+  /* ---------------- NAV ITEMS ---------------- */
   const navItems = [
     { to: "/", label: "Dashboard" },
     { to: "/denomination-plan", label: "Denomination" },
@@ -58,8 +75,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   {ICONS[item.label] || "•"}
                 </span>
                 <span className="flex-1">{item.label}</span>
-
-                {/* Optional future badge placeholder */}
                 {active && (
                   <span className="w-2 h-2 rounded-full bg-accent" />
                 )}
@@ -119,6 +134,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
+      {/* OFFLINE WARNING BANNER */}
+      {offline && (
+        <div className="bg-red-600 text-white text-xs text-center py-2">
+          ⚠️ You are offline. Data will sync once network is restored.
+        </div>
+      )}
+
       {/* DESKTOP / TABLET */}
       <div className="flex flex-1">
         <nav className="hidden md:block w-64 bg-white border-r p-3">
@@ -152,7 +174,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {/* PWA READY HOOK (no popup yet) */}
+      {/* PWA META */}
       <meta name="theme-color" content="#0f172a" />
     </div>
   );
