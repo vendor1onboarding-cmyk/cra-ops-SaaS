@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 /**
  * Supported denominations only
@@ -29,8 +29,6 @@ export default function Dashboard() {
   const [loads, setLoads] = useState<any[]>([]);
   const [cashUtil, setCashUtil] = useState<any>(null);
   const [denomSummary, setDenomSummary] = useState<any>(null);
-
-  /* 🟢 ATM Draft Indicator */
   const [atmDraft, setAtmDraft] = useState<any>(null);
 
   /* ================= Admin State ================= */
@@ -107,7 +105,7 @@ export default function Dashboard() {
     computeCashUtil(pickupsRes.data || [], loadsRes.data || []);
     computeDenominationSummary(pickupsRes.data || [], loadsRes.data || []);
 
-    /* 🟢 Detect ATM Draft */
+    /* Draft indicator */
     const draftKeyPrefix = `atm_draft_${assign.id}_`;
     const draftKey = Object.keys(localStorage).find(k =>
       k.startsWith(draftKeyPrefix)
@@ -223,20 +221,36 @@ export default function Dashboard() {
       {/* ================= Custodian ================= */}
       {!loading && profile?.role === "custodian" && assignment && (
         <div className="space-y-6">
-          <h2 className="text-lg font-semibold">Custodian Dashboard – Today</h2>
 
-          {/* 🟢 ATM Draft Indicator */}
+          {/* PRINT HEADER */}
+          <div className="hidden print:block text-center mb-6">
+            <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
+            <p className="text-sm">Custodian Daily Cash Report</p>
+            <p className="text-xs mt-1">
+              Date: {assignment.assignment_date} | Custodian: {profile.full_name}
+            </p>
+            <p className="text-xs">
+              Assignment ID: {assignment.id}
+            </p>
+          </div>
+
+          {/* HEADER + PRINT */}
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold">Custodian Dashboard – Today</h2>
+            <button
+              onClick={() => window.print()}
+              className="bg-slate-700 text-white px-3 py-2 rounded text-sm print:hidden"
+            >
+              🖨️ Print / Save as PDF
+            </button>
+          </div>
+
+          {/* ATM Draft */}
           {atmDraft && (
-            <div className="bg-yellow-100 border border-yellow-300 p-3 rounded text-sm">
-              <div className="font-semibold">
-                ⏳ ATM Load In Progress
-              </div>
-              <div className="text-xs mt-1">
-                {atmDraft.siteLabel}
-              </div>
-              <div className="text-xs">
-                Started at: {atmDraft.timeIn}
-              </div>
+            <div className="bg-yellow-100 border border-yellow-300 p-3 rounded text-sm print:hidden">
+              <div className="font-semibold">⏳ ATM Load In Progress</div>
+              <div className="text-xs">{atmDraft.siteLabel}</div>
+              <div className="text-xs">Started at: {atmDraft.timeIn}</div>
               <button
                 onClick={() => navigate("/atm-replenishment")}
                 className="mt-2 text-xs text-blue-700 underline"
@@ -246,7 +260,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ATM COUNTS */}
+          {/* COUNTS */}
           <div className="grid grid-cols-3 gap-3 text-sm">
             <Stat label="Assigned ATMs" value={assignedATMCount} />
             <Stat label="Loaded ATMs" value={loadedATMCount} />
@@ -262,14 +276,14 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* DENOMINATION SPLIT */}
+          {/* DENOMINATION SUMMARY */}
           {denomSummary && (
             <div className="bg-white rounded shadow p-4">
               <h3 className="font-semibold mb-3">Denomination-wise Cash Position</h3>
               <table className="w-full text-xs border">
                 <thead className="bg-slate-100">
                   <tr>
-                    <th className="border p-2">Denom</th>
+                    <th className="border p-2">Denomination</th>
                     <th className="border p-2">Picked</th>
                     <th className="border p-2">Loaded</th>
                     <th className="border p-2">In Hand</th>
@@ -291,76 +305,79 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ASSIGNED ROUTE SITES – GROUPED */}
+          {/* ASSIGNED ROUTE SITES */}
           <div className="bg-white rounded shadow p-4">
             <h3 className="font-semibold mb-3">Assigned Route Sites</h3>
 
-            {/* LOADED ATMs */}
-            {loadedSites.length > 0 && (
-              <>
-                <h4 className="text-sm font-semibold text-green-700 mb-2">✅ Loaded ATMs</h4>
-                {loadedSites.map(rs => {
-                  const plan = plans.find(p => p.site_id === rs.site_id);
-                  const load = loads.find(l => l.site_id === rs.site_id);
+            {loadedSites.map(rs => {
+              const plan = plans.find(p => p.site_id === rs.site_id);
+              const load = loads.find(l => l.site_id === rs.site_id);
 
-                  const plannedTotal = plan
-                    ? DENOMS.reduce((s, d) => s + (plan[`denom_${d}`] || 0) * d, 0)
-                    : 0;
+              const plannedTotal = plan
+                ? DENOMS.reduce((s, d) => s + (plan[`denom_${d}`] || 0) * d, 0)
+                : 0;
 
-                  const loadedTotal = load
-                    ? DENOMS.reduce((s, d) => s + (load[`denom_${d}`] || 0) * d, 0)
-                    : 0;
+              const loadedTotal = load
+                ? DENOMS.reduce((s, d) => s + (load[`denom_${d}`] || 0) * d, 0)
+                : 0;
 
-                  const variance = loadedTotal - plannedTotal;
+              const variance = loadedTotal - plannedTotal;
 
-                  return (
-                    <details key={rs.id} className="mb-3 border rounded">
-                      <summary className="cursor-pointer px-3 py-2 bg-slate-50 text-sm font-medium">
-                        {formatSite(rs.site)}
-                      </summary>
+              return (
+                <details key={rs.id} className="mb-3 border rounded">
+                  <summary className="cursor-pointer px-3 py-2 bg-slate-50 text-sm font-medium">
+                    {formatSite(rs.site)}
+                  </summary>
 
-                      <div className="p-3 text-sm space-y-2">
-                        <div className={`font-semibold ${variance !== 0 ? "text-red-600" : "text-green-600"}`}>
-                          Planned ₹{plannedTotal} | Loaded ₹{loadedTotal} | Δ ₹{variance}
-                        </div>
+                  <div className="p-3 text-sm space-y-2">
+                    <div className={`font-semibold ${variance !== 0 ? "text-red-600" : "text-green-600"}`}>
+                      Planned ₹{plannedTotal} | Loaded ₹{loadedTotal} | Δ ₹{variance}
+                    </div>
 
-                        {!plan && (
-                          <div className="p-2 bg-red-100 text-red-700 rounded text-xs">
-                            ⚠️ Denomination plan missing (planned assumed as 0)
-                          </div>
-                        )}
-
-                        <div className="mt-2 space-y-1">
-                          {DENOMS.map(d => {
-                            const pVal = plan?.[`denom_${d}`] || 0;
-                            const lVal = load[`denom_${d}`] || 0;
-                            return (
-                              <div key={d} className="flex justify-between text-xs">
-                                <span>₹{d}</span>
-                                <span>Planned {pVal} | Loaded {lVal} | Δ {lVal - pVal}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
+                    {!plan && (
+                      <div className="p-2 bg-red-100 text-red-700 rounded text-xs">
+                        ⚠️ Denomination plan missing (planned assumed as 0)
                       </div>
-                    </details>
-                  );
-                })}
-              </>
-            )}
+                    )}
 
-            {/* PENDING ATMs */}
+                    <div className="mt-2 space-y-1">
+                      {DENOMS.map(d => {
+                        const pVal = plan?.[`denom_${d}`] || 0;
+                        const lVal = load[`denom_${d}`] || 0;
+                        return (
+                          <div key={d} className="flex justify-between text-xs">
+                            <span>₹{d}</span>
+                            <span>
+                              Planned {pVal} | Loaded {lVal} | Δ {lVal - pVal}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </details>
+              );
+            })}
+
             {pendingSites.length > 0 && (
               <>
-                <h4 className="text-sm font-semibold text-yellow-700 mt-4 mb-2">⏳ Pending ATMs</h4>
+                <h4 className="text-sm font-semibold mt-3">Pending ATMs</h4>
                 {pendingSites.map(rs => (
-                  <div key={rs.id} className="border rounded p-3 mb-2 text-sm bg-yellow-50">
-                    <div className="font-medium">{formatSite(rs.site)}</div>
-                    <div className="text-xs text-yellow-800 mt-1">ATM not yet loaded</div>
+                  <div key={rs.id} className="text-sm">
+                    {formatSite(rs.site)}
                   </div>
                 ))}
               </>
             )}
+          </div>
+
+          {/* PRINT FOOTER */}
+          <div className="hidden print:block mt-10 text-xs">
+            <p>Generated on: {new Date().toLocaleString()}</p>
+            <div className="mt-6">
+              <p>Custodian Signature: _______________________</p>
+              <p className="mt-4">Supervisor Signature: _______________________</p>
+            </div>
           </div>
         </div>
       )}
@@ -400,9 +417,12 @@ export default function Dashboard() {
             <div key={a.id} className="bg-white p-4 rounded shadow text-sm">
               <div><strong>Custodian:</strong> {a.custodian_name}</div>
               <div><strong>Status:</strong> {a.status}</div>
-              <Link to={`/admin/eod/${a.id}`} className="text-blue-600 underline text-xs">
+              <button
+                onClick={() => navigate(`/admin/eod/${a.id}`)}
+                className="mt-2 text-blue-600 underline text-xs"
+              >
                 View EOD Detail →
-              </Link>
+              </button>
             </div>
           ))}
         </div>

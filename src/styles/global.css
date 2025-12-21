@@ -5,3 +5,33 @@
 body {
   @apply bg-slate-100;
 }
+/* ---------------- PRINT STYLES ---------------- */
+@media print {
+  body {
+    background: white !important;
+  }
+
+  nav,
+  header,
+  button,
+  .print-hidden,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  h2, h3 {
+    margin-top: 8px;
+  }
+
+  table {
+    page-break-inside: avoid;
+  }
+
+  details {
+    page-break-inside: avoid;
+  }
+}

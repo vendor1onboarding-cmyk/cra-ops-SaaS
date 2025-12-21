@@ -3,7 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 
-// 🔹 Standard site formatter (same as rest of app)
+/**
+ * Standard site formatter
+ */
 function formatSite(site: any) {
   if (!site) return "Unknown Site";
   const bank = site.bank_name || "Bank";
@@ -13,8 +15,11 @@ function formatSite(site: any) {
 }
 
 export default function AdminEODDetail() {
-  const { assignmentId } = useParams();
+  const params = useParams();
   const navigate = useNavigate();
+
+  // 🔑 FIX: parse assignmentId as number
+  const assignmentId = Number(params.assignmentId);
 
   const [loading, setLoading] = useState(true);
   const [assignment, setAssignment] = useState<any>(null);
@@ -28,9 +33,15 @@ export default function AdminEODDetail() {
   });
 
   useEffect(() => {
+    if (!assignmentId || Number.isNaN(assignmentId)) {
+      setLoading(false);
+      return;
+    }
+
     async function load() {
       setLoading(true);
 
+      /* ---------------- Assignment ---------------- */
       const { data: assignmentData } = await supabase
         .from("assignments")
         .select("*")
@@ -42,6 +53,7 @@ export default function AdminEODDetail() {
         return;
       }
 
+      /* ---------------- All EOD Data ---------------- */
       const [
         routeSites,
         denominations,
@@ -147,6 +159,16 @@ export default function AdminEODDetail() {
     );
   }
 
+  if (!assignment) {
+    return (
+      <AppLayout>
+        <p className="text-sm text-red-600">
+          Assignment not found.
+        </p>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
       <div className="max-w-5xl mx-auto space-y-6 text-sm">
@@ -170,7 +192,7 @@ export default function AdminEODDetail() {
         <Section title="Denomination Plans">
           {data.denominations.map((d: any, i: number) => (
             <div key={i}>
-              {formatSite(d.site)} | ₹2000:{d.denom_2000} ₹500:{d.denom_500}
+              {formatSite(d.site)}
             </div>
           ))}
         </Section>
@@ -178,7 +200,7 @@ export default function AdminEODDetail() {
         <Section title="Cash Pickups">
           {data.cashPickups.map((c: any, i: number) => (
             <div key={i}>
-              {c.bank_name} – ₹{c.total_amount} (Var: {c.variance})
+              {c.bank_name} – ₹{c.total_amount}
             </div>
           ))}
         </Section>
@@ -195,18 +217,6 @@ export default function AdminEODDetail() {
           {data.issues.map((t: any, i: number) => (
             <div key={i}>
               {formatSite(t.site)} – {t.issue_type}
-              {t.photo_url && (
-                <div>
-                  <a
-                    href={t.photo_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 underline text-xs"
-                  >
-                    View Photo
-                  </a>
-                </div>
-              )}
             </div>
           ))}
         </Section>
@@ -232,9 +242,7 @@ export default function AdminEODDetail() {
   );
 }
 
-// --------------------------------------------------
-// Safe Section wrapper
-// --------------------------------------------------
+/* ---------------- Safe Section Wrapper ---------------- */
 function Section({ title, children }: any) {
   const hasContent = Array.isArray(children)
     ? children.length > 0
