@@ -3,37 +3,27 @@ import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 
-/**
- * Supported denominations only
- */
-const DENOMS = [2000, 500, 200, 100];
+/* ================= CONFIG ================= */
+const DENOMS = [2000, 500, 200, 100] as const;
+type GeoMode = "OFF" | "SOFT" | "STRICT";
 
-/**
- * IST DateTime helper (yyyy-MM-ddTHH:mm)
- */
+/* ================= HELPERS ================= */
 function getISTDateTimeLocal(): string {
   const now = new Date();
-  const istOffsetMs = 5.5 * 60 * 60 * 1000;
-  const istDate = new Date(now.getTime() + istOffsetMs);
-  return istDate.toISOString().slice(0, 16);
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  return new Date(now.getTime() + istOffset).toISOString().slice(0, 16);
 }
 
-/**
- * GPS helpers
- */
 function getCurrentLocation(): Promise<{ lat: number; lng: number }> {
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject("Geolocation not supported");
-      return;
-    }
-
+    if (!navigator.geolocation) return reject("Geolocation not supported");
     navigator.geolocation.getCurrentPosition(
-      pos => resolve({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude
-      }),
-      err => reject(err.message),
+      (pos) =>
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        }),
+      (err) => reject(err.message),
       { enableHighAccuracy: true, timeout: 15000 }
     );
   });
@@ -48,24 +38,19 @@ function calculateDistanceMeters(
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
-
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
-
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function formatSite(site: any) {
-  if (!site) return "Unknown Site";
-  const bank = site.bank_name || "Bank";
-  const address = site.address || site.site_code || "Location";
-  const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
-  return `${bank} – ${address}${atm}`;
+  return `${site.bank_name} – ${site.address} (ATM: ${site.atm_id})`;
 }
 
+/* ================= COMPONENT ================= */
 export default function ATMReplenishment() {
   const { profile } = useAuth();
 
@@ -76,9 +61,6 @@ export default function ATMReplenishment() {
   const [timeIn, setTimeIn] = useState("");
   const [timeOut, setTimeOut] = useState("");
 
-  const [closingBalance, setClosingBalance] = useState<number>(0);
-  const [remarks, setRemarks] = useState("");
-
   const [form, setForm] = useState({
     denom_2000: 0,
     denom_500: 0,
@@ -86,29 +68,45 @@ export default function ATMReplenishment() {
     denom_100: 0,
   });
 
+  const [closingBalance, setClosingBalance] = useState<number | null>(null);
+  const [remarks, setRemarks] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
-  const [geoStatus, setGeoStatus] = useState<string>("unknown");
+
+  const [geoStatus, setGeoStatus] = useState<
+    "verified" | "mismatch" | "no_gps" | "unknown"
+  >("unknown");
+  const [geoMode, setGeoMode] = useState<GeoMode>("OFF");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const today = new Date().toISOString().split("T")[0];
 
-  /* --------------------------------------------------
-     Load assignment and sites
-     -------------------------------------------------- */
+  /* ---------- Load GPS Mode ---------- */
+  useEffect(() => {
+    supabase
+      .from("system_settings")
+      .select("value")
+      .eq("key", "geo_enforcement_mode")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) setGeoMode(data.value as GeoMode);
+      });
+  }, []);
+
+  /* ---------- Load Assignment + Sites ---------- */
   useEffect(() => {
     if (!profile) return;
 
-    async function load() {
+    async function loadAssignment() {
       const { data } = await supabase
         .from("assignments")
-        .select(`
+        .select(
+          `
           id,
           route_sites (
             site_id,
-            site:site_id(
-              site_code,
+            site:site_id (
               bank_name,
               address,
               atm_id,
@@ -116,7 +114,8 @@ export default function ATMReplenishment() {
               longitude
             )
           )
-        `)
+        `
+        )
         .eq("custodian_id", profile.id)
         .eq("assignment_date", today)
         .eq("status", "open")
@@ -125,80 +124,79 @@ export default function ATMReplenishment() {
       if (!data) return;
 
       setAssignmentId(data.id);
-      setSites(data.route_sites.map((r: any) => ({
-        site_id: r.site_id,
-        site: r.site,
-        label: formatSite(r.site),
-      })));
-
-      // Resume draft if exists
-      const draftKey = Object.keys(localStorage)
-        .find(k => k.startsWith(`atm_draft_${data.id}_`));
-
-      if (draftKey) {
-        const parsed = JSON.parse(localStorage.getItem(draftKey)!);
-        const site = data.route_sites.find((r: any) => r.site_id === parsed.siteId);
-        setSelectedSite(site);
-        setTimeIn(parsed.timeIn);
-      }
+      setSites(
+        data.route_sites.map((r: any) => ({
+          site_id: r.site_id,
+          site: r.site,
+          label: formatSite(r.site),
+        }))
+      );
     }
 
-    load();
+    loadAssignment();
   }, [profile]);
 
-  /* --------------------------------------------------
-     Draft persistence
-     -------------------------------------------------- */
+  /* ---------- Draft + Auto TimeIn ---------- */
   useEffect(() => {
     if (!assignmentId || !selectedSite) return;
 
     const key = `atm_draft_${assignmentId}_${selectedSite.site_id}`;
-    const draft = localStorage.getItem(key);
+    const existing = localStorage.getItem(key);
 
-    if (!draft) {
-      const nowIST = getISTDateTimeLocal();
-      setTimeIn(nowIST);
-      localStorage.setItem(key, JSON.stringify({
-        siteId: selectedSite.site_id,
-        timeIn: nowIST
-      }));
+    if (existing) {
+      const d = JSON.parse(existing);
+      setTimeIn(d.timeIn);
+    } else {
+      const now = getISTDateTimeLocal();
+      setTimeIn(now);
+      localStorage.setItem(
+        key,
+        JSON.stringify({ siteId: selectedSite.site_id, timeIn: now })
+      );
     }
   }, [selectedSite, assignmentId]);
 
-  /* --------------------------------------------------
-     Save ATM Replenishment
-     -------------------------------------------------- */
+  /* ---------- Validation ---------- */
+  const totalNotes = Object.values(form).reduce((a, b) => a + b, 0);
+
+  function getValidationMessage(): string | null {
+    if (!assignmentId || !selectedSite)
+      return "Assignment or ATM site not selected.";
+
+    if (totalNotes === 0)
+      return "Enter at least one denomination before saving.";
+
+    if (geoStatus !== "verified") {
+      if (geoMode === "STRICT")
+        return "ATM load blocked due to GPS mismatch. Contact Admin.";
+      if (geoMode === "SOFT" && !photo)
+        return "ATM photo is mandatory due to GPS mismatch.";
+    }
+    return null;
+  }
+
+  const validationMessage = getValidationMessage();
+
+  /* ---------- SAVE ---------- */
   async function handleSave() {
     setError(null);
 
-    const totalNotes =
-      form.denom_2000 +
-      form.denom_500 +
-      form.denom_200 +
-      form.denom_100;
-
-    if (!assignmentId || !selectedSite) {
-      setError("Assignment or Site missing");
-      return;
-    }
-
-    if (totalNotes === 0) {
-      setError("Please enter at least one denomination before saving.");
+    if (validationMessage) {
+      setError(validationMessage);
       return;
     }
 
     setLoading(true);
 
-    // GPS capture
-    let loadLat = null;
-    let loadLng = null;
-    let distance = null;
-    let geo = "unknown";
+    let lat: number | null = null;
+    let lng: number | null = null;
+    let distance: number | null = null;
+    let geo: typeof geoStatus = "unknown";
 
     try {
       const gps = await getCurrentLocation();
-      loadLat = gps.lat;
-      loadLng = gps.lng;
+      lat = gps.lat;
+      lng = gps.lng;
 
       if (selectedSite.site.latitude && selectedSite.site.longitude) {
         distance = calculateDistanceMeters(
@@ -213,17 +211,15 @@ export default function ATMReplenishment() {
       geo = "no_gps";
     }
 
-    // Photo upload (optional)
-    let photoUrl = null;
-    if (photo) {
-      const fileName = `${assignmentId}_${selectedSite.site_id}_${Date.now()}.jpg`;
-      const { data, error } = await supabase.storage
-        .from("atm-photos")
-        .upload(fileName, photo);
+    setGeoStatus(geo);
 
-      if (!error) {
-        photoUrl = data?.path;
-      }
+    let photoUrl: string | null = null;
+    if (photo) {
+      const name = `atm_${assignmentId}_${selectedSite.site_id}_${Date.now()}.jpg`;
+      const { data } = await supabase.storage
+        .from("atm-photos")
+        .upload(name, photo);
+      photoUrl = data?.path ?? null;
     }
 
     const finalTimeOut = getISTDateTimeLocal();
@@ -236,141 +232,199 @@ export default function ATMReplenishment() {
         site_id: selectedSite.site_id,
         time_in: timeIn,
         time_out: finalTimeOut,
+
+        denom_2000: form.denom_2000,
+        denom_500: form.denom_500,
+        denom_200: form.denom_200,
+        denom_100: form.denom_100,
+
         closing_balance: closingBalance,
         remarks,
-        ...form,
-        load_lat: loadLat,
-        load_lng: loadLng,
+
+        load_lat: lat,
+        load_lng: lng,
         distance_meters: distance,
         geo_status: geo,
+        photo_required: geo !== "verified",
         photo_url: photoUrl,
       });
 
     if (insertError) {
-      setError("Failed to save ATM replenishment");
+      console.error(insertError);
+      setError(insertError.message);
       setLoading(false);
       return;
     }
 
-    localStorage.removeItem(`atm_draft_${assignmentId}_${selectedSite.site_id}`);
+    localStorage.removeItem(
+      `atm_draft_${assignmentId}_${selectedSite.site_id}`
+    );
+
     setSelectedSite(null);
     setForm({ denom_2000: 0, denom_500: 0, denom_200: 0, denom_100: 0 });
+    setClosingBalance(null);
+    setRemarks("");
+    setPhoto(null);
     setTimeIn("");
     setTimeOut("");
-    setPhoto(null);
-    setClosingBalance(0);
-    setRemarks("");
-    setGeoStatus(geo);
-
     setLoading(false);
   }
 
-  /* --------------------------------------------------
-     UI
-     -------------------------------------------------- */
+  /* ================= UI ================= */
   return (
     <AppLayout>
-      <div className="max-w-xl mx-auto space-y-4">
-        <h2 className="text-lg font-semibold">ATM Replenishment</h2>
+      <div className="max-w-3xl mx-auto space-y-6">
+        <h2 className="text-lg font-semibold text-primary">
+          ATM Replenishment
+        </h2>
 
-        <select
-          className="w-full border px-3 py-2"
-          value={selectedSite?.site_id ?? ""}
-          onChange={e => {
-            const site = sites.find(s => s.site_id === Number(e.target.value));
-            setSelectedSite(site || null);
-          }}
-        >
-          <option value="">Select Site</option>
-          {sites.map(s => (
-            <option key={s.site_id} value={s.site_id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-700">
+            Select ATM Site
+          </label>
+          <select
+            className="w-full border rounded px-3 py-2 text-sm"
+            value={selectedSite?.site_id ?? ""}
+            onChange={(e) =>
+              setSelectedSite(
+                sites.find(
+                  (s) => s.site_id === Number(e.target.value)
+                ) || null
+              )
+            }
+          >
+            <option value="">-- Select ATM --</option>
+            {sites.map((s) => (
+              <option key={s.site_id} value={s.site_id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {selectedSite && (
-          <>
-            <div className="grid grid-cols-2 gap-3">
-              {DENOMS.map(d => (
-                <div key={d}>
-                  <label className="text-xs">₹{d}</label>
-                  <input
-                    type="number"
-                    min={0}
-                    className="w-full border px-2 py-1"
-                    value={(form as any)[`denom_${d}`]}
-                    onChange={e =>
-                      setForm({ ...form, [`denom_${d}`]: Number(e.target.value) })
-                    }
-                  />
-                </div>
-              ))}
+          <div className="bg-white border rounded-lg p-4 space-y-5 shadow-sm">
+            <div>
+              <p className="text-sm font-medium text-slate-700 mb-2">
+                Cash Loaded (Denomination-wise)
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {DENOMS.map((d) => (
+                  <div key={d} className="space-y-1">
+                    <label className="text-xs text-slate-600">
+                      ₹{d}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full border rounded px-2 py-1 text-sm"
+                      value={(form as any)[`denom_${d}`]}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          [`denom_${d}`]: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div>
-              <label className="text-sm">Time In</label>
+              <label className="text-sm font-medium text-slate-700">
+                Closing Balance (₹)
+              </label>
               <input
-                type="datetime-local"
-                className="w-full border px-2 py-1"
-                value={timeIn}
-                onChange={e => setTimeIn(e.target.value)}
+                type="number"
+                className="w-full border rounded px-3 py-2 text-sm"
+                value={closingBalance ?? ""}
+                onChange={(e) =>
+                  setClosingBalance(
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Time In (IST)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={timeIn}
+                  readOnly
+                  className="w-full border rounded px-3 py-2 text-sm bg-slate-100"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Time Out (Auto)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={timeOut}
+                  readOnly
+                  className="w-full border rounded px-3 py-2 text-sm bg-slate-100"
+                />
+              </div>
             </div>
 
             <div>
-              <label className="text-sm">Time Out</label>
-              <input
-                type="datetime-local"
-                className="w-full border px-2 py-1"
-                value={timeOut}
-                disabled
+              <label className="text-sm font-medium text-slate-700">
+                Remarks
+              </label>
+              <textarea
+                className="w-full border rounded px-3 py-2 text-sm"
+                rows={2}
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
               />
             </div>
 
-            <input
-              type="number"
-              className="w-full border px-3 py-2"
-              placeholder="Closing Balance"
-              value={closingBalance}
-              onChange={e => setClosingBalance(Number(e.target.value))}
-            />
+            {geoMode === "SOFT" && geoStatus !== "verified" && (
+              <div className="border rounded-md p-3 bg-yellow-50 space-y-3">
+                <p className="text-sm font-medium text-yellow-800">
+                  GPS Verification Required
+                </p>
 
-            <textarea
-              className="w-full border px-3 py-2"
-              placeholder="Remarks"
-              value={remarks}
-              onChange={e => setRemarks(e.target.value)}
-            />
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) =>
+                    setPhoto(e.target.files?.[0] || null)
+                  }
+                />
+              </div>
+            )}
 
-            <div>
-              <label className="text-sm">ATM Photo (Optional)</label>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={e => setPhoto(e.target.files?.[0] || null)}
-              />
-            </div>
-
-            {geoStatus === "mismatch" && (
-              <div className="bg-yellow-100 text-xs p-2 rounded">
-                ⚠️ Location mismatch detected. Photo evidence recommended.
+            {validationMessage && (
+              <div className="bg-red-100 border border-red-300 p-3 rounded text-sm text-red-700">
+                ⚠️ {validationMessage}
               </div>
             )}
 
             <button
               onClick={handleSave}
-              disabled={loading}
-              className="w-full py-2 rounded bg-primary text-white"
+              disabled={loading || !!validationMessage}
+              className={`w-full py-2 rounded text-sm font-semibold ${
+                validationMessage
+                  ? "bg-slate-300 text-slate-600"
+                  : "bg-primary text-white hover:bg-primary-light"
+              }`}
             >
-              {loading ? "Saving…" : "Save ATM Replenishment"}
+              {loading
+                ? "Saving ATM Load..."
+                : "Save ATM Replenishment"}
             </button>
 
             {error && (
-              <p className="text-sm text-red-600 text-center">{error}</p>
+              <p className="text-sm text-red-600">{error}</p>
             )}
-          </>
+          </div>
         )}
       </div>
     </AppLayout>
