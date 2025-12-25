@@ -11,6 +11,7 @@ const ICONS: Record<string, string> = {
   Denomination: "💰",
   "Cash Pickup": "🏦",
   "ATM Load": "🏧",
+  "ATM Cash Adjustment": "🔄💵",
   "Tech Issues": "⚠️",
   EOD: "🧾",
   "Route Assignment": "🗺️",
@@ -44,8 +45,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
     { to: "/denomination-plan", label: "Denomination" },
     { to: "/cash-pickup", label: "Cash Pickup" },
     { to: "/atm-replenishment", label: "ATM Load" },
+	{ to: "/atm-adjustment", label: "ATM Cash Adjustment" },
     { to: "/technical-issues", label: "Tech Issues" },
     { to: "/eod-summary", label: "EOD" },
+	
   ];
 
   if (profile?.role === "admin") {
