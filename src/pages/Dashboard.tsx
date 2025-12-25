@@ -152,19 +152,19 @@ export default function Dashboard() {
     <AppLayout>
       {/* =================== CUSTODIAN =================== */}
       {profile?.role === "custodian" && (
-        <div className="space-y-6 print-area">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-primary">
-              Custodian Dashboard – Today
-            </h2>
-            <button
-              onClick={() => window.print()}
-              className="no-print px-3 py-1 border rounded text-sm"
-            >
-              Print / Save as PDF
-            </button>
-          </div>
+        <div className="space-y-6 bg-gradient-to-br from-slate-50 to-slate-100 p-3 md:p-6 print:bg-white print:p-0">
+         <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b rounded-md p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2 print:hidden">
+  <h2 className="text-lg md:text-xl font-semibold text-primary">
+    Custodian Dashboard – Today
+  </h2>
 
+  <button
+    onClick={() => window.print()}
+    className="self-start md:self-auto px-4 py-1.5 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 shadow"
+  >
+    Save / Print PDF
+  </button>
+</div>
           {/* KPI GRID */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
