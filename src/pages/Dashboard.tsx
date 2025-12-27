@@ -154,10 +154,15 @@ export default function Dashboard() {
           </div>
 
           {/* KPI GRID – SIMPLE, STABLE */}
-          <div className="rounded-md p-3 md:p-4 text-center shadow">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 max-w-full overflow-hidden">
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
             <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
             <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
+			<div className="rounded-md bg-white shadow p-3 md:p-4 w-full min-w-0">
+  <p className="text-xs text-slate-500 truncate">ATMs Loaded</p>
+  <p className="text-lg font-semibold">
+    {loadedSites.length}/{routeSites.length}
+  </p>
           </div>
 
           {/* DENOMINATION TABLE */}
