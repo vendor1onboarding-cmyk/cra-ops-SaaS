@@ -2,10 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------
+   BASE LAYOUT
+--------------------------------- */
 body {
-  @apply bg-slate-100;
+  @apply bg-slate-100 text-slate-800;
+  overflow-x: hidden; /* Prevent whole-page horizontal scroll */
 }
-/* ---------------- PRINT STYLES ---------------- */
+
+/* ---------------------------------
+   CARD / CONTAINER STABILITY
+--------------------------------- */
+.card,
+.dashboard-card {
+  @apply bg-white rounded-md shadow p-3 md:p-4 w-full min-w-0;
+}
+
+/* ---------------------------------
+   KPI GRID FIX (Mobile Safe)
+--------------------------------- */
+.kpi-grid {
+  @apply grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 max-w-full;
+}
+
+.kpi-card {
+  @apply bg-white rounded-md shadow p-3 md:p-4 min-w-0;
+}
+
+.kpi-card p {
+  @apply truncate;
+}
+
+/* ---------------------------------
+   TABLE RESPONSIVENESS (CRITICAL FIX)
+--------------------------------- */
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper::-webkit-scrollbar {
+  height: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+table {
+  width: 100%;
+  min-width: 720px; /* Allows horizontal scroll INSIDE container */
+  border-collapse: collapse;
+}
+
+th,
+td {
+  @apply px-2 py-2 text-xs md:text-sm whitespace-nowrap;
+}
+
+/* Smaller text on mobile for dense data */
+@media (max-width: 640px) {
+  table {
+    min-width: 600px;
+  }
+
+  th,
+  td {
+    font-size: 11px;
+    padding: 6px;
+  }
+}
+
+/* ---------------------------------
+   DASHBOARD SECTION SPACING
+--------------------------------- */
+.dashboard-section {
+  @apply space-y-3;
+}
+
+/* ---------------------------------
+   BUTTON CONSISTENCY
+--------------------------------- */
+button {
+  @apply rounded-md text-sm font-medium;
+}
+
+/* Print / Save PDF button alignment */
+.print-actions {
+  @apply flex justify-end gap-2 mt-3;
+}
+
+@media (max-width: 640px) {
+  .print-actions {
+    @apply justify-center;
+  }
+}
+
+/* ---------------------------------
+   PRINT STYLES (UNCHANGED + SAFE)
+--------------------------------- */
 @media print {
   body {
     background: white !important;
@@ -23,7 +120,8 @@ body {
     padding: 0 !important;
   }
 
-  h2, h3 {
+  h2,
+  h3 {
     margin-top: 8px;
   }
 

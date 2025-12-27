@@ -158,9 +158,8 @@ export default function Dashboard() {
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
             <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
             <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
-          </div>
-
-          {/* DENOMINATION TABLE */}
+		</div>	
+            {/* DENOMINATION TABLE */}
           <Section title="Denomination-wise Cash Position">
             <div className="relative -mx-4 md:mx-0 overflow-x-auto">
               <DenomTable
