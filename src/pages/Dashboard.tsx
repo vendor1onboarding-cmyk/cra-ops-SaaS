@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -17,7 +17,7 @@ export default function Dashboard() {
   const [supervisorAssignments, setSupervisorAssignments] = useState<any[]>([]);
 
   /* --------------------------------------------------
-     LOAD DATA
+     LOAD DATA (UNCHANGED)
   -------------------------------------------------- */
   useEffect(() => {
     if (!profile) return;
@@ -25,7 +25,6 @@ export default function Dashboard() {
     async function load() {
       setLoading(true);
 
-      // Custodian
       if (profile.role === "custodian") {
         const { data: asg } = await supabase
           .from("assignments")
@@ -39,28 +38,27 @@ export default function Dashboard() {
         if (asg) {
           setAssignment(asg);
 
-          const [routes, loads, pickups, adjustments] =
-            await Promise.all([
-              supabase
-                .from("route_sites")
-                .select("site:sites(id, bank_name, address)")
-                .eq("assignment_id", asg.id),
+          const [routes, loads, pickups, adjustments] = await Promise.all([
+            supabase
+              .from("route_sites")
+              .select("site:sites(id, bank_name, address)")
+              .eq("assignment_id", asg.id),
 
-              supabase
-                .from("atm_replenishments")
-                .select("*, site:sites(bank_name, address)")
-                .eq("assignment_id", asg.id),
+            supabase
+              .from("atm_replenishments")
+              .select("*, site:sites(bank_name, address)")
+              .eq("assignment_id", asg.id),
 
-              supabase
-                .from("cash_pickups")
-                .select("*")
-                .eq("assignment_id", asg.id),
+            supabase
+              .from("cash_pickups")
+              .select("*")
+              .eq("assignment_id", asg.id),
 
-              supabase
-                .from("atm_cash_adjustments")
-                .select("*")
-                .eq("assignment_id", asg.id),
-            ]);
+            supabase
+              .from("atm_cash_adjustments")
+              .select("*")
+              .eq("assignment_id", asg.id),
+          ]);
 
           setRouteSites(routes.data || []);
           setAtmLoads(loads.data || []);
@@ -69,7 +67,6 @@ export default function Dashboard() {
         }
       }
 
-      // Supervisor
       if (profile.role === "supervisor") {
         const { data } = await supabase
           .from("assignments")
@@ -87,7 +84,6 @@ export default function Dashboard() {
         setSupervisorAssignments(data || []);
       }
 
-      // Admin
       if (profile.role === "admin") {
         const { data } = await supabase
           .from("assignments")
@@ -109,7 +105,7 @@ export default function Dashboard() {
   }, [profile]);
 
   /* --------------------------------------------------
-     HELPERS
+     HELPERS (UNCHANGED)
   -------------------------------------------------- */
   const sumDenoms = (rows: any[]) => ({
     d100: rows.reduce((s, r) => s + (r.denom_100 || 0), 0),
@@ -137,9 +133,6 @@ export default function Dashboard() {
     (r) => !loadedSiteIds.includes(r.site.id)
   );
 
-  /* --------------------------------------------------
-     UI
-  -------------------------------------------------- */
   if (loading) {
     return (
       <AppLayout>
@@ -150,84 +143,82 @@ export default function Dashboard() {
 
   return (
     <AppLayout>
-      {/* =================== CUSTODIAN =================== */}
+      {/* ================= CUSTODIAN ================= */}
       {profile?.role === "custodian" && (
-        <div className="space-y-6 bg-gradient-to-br from-slate-50 to-slate-100 p-3 md:p-6 print:bg-white print:p-0">
-         <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b rounded-md p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2 print:hidden">
-  <h2 className="text-lg md:text-xl font-semibold text-primary">
-    Custodian Dashboard – Today
-  </h2>
+        <div className="space-y-6 p-3 md:p-6 bg-slate-50 print:bg-white">
 
-  <button
-    onClick={() => window.print()}
-    className="self-start md:self-auto px-4 py-1.5 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 shadow"
-  >
-    Save / Print PDF
-  </button>
-</div>
-          {/* KPI GRID */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <KPI label="Cash Picked" value={`₹${total(picked)}`} />
-            <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
-            <KPI
-              label="Cash In Hand"
-              value={`₹${total(inHand)}`}
-              highlight
-            />
-            <KPI
-              label="ATMs Loaded"
-              value={`${atmLoads.length} / ${routeSites.length}`}
-            />
+          {/* HEADER */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 print:hidden">
+            <h2 className="text-lg sm:text-xl font-semibold text-primary">
+              Custodian Dashboard – Today
+            </h2>
+            <button
+              onClick={() => window.print()}
+              className="w-full sm:w-auto px-4 py-2 rounded-md bg-primary text-white text-sm font-medium"
+            >
+              Save / Print PDF
+            </button>
           </div>
 
-          {/* DENOMINATION TABLE */}
+          {/* KPI GRID */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <KPI label="Cash Picked" value={`₹${total(picked)}`} />
+            <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
+            <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
+          </div>
+
+          {/* DENOM TABLE */}
           <Section title="Denomination-wise Cash Position">
-            <DenomTable
-              picked={picked}
-              loaded={loaded}
-              adjusted={adjusted}
-              inHand={inHand}
-            />
+            <Scrollable>
+              <DenomTable
+                picked={picked}
+                loaded={loaded}
+                adjusted={adjusted}
+                inHand={inHand}
+              />
+            </Scrollable>
           </Section>
 
           {/* LOADED ATMs */}
-          <Section title="Loaded ATMs (Denomination-wise)">
-            <table className="w-full border text-xs">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="p-2 border">ATM</th>
-                  <th className="p-2 border">₹100</th>
-                  <th className="p-2 border">₹200</th>
-                  <th className="p-2 border">₹500</th>
-                  <th className="p-2 border">₹2000</th>
-                  <th className="p-2 border">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {atmLoads.map((a) => (
-                  <tr key={a.id}>
-                    <td className="p-2 border">
-                      {a.site.bank_name} – {a.site.address}
-                    </td>
-                    <td className="p-2 border">{a.denom_100}</td>
-                    <td className="p-2 border">{a.denom_200}</td>
-                    <td className="p-2 border">{a.denom_500}</td>
-                    <td className="p-2 border">{a.denom_2000}</td>
-                    <td className="p-2 border">
-                      ₹{a.denom_100 * 100 +
-                        a.denom_200 * 200 +
-                        a.denom_500 * 500 +
-                        a.denom_2000 * 2000}
-                    </td>
+          <Section title="Loaded ATMs">
+            <Scrollable>
+              <table className="min-w-[600px] w-full border text-xs">
+                <thead className="bg-slate-100 sticky top-0">
+                  <tr>
+                    <th className="p-2 border">ATM</th>
+                    <th className="p-2 border">₹100</th>
+                    <th className="p-2 border">₹200</th>
+                    <th className="p-2 border">₹500</th>
+                    <th className="p-2 border">₹2000</th>
+                    <th className="p-2 border">Total</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {atmLoads.map((a) => (
+                    <tr key={a.id}>
+                      <td className="p-2 border whitespace-normal">
+                        {a.site.bank_name} – {a.site.address}
+                      </td>
+                      <td className="p-2 border">{a.denom_100}</td>
+                      <td className="p-2 border">{a.denom_200}</td>
+                      <td className="p-2 border">{a.denom_500}</td>
+                      <td className="p-2 border">{a.denom_2000}</td>
+                      <td className="p-2 border">
+                        ₹{a.denom_100 * 100 +
+                          a.denom_200 * 200 +
+                          a.denom_500 * 500 +
+                          a.denom_2000 * 2000}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Scrollable>
           </Section>
 
-          {/* PENDING ATMs */}
+          {/* PENDING */}
           <Section title="Pending ATMs">
-            <ul className="list-disc ml-5 text-sm">
+            <ul className="list-disc ml-4 text-sm space-y-1">
               {pendingSites.map((s) => (
                 <li key={s.site.id}>
                   {s.site.bank_name} – {s.site.address}
@@ -236,7 +227,7 @@ export default function Dashboard() {
             </ul>
           </Section>
 
-          <div className="text-right">
+          <div className="text-right print:hidden">
             <Link to="/eod-summary" className="text-primary underline">
               View / Submit EOD Summary
             </Link>
@@ -244,48 +235,45 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* =================== SUPERVISOR =================== */}
+      {/* SUPERVISOR */}
       {profile?.role === "supervisor" && (
-        <ReadOnlyTable
-          title="Supervisor – Daily Overview"
-          rows={supervisorAssignments}
-        />
+        <ReadOnlyTable title="Supervisor – Daily Overview" rows={supervisorAssignments} />
       )}
 
-      {/* =================== ADMIN =================== */}
+      {/* ADMIN */}
       {profile?.role === "admin" && (
-        <ReadOnlyTable
-          title="Admin – Assignment Overview"
-          rows={adminAssignments}
-          admin
-        />
+        <ReadOnlyTable title="Admin – Assignment Overview" rows={adminAssignments} admin />
       )}
     </AppLayout>
   );
 }
 
-/* ------------------ SHARED COMPONENTS ------------------ */
+/* ---------------- SHARED UI ---------------- */
 
 function KPI({ label, value, highlight }: any) {
   return (
     <div
-      className={`p-4 rounded shadow text-center ${
+      className={`rounded-md p-4 text-center shadow ${
         highlight ? "bg-primary text-white" : "bg-white"
       }`}
     >
       <div className="text-xs opacity-80">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
+      <div className="text-xl font-semibold">{value}</div>
     </div>
   );
 }
 
 function Section({ title, children }: any) {
   return (
-    <div className="bg-white p-4 rounded shadow text-sm">
-      <h3 className="font-semibold mb-3">{title}</h3>
+    <div className="bg-white rounded-md shadow p-3">
+      <h3 className="font-semibold mb-2">{title}</h3>
       {children}
     </div>
   );
+}
+
+function Scrollable({ children }: any) {
+  return <div className="overflow-x-auto">{children}</div>;
 }
 
 function DenomTable({ picked, loaded, adjusted, inHand }: any) {
@@ -297,7 +285,7 @@ function DenomTable({ picked, loaded, adjusted, inHand }: any) {
   ];
 
   return (
-    <table className="w-full border text-xs">
+    <table className="min-w-[500px] w-full border text-xs">
       <thead className="bg-slate-100">
         <tr>
           <th className="p-2 border">Type</th>
@@ -328,37 +316,36 @@ function DenomTable({ picked, loaded, adjusted, inHand }: any) {
 
 function ReadOnlyTable({ title, rows, admin }: any) {
   return (
-    <div className="bg-white p-4 rounded shadow">
-      <h2 className="text-xl font-semibold mb-4">{title}</h2>
-      <table className="w-full border text-sm">
-        <thead className="bg-slate-100">
-          <tr>
-            <th className="p-2 border">Date</th>
-            <th className="p-2 border">Custodian</th>
-            <th className="p-2 border">Status</th>
-            {admin && <th className="p-2 border">EOD</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r: any) => (
-            <tr key={r.id}>
-              <td className="p-2 border">{r.assignment_date}</td>
-              <td className="p-2 border">{r.custodian?.full_name}</td>
-              <td className="p-2 border capitalize">{r.status}</td>
-              {admin && (
-                <td className="p-2 border text-center">
-                  <Link
-                    to={`/admin/approvals`}
-                    className="text-primary underline"
-                  >
-                    View
-                  </Link>
-                </td>
-              )}
+    <div className="bg-white rounded-md shadow p-4">
+      <h2 className="text-lg font-semibold mb-3">{title}</h2>
+      <Scrollable>
+        <table className="min-w-[600px] w-full border text-sm">
+          <thead className="bg-slate-100">
+            <tr>
+              <th className="p-2 border">Date</th>
+              <th className="p-2 border">Custodian</th>
+              <th className="p-2 border">Status</th>
+              {admin && <th className="p-2 border">EOD</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r: any) => (
+              <tr key={r.id}>
+                <td className="p-2 border">{r.assignment_date}</td>
+                <td className="p-2 border">{r.custodian?.full_name}</td>
+                <td className="p-2 border capitalize">{r.status}</td>
+                {admin && (
+                  <td className="p-2 border text-center">
+                    <Link to="/admin/approvals" className="text-primary underline">
+                      View
+                    </Link>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Scrollable>
     </div>
   );
 }
