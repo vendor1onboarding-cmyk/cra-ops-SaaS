@@ -141,20 +141,20 @@ export default function Dashboard() {
         <div className="space-y-6 p-4 bg-slate-50 print:bg-white">
 
           {/* HEADER */}
-          <div className="flex items-center justify-between print:hidden">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between print:hidden">
             <h2 className="text-lg font-semibold text-primary">
               Custodian Dashboard – Today
             </h2>
             <button
               onClick={() => window.print()}
-              className="px-4 py-2 rounded bg-primary text-white text-sm"
+              className="self-start md:self-auto px-4 py-2 rounded bg-primary text-white text-sm"
             >
               Save / Print PDF
             </button>
           </div>
 
           {/* KPI GRID – SIMPLE, STABLE */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-md p-3 md:p-4 text-center shadow">
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
             <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
             <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
@@ -162,7 +162,7 @@ export default function Dashboard() {
 
           {/* DENOMINATION TABLE */}
           <Section title="Denomination-wise Cash Position">
-            <div className="overflow-x-auto">
+            <div className="relative -mx-4 md:mx-0 overflow-x-auto">
               <DenomTable
                 picked={picked}
                 loaded={loaded}
@@ -174,8 +174,8 @@ export default function Dashboard() {
 
           {/* LOADED ATMs */}
           <Section title="Loaded ATMs">
-            <div className="overflow-x-auto">
-              <table className="min-w-[600px] w-full border text-xs">
+            <div className="relative -mx-4 md:mx-0 overflow-x-auto">
+              <table className="min-w-[760px] w-full border text-xs">
                 <thead className="bg-slate-100">
                   <tr>
                     <th className="p-2 border">ATM</th>
