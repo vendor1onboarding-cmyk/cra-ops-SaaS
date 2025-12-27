@@ -5,11 +5,10 @@ import { useAuth } from "../context/AuthContext";
 
 const GPS_RADIUS_METERS = 100;
 
-// ---------------- Utilities ----------------
-function toISTISOString(date = new Date()) {
-  return new Date(date.getTime() + 5.5 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 16);
+/* ---------------- Utilities ---------------- */
+
+function toIST(date = new Date()) {
+  return new Date(date.getTime() + 5.5 * 60 * 60 * 1000).toISOString();
 }
 
 function calculateDistanceMeters(
@@ -42,46 +41,13 @@ async function getCurrentLocation(): Promise<{ lat: number; lng: number }> {
           lng: pos.coords.longitude,
         }),
       reject,
-      {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 0,
-      }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
     );
   });
 }
 
-// Image compression (client-side)
-async function compressImage(file: File): Promise<File> {
-  const bitmap = await createImageBitmap(file);
-  const canvas = document.createElement("canvas");
+/* ---------------- Component ---------------- */
 
-  const MAX_WIDTH = 1024;
-  const scale = Math.min(1, MAX_WIDTH / bitmap.width);
-
-  canvas.width = bitmap.width * scale;
-  canvas.height = bitmap.height * scale;
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return file;
-
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-
-  return new Promise((resolve) => {
-    canvas.toBlob(
-      (blob) =>
-        resolve(
-          new File([blob!], file.name, {
-            type: "image/jpeg",
-          })
-        ),
-      "image/jpeg",
-      0.7
-    );
-  });
-}
-
-// ---------------- Component ----------------
 export default function ATMReplenishment() {
   const { profile } = useAuth();
 
@@ -90,7 +56,8 @@ export default function ATMReplenishment() {
   const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
   const selectedSite = sites.find((s) => s.id === selectedSiteId);
 
-  const [timeIn] = useState(toISTISOString());
+  const [timeIn, setTimeIn] = useState<string | null>(null);
+
   const [remarks, setRemarks] = useState("");
 
   const [denoms, setDenoms] = useState({
@@ -112,18 +79,21 @@ export default function ATMReplenishment() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const geoMode = "SOFT"; // OFF / SOFT
+  const geoMode: "OFF" | "SOFT" = "SOFT";
 
-  // ---------------- Load Assignment & Sites ----------------
+  /* -------- Load Assignment & Sites -------- */
+
   useEffect(() => {
     if (!profile) return;
 
     async function loadData() {
+      const today = new Date().toISOString().slice(0, 10);
+
       const { data: assignment } = await supabase
         .from("assignments")
         .select("id")
         .eq("custodian_id", profile.id)
-        .eq("assignment_date", new Date().toISOString().slice(0, 10))
+        .eq("assignment_date", today)
         .single();
 
       if (!assignment) return;
@@ -132,9 +102,7 @@ export default function ATMReplenishment() {
 
       const { data } = await supabase
         .from("route_sites")
-        .select(
-          "site:sites(id, bank_name, address, latitude, longitude)"
-        )
+        .select("site:sites(id, bank_name, address, latitude, longitude)")
         .eq("assignment_id", assignment.id);
 
       setSites((data || []).map((r: any) => r.site));
@@ -143,10 +111,12 @@ export default function ATMReplenishment() {
     loadData();
   }, [profile]);
 
-  // ---------------- Acquire GPS ----------------
+  /* -------- GPS Acquisition -------- */
+
   async function handleAcquireGPS() {
     setGeoMessage("Acquiring GPS location…");
     setGeoStatus("unknown");
+    setPhoto(null);
 
     try {
       const gps = await getCurrentLocation();
@@ -155,7 +125,7 @@ export default function ATMReplenishment() {
 
       if (!selectedSite?.latitude || !selectedSite?.longitude) {
         setGeoStatus("no_gps");
-        setGeoMessage("Site GPS coordinates not configured.");
+        setGeoMessage("ATM GPS not configured.");
         return;
       }
 
@@ -173,15 +143,20 @@ export default function ATMReplenishment() {
         setGeoMessage(`GPS verified (${distance.toFixed(1)} m)`);
       } else {
         setGeoStatus("mismatch");
-        setGeoMessage(`GPS mismatch (${distance.toFixed(1)} m away)`);
+        setGeoMessage(
+          `GPS mismatch (${distance.toFixed(
+            1
+          )} m). ATM photo is required.`
+        );
       }
     } catch {
       setGeoStatus("no_gps");
-      setGeoMessage("Unable to acquire GPS. Please stand near ATM.");
+      setGeoMessage("Unable to acquire GPS. Please upload ATM photo.");
     }
   }
 
-  // ---------------- Save ----------------
+  /* -------- Save ATM Load -------- */
+
   async function handleSave() {
     setError(null);
     setSaving(true);
@@ -198,8 +173,14 @@ export default function ATMReplenishment() {
       return;
     }
 
+    if (!timeIn) {
+      setError("Time In not captured. Please reselect the site.");
+      setSaving(false);
+      return;
+    }
+
     if (geoMode === "SOFT" && geoStatus !== "verified" && !photo) {
-      setError("GPS validation failed. Please upload ATM photo.");
+      setError("GPS validation failed. ATM photo is mandatory.");
       setSaving(false);
       return;
     }
@@ -207,12 +188,11 @@ export default function ATMReplenishment() {
     let photoUrl: string | null = null;
 
     if (photo) {
-      const compressed = await compressImage(photo);
       const path = `atm-loads/${assignmentId}-${selectedSiteId}-${Date.now()}.jpg`;
 
       const { error: uploadError } = await supabase.storage
         .from("issue-photos")
-        .upload(path, compressed, { upsert: true });
+        .upload(path, photo, { upsert: true });
 
       if (uploadError) {
         setError("Photo upload failed.");
@@ -226,7 +206,8 @@ export default function ATMReplenishment() {
     const { error } = await supabase.from("atm_replenishments").insert({
       assignment_id: assignmentId,
       site_id: selectedSiteId,
-      time_in: new Date(timeIn).toISOString(),
+      time_in: timeIn,
+      time_out: toIST(),
       ...denoms,
       remarks,
       load_lat: loadLat,
@@ -239,14 +220,35 @@ export default function ATMReplenishment() {
 
     if (error) {
       setError("Failed to save ATM Replenishment.");
-    } else {
-      alert("ATM Replenishment saved successfully.");
+      setSaving(false);
+      return;
     }
 
+    /* -------- Reset Form -------- */
+
+    setSelectedSiteId(null);
+    setTimeIn(null);
+    setRemarks("");
+    setDenoms({
+      denom_100: 0,
+      denom_200: 0,
+      denom_500: 0,
+      denom_2000: 0,
+    });
+    setGeoStatus("unknown");
+    setGeoMessage(null);
+    setGeoDistance(null);
+    setLoadLat(null);
+    setLoadLng(null);
+    setPhoto(null);
+    setError(null);
+
+    alert("ATM Replenishment saved successfully.");
     setSaving(false);
   }
 
-  // ---------------- UI ----------------
+  /* -------- UI -------- */
+
   return (
     <AppLayout>
       <div className="max-w-xl mx-auto space-y-4">
@@ -261,11 +263,16 @@ export default function ATMReplenishment() {
         )}
 
         <div>
-          <label className="text-sm">Select Site</label>
+          <label className="text-sm">Select ATM Site</label>
           <select
             className="w-full border rounded px-2 py-1 text-sm"
             value={selectedSiteId ?? ""}
-            onChange={(e) => setSelectedSiteId(Number(e.target.value))}
+            onChange={(e) => {
+              const siteId = Number(e.target.value);
+              setSelectedSiteId(siteId);
+              if (siteId) setTimeIn(toIST());
+              else setTimeIn(null);
+            }}
           >
             <option value="">-- Select ATM --</option>
             {sites.map((s) => (
@@ -284,7 +291,7 @@ export default function ATMReplenishment() {
           Acquire GPS Location
         </button>
 
-        {geoMode === "SOFT" && geoStatus !== "verified" && (
+        {(geoStatus === "mismatch" || geoStatus === "no_gps") && (
           <div>
             <label className="text-sm">ATM Photo (Required)</label>
             <input
@@ -306,18 +313,19 @@ export default function ATMReplenishment() {
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          {Object.entries(denoms).map(([k, v]) => (
-            <div key={k}>
-              <label className="text-sm">
-                ₹{k.replace("denom_", "")}
-              </label>
+          {(["100", "200", "500", "2000"] as const).map((d) => (
+            <div key={d}>
+              <label className="text-sm">₹{d}</label>
               <input
                 type="number"
                 min={0}
                 className="w-full border rounded px-2 py-1 text-sm"
-                value={v}
+                value={(denoms as any)[`denom_${d}`]}
                 onChange={(e) =>
-                  setDenoms({ ...denoms, [k]: Number(e.target.value) })
+                  setDenoms({
+                    ...denoms,
+                    [`denom_${d}`]: Number(e.target.value),
+                  })
                 }
               />
             </div>
