@@ -158,12 +158,6 @@ export default function Dashboard() {
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
             <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
             <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
-			<div className="rounded-md bg-white shadow p-3 md:p-4 w-full min-w-0">
-  <p className="text-xs text-slate-500 truncate">ATMs Loaded</p>
-  <p className="text-lg font-semibold">
-    {loadedSites.length}/{routeSites.length}
-  </p>
-</div>
           </div>
 
           {/* DENOMINATION TABLE */}
