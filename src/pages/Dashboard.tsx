@@ -16,9 +16,7 @@ export default function Dashboard() {
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
   const [supervisorAssignments, setSupervisorAssignments] = useState<any[]>([]);
 
-  /* --------------------------------------------------
-     LOAD DATA (UNCHANGED)
-  -------------------------------------------------- */
+  /* ================= LOAD DATA (UNCHANGED) ================= */
   useEffect(() => {
     if (!profile) return;
 
@@ -74,10 +72,7 @@ export default function Dashboard() {
             id,
             assignment_date,
             status,
-            custodian:profiles!assignments_custodian_id_fkey(full_name),
-            atm_replenishments(id),
-            cash_pickups(id),
-            atm_cash_adjustments(id)
+            custodian:profiles!assignments_custodian_id_fkey(full_name)
           `)
           .order("assignment_date", { ascending: false });
 
@@ -104,9 +99,7 @@ export default function Dashboard() {
     load();
   }, [profile]);
 
-  /* --------------------------------------------------
-     HELPERS (UNCHANGED)
-  -------------------------------------------------- */
+  /* ================= HELPERS (UNCHANGED) ================= */
   const sumDenoms = (rows: any[]) => ({
     d100: rows.reduce((s, r) => s + (r.denom_100 || 0), 0),
     d200: rows.reduce((s, r) => s + (r.denom_200 || 0), 0),
@@ -145,46 +138,45 @@ export default function Dashboard() {
     <AppLayout>
       {/* ================= CUSTODIAN ================= */}
       {profile?.role === "custodian" && (
-        <div className="space-y-5 p-3 md:p-6 bg-slate-50 print:bg-white">
-          
+        <div className="space-y-6 p-4 bg-slate-50 print:bg-white">
+
           {/* HEADER */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 print:hidden">
-            <h2 className="text-lg sm:text-xl font-semibold text-primary">
+          <div className="flex items-center justify-between print:hidden">
+            <h2 className="text-lg font-semibold text-primary">
               Custodian Dashboard – Today
             </h2>
             <button
               onClick={() => window.print()}
-              className="w-full sm:w-auto px-4 py-2 rounded-md bg-primary text-white text-sm font-medium"
+              className="px-4 py-2 rounded bg-primary text-white text-sm"
             >
               Save / Print PDF
             </button>
           </div>
 
-          {/* KPI GRID */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* KPI GRID – SIMPLE, STABLE */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
             <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
             <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
-            <KPI label="ATMs Loaded" value={`${atmLoads.length} / ${routeSites.length}`} />
           </div>
 
-          {/* DENOM TABLE */}
+          {/* DENOMINATION TABLE */}
           <Section title="Denomination-wise Cash Position">
-            <Scrollable>
+            <div className="overflow-x-auto">
               <DenomTable
                 picked={picked}
                 loaded={loaded}
                 adjusted={adjusted}
                 inHand={inHand}
               />
-            </Scrollable>
+            </div>
           </Section>
 
           {/* LOADED ATMs */}
           <Section title="Loaded ATMs">
-            <Scrollable>
+            <div className="overflow-x-auto">
               <table className="min-w-[600px] w-full border text-xs">
-                <thead className="bg-slate-100 sticky top-0">
+                <thead className="bg-slate-100">
                   <tr>
                     <th className="p-2 border">ATM</th>
                     <th className="p-2 border">₹100</th>
@@ -197,7 +189,7 @@ export default function Dashboard() {
                 <tbody>
                   {atmLoads.map((a) => (
                     <tr key={a.id}>
-                      <td className="p-2 border whitespace-normal">
+                      <td className="p-2 border">
                         {a.site.bank_name} – {a.site.address}
                       </td>
                       <td className="p-2 border">{a.denom_100}</td>
@@ -214,12 +206,12 @@ export default function Dashboard() {
                   ))}
                 </tbody>
               </table>
-            </Scrollable>
+            </div>
           </Section>
 
-          {/* PENDING */}
+          {/* PENDING ATMs */}
           <Section title="Pending ATMs">
-            <ul className="list-disc ml-4 text-sm space-y-1">
+            <ul className="list-disc ml-5 text-sm space-y-1">
               {pendingSites.map((s) => (
                 <li key={s.site.id}>
                   {s.site.bank_name} – {s.site.address}
@@ -236,12 +228,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* SUPERVISOR */}
+      {/* ================= SUPERVISOR ================= */}
       {profile?.role === "supervisor" && (
         <ReadOnlyTable title="Supervisor – Daily Overview" rows={supervisorAssignments} />
       )}
 
-      {/* ADMIN */}
+      {/* ================= ADMIN ================= */}
       {profile?.role === "admin" && (
         <ReadOnlyTable title="Admin – Assignment Overview" rows={adminAssignments} admin />
       )}
@@ -249,15 +241,17 @@ export default function Dashboard() {
   );
 }
 
-/* ---------------- SHARED UI ---------------- */
+/* ================= SHARED UI ================= */
 
 function KPI({ label, value, highlight }: any) {
   return (
-    <div className={`rounded-md p-3 text-center shadow ${
-      highlight ? "bg-primary text-white" : "bg-white"
-    }`}>
+    <div
+      className={`rounded-md p-4 text-center shadow ${
+        highlight ? "bg-primary text-white" : "bg-white"
+      }`}
+    >
       <div className="text-xs opacity-80">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
+      <div className="text-xl font-semibold">{value}</div>
     </div>
   );
 }
@@ -269,10 +263,6 @@ function Section({ title, children }: any) {
       {children}
     </div>
   );
-}
-
-function Scrollable({ children }: any) {
-  return <div className="overflow-x-auto">{children}</div>;
 }
 
 function DenomTable({ picked, loaded, adjusted, inHand }: any) {
@@ -317,7 +307,7 @@ function ReadOnlyTable({ title, rows, admin }: any) {
   return (
     <div className="bg-white rounded-md shadow p-4">
       <h2 className="text-lg font-semibold mb-3">{title}</h2>
-      <Scrollable>
+      <div className="overflow-x-auto">
         <table className="min-w-[600px] w-full border text-sm">
           <thead className="bg-slate-100">
             <tr>
@@ -344,7 +334,7 @@ function ReadOnlyTable({ title, rows, admin }: any) {
             ))}
           </tbody>
         </table>
-      </Scrollable>
+      </div>
     </div>
   );
 }
