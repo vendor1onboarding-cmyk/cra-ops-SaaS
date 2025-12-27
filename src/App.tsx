@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import DenominationPlanPage from "./pages/DenominationPlan";
 import CashPickupPage from "./pages/CashPickup";
 import ATMReplenishmentPage from "./pages/ATMReplenishment";
+import ATMExcessCashPage from "./pages/ATMExcessCash";
 import ATMCashAdjustmentPage from "./pages/ATMCashAdjustment";
 import TechnicalIssuesPage from "./pages/TechnicalIssues";
 import EODSummaryPage from "./pages/EODSummary";
@@ -76,6 +77,17 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
+<Route
+  path="/atm-excess-cash"
+  element={
+    <PrivateRoute>
+      <ATMExcessCashPage />
+    </PrivateRoute>
+  }
+/>
+
+
 <Route
   path="/atm-adjustment"
   element={
