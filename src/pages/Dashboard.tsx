@@ -163,6 +163,7 @@ export default function Dashboard() {
   <p className="text-lg font-semibold">
     {loadedSites.length}/{routeSites.length}
   </p>
+</div>
           </div>
 
           {/* DENOMINATION TABLE */}
