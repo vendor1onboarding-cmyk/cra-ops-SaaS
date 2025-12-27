@@ -15,6 +15,7 @@ export default function Dashboard() {
   const [cashAdjustments, setCashAdjustments] = useState<any[]>([]);
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
   const [supervisorAssignments, setSupervisorAssignments] = useState<any[]>([]);
+  const [showAllDenoms, setShowAllDenoms] = useState(false);
 
   /* ================= LOAD DATA (UNCHANGED) ================= */
   useEffect(() => {
@@ -99,7 +100,7 @@ export default function Dashboard() {
     load();
   }, [profile]);
 
-  /* ================= HELPERS (UNCHANGED) ================= */
+  /* ================= HELPERS ================= */
   const sumDenoms = (rows: any[]) => ({
     d100: rows.reduce((s, r) => s + (r.denom_100 || 0), 0),
     d200: rows.reduce((s, r) => s + (r.denom_200 || 0), 0),
@@ -136,7 +137,6 @@ export default function Dashboard() {
 
   return (
     <AppLayout>
-      {/* ================= CUSTODIAN ================= */}
       {profile?.role === "custodian" && (
         <div className="space-y-6 p-4 bg-slate-50 print:bg-white">
 
@@ -147,21 +147,30 @@ export default function Dashboard() {
             </h2>
             <button
               onClick={() => window.print()}
-              className="self-start md:self-auto px-4 py-2 rounded bg-primary text-white text-sm"
+              className="px-4 py-2 rounded bg-primary text-white text-sm"
             >
               Save / Print PDF
             </button>
           </div>
 
-          {/* KPI GRID – SIMPLE, STABLE */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 max-w-full overflow-hidden">
+          {/* KPI GRID */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
             <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
             <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
-		</div>	
-            {/* DENOMINATION TABLE */}
+          </div>
+
+          {/* DENOMINATION – MOBILE ACCORDION */}
           <Section title="Denomination-wise Cash Position">
-            <div className="relative -mx-4 md:mx-0 overflow-x-auto">
+            <button
+              className="text-xs text-primary underline mb-2 md:hidden"
+              onClick={() => setShowAllDenoms(!showAllDenoms)}
+            >
+              {showAllDenoms ? "Hide ₹100 / ₹200" : "Show full breakdown"}
+            </button>
+
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-x-auto">
               <DenomTable
                 picked={picked}
                 loaded={loaded}
@@ -169,15 +178,46 @@ export default function Dashboard() {
                 inHand={inHand}
               />
             </div>
+
+            {/* Mobile Accordion */}
+            <div className="md:hidden space-y-2">
+              {[
+                ["Picked", picked],
+                ["Loaded", loaded],
+                ["Adjusted", adjusted],
+                ["In Hand", inHand],
+              ].map(([label, d]: any) => (
+                <details
+                  key={label}
+                  className="bg-white rounded-md shadow p-3"
+                >
+                  <summary className="font-medium cursor-pointer">
+                    {label} – ₹{total(d)}
+                  </summary>
+                  <div className="mt-2 text-sm space-y-1">
+                    {showAllDenoms && (
+                      <>
+                        <p>₹100 × {d.d100}</p>
+                        <p>₹200 × {d.d200}</p>
+                      </>
+                    )}
+                    <p>₹500 × {d.d500}</p>
+                    <p>₹2000 × {d.d2000}</p>
+                  </div>
+                </details>
+              ))}
+            </div>
           </Section>
 
-          {/* LOADED ATMs */}
+          {/* LOADED ATMs – STICKY NAME */}
           <Section title="Loaded ATMs">
-            <div className="relative -mx-4 md:mx-0 overflow-x-auto">
-              <table className="min-w-[760px] w-full border text-xs">
+            <div className="overflow-x-auto">
+              <table className="min-w-[700px] w-full border text-xs">
                 <thead className="bg-slate-100">
                   <tr>
-                    <th className="p-2 border">ATM</th>
+                    <th className="p-2 border sticky left-0 bg-slate-100">
+                      ATM
+                    </th>
                     <th className="p-2 border">₹100</th>
                     <th className="p-2 border">₹200</th>
                     <th className="p-2 border">₹500</th>
@@ -188,7 +228,7 @@ export default function Dashboard() {
                 <tbody>
                   {atmLoads.map((a) => (
                     <tr key={a.id}>
-                      <td className="p-2 border">
+                      <td className="p-2 border sticky left-0 bg-white">
                         {a.site.bank_name} – {a.site.address}
                       </td>
                       <td className="p-2 border">{a.denom_100}</td>
@@ -227,12 +267,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ================= SUPERVISOR ================= */}
       {profile?.role === "supervisor" && (
         <ReadOnlyTable title="Supervisor – Daily Overview" rows={supervisorAssignments} />
       )}
 
-      {/* ================= ADMIN ================= */}
       {profile?.role === "admin" && (
         <ReadOnlyTable title="Admin – Assignment Overview" rows={adminAssignments} admin />
       )}
@@ -273,7 +311,7 @@ function DenomTable({ picked, loaded, adjusted, inHand }: any) {
   ];
 
   return (
-    <table className="min-w-[500px] w-full border text-xs">
+    <table className="min-w-[600px] w-full border text-xs">
       <thead className="bg-slate-100">
         <tr>
           <th className="p-2 border">Type</th>
