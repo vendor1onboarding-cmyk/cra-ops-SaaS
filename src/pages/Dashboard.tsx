@@ -145,8 +145,8 @@ export default function Dashboard() {
     <AppLayout>
       {/* ================= CUSTODIAN ================= */}
       {profile?.role === "custodian" && (
-        <div className="space-y-6 p-3 md:p-6 bg-slate-50 print:bg-white">
-
+        <div className="space-y-5 p-3 md:p-6 bg-slate-50 print:bg-white">
+          
           {/* HEADER */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 print:hidden">
             <h2 className="text-lg sm:text-xl font-semibold text-primary">
@@ -161,10 +161,11 @@ export default function Dashboard() {
           </div>
 
           {/* KPI GRID */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KPI label="Cash Picked" value={`₹${total(picked)}`} />
             <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
             <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
+            <KPI label="ATMs Loaded" value={`${atmLoads.length} / ${routeSites.length}`} />
           </div>
 
           {/* DENOM TABLE */}
@@ -252,13 +253,11 @@ export default function Dashboard() {
 
 function KPI({ label, value, highlight }: any) {
   return (
-    <div
-      className={`rounded-md p-4 text-center shadow ${
-        highlight ? "bg-primary text-white" : "bg-white"
-      }`}
-    >
+    <div className={`rounded-md p-3 text-center shadow ${
+      highlight ? "bg-primary text-white" : "bg-white"
+    }`}>
       <div className="text-xs opacity-80">{label}</div>
-      <div className="text-xl font-semibold">{value}</div>
+      <div className="text-lg font-semibold">{value}</div>
     </div>
   );
 }
