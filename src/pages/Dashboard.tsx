@@ -1,377 +1,204 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
-import { Link } from "react-router-dom";
+import { AppLayout } from "../components/Layout";
+import { useNavigate } from "react-router-dom";
+
+const DENOMS_DESKTOP = [2000, 500, 200, 100];
+const DENOMS_MOBILE = [2000, 500]; // hide low-value denoms on mobile
+
+function formatSite(site: any) {
+  if (!site) return "Unknown Site";
+  return `${site.bank_name} – ${site.address}${site.atm_id ? ` (ATM: ${site.atm_id})` : ""}`;
+}
 
 export default function Dashboard() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
   const [assignment, setAssignment] = useState<any>(null);
   const [routeSites, setRouteSites] = useState<any[]>([]);
-  const [atmLoads, setAtmLoads] = useState<any[]>([]);
-  const [cashPickups, setCashPickups] = useState<any[]>([]);
-  const [cashAdjustments, setCashAdjustments] = useState<any[]>([]);
-  const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
-  const [supervisorAssignments, setSupervisorAssignments] = useState<any[]>([]);
-  const [showAllDenoms, setShowAllDenoms] = useState(false);
+  const [plans, setPlans] = useState<any[]>([]);
+  const [loads, setLoads] = useState<any[]>([]);
+  const [cashUtil, setCashUtil] = useState<any>(null);
+  const [denomSummary, setDenomSummary] = useState<any>(null);
 
-  /* ================= LOAD DATA (UNCHANGED) ================= */
   useEffect(() => {
-    if (!profile) return;
-
-    async function load() {
-      setLoading(true);
-
-      if (profile.role === "custodian") {
-        const { data: asg } = await supabase
-          .from("assignments")
-          .select("*")
-          .eq("custodian_id", profile.id)
-          .in("status", ["open", "submitted"])
-          .order("assignment_date", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (asg) {
-          setAssignment(asg);
-
-          const [routes, loads, pickups, adjustments] = await Promise.all([
-            supabase
-              .from("route_sites")
-              .select("site:sites(id, bank_name, address)")
-              .eq("assignment_id", asg.id),
-
-            supabase
-              .from("atm_replenishments")
-              .select("*, site:sites(bank_name, address)")
-              .eq("assignment_id", asg.id),
-
-            supabase
-              .from("cash_pickups")
-              .select("*")
-              .eq("assignment_id", asg.id),
-
-            supabase
-              .from("atm_cash_adjustments")
-              .select("*")
-              .eq("assignment_id", asg.id),
-          ]);
-
-          setRouteSites(routes.data || []);
-          setAtmLoads(loads.data || []);
-          setCashPickups(pickups.data || []);
-          setCashAdjustments(adjustments.data || []);
-        }
-      }
-
-      if (profile.role === "supervisor") {
-        const { data } = await supabase
-          .from("assignments")
-          .select(`
-            id,
-            assignment_date,
-            status,
-            custodian:profiles!assignments_custodian_id_fkey(full_name)
-          `)
-          .order("assignment_date", { ascending: false });
-
-        setSupervisorAssignments(data || []);
-      }
-
-      if (profile.role === "admin") {
-        const { data } = await supabase
-          .from("assignments")
-          .select(`
-            id,
-            assignment_date,
-            status,
-            custodian:profiles!assignments_custodian_id_fkey(full_name)
-          `)
-          .order("assignment_date", { ascending: false });
-
-        setAdminAssignments(data || []);
-      }
-
-      setLoading(false);
-    }
-
-    load();
+    if (profile?.role === "custodian") loadCustodian();
   }, [profile]);
 
-  /* ================= HELPERS ================= */
-  const sumDenoms = (rows: any[]) => ({
-    d100: rows.reduce((s, r) => s + (r.denom_100 || 0), 0),
-    d200: rows.reduce((s, r) => s + (r.denom_200 || 0), 0),
-    d500: rows.reduce((s, r) => s + (r.denom_500 || 0), 0),
-    d2000: rows.reduce((s, r) => s + (r.denom_2000 || 0), 0),
-  });
+  async function loadCustodian() {
+    setLoading(true);
+    const today = new Date().toISOString().split("T")[0];
 
-  const picked = sumDenoms(cashPickups);
-  const loaded = sumDenoms(atmLoads);
-  const adjusted = sumDenoms(cashAdjustments);
+    const { data: assign } = await supabase
+      .from("assignments")
+      .select("*")
+      .eq("custodian_id", profile.id)
+      .eq("assignment_date", today)
+      .eq("status", "open")
+      .maybeSingle();
 
-  const inHand = {
-    d100: picked.d100 - loaded.d100 + adjusted.d100,
-    d200: picked.d200 - loaded.d200 + adjusted.d200,
-    d500: picked.d500 - loaded.d500 + adjusted.d500,
-    d2000: picked.d2000 - loaded.d2000 + adjusted.d2000,
-  };
+    if (!assign) {
+      setAssignment(null);
+      setLoading(false);
+      return;
+    }
 
-  const total = (d: any) =>
-    d.d100 * 100 + d.d200 * 200 + d.d500 * 500 + d.d2000 * 2000;
+    setAssignment(assign);
 
-  const loadedSiteIds = atmLoads.map((a) => a.site_id);
-  const pendingSites = routeSites.filter(
-    (r) => !loadedSiteIds.includes(r.site.id)
-  );
+    const [rs, ps, ls, cs] = await Promise.all([
+      supabase.from("route_sites").select("*, site:site_id(*)").eq("assignment_id", assign.id),
+      supabase.from("denomination_plans").select("*").eq("assignment_id", assign.id),
+      supabase.from("atm_replenishments").select("*").eq("assignment_id", assign.id),
+      supabase.from("cash_pickups").select("*").eq("assignment_id", assign.id),
+    ]);
 
-  if (loading) {
+    setRouteSites(rs.data || []);
+    setPlans(ps.data || []);
+    setLoads(ls.data || []);
+
+    computeCash(cs.data || [], ls.data || []);
+    computeDenoms(cs.data || [], ls.data || []);
+    setLoading(false);
+  }
+
+  function computeCash(pickups: any[], loads: any[]) {
+    const picked = pickups.reduce((s, p) => s + (p.total_amount || 0), 0);
+    const loaded = loads.reduce(
+      (s, l) => s + DENOMS_DESKTOP.reduce((ds, d) => ds + (l[`denom_${d}`] || 0) * d, 0),
+      0
+    );
+    setCashUtil({ picked, loaded, inHand: picked - loaded });
+  }
+
+  function computeDenoms(pickups: any[], loads: any[]) {
+    const r: any = { picked: {}, loaded: {}, inHand: {} };
+    DENOMS_DESKTOP.forEach(d => {
+      r.picked[d] = pickups.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0);
+      r.loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
+      r.inHand[d] = r.picked[d] - r.loaded[d];
+    });
+    setDenomSummary(r);
+  }
+
+  if (loading) return <AppLayout><div className="text-center text-sm">Loading…</div></AppLayout>;
+
+  if (!assignment) {
     return (
       <AppLayout>
-        <div className="text-sm">Loading dashboard…</div>
+        <div className="text-center text-sm text-slate-500">
+          No assignment assigned for today.
+        </div>
       </AppLayout>
     );
   }
 
+  const loadedIds = new Set(loads.map(l => l.site_id));
+  const loadedSites = routeSites.filter(r => loadedIds.has(r.site_id));
+  const pendingSites = routeSites.filter(r => !loadedIds.has(r.site_id));
+
   return (
     <AppLayout>
-      {profile?.role === "custodian" && (
-        <div className="space-y-6 p-4 bg-slate-50 print:bg-white">
+      <div className="space-y-5">
 
-          {/* HEADER */}
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between print:hidden">
-            <h2 className="text-lg font-semibold text-primary">
-              Custodian Dashboard – Today
-            </h2>
-            <button
-              onClick={() => window.print()}
-              className="px-4 py-2 rounded bg-primary text-white text-sm"
-            >
-              Save / Print PDF
-            </button>
-          </div>
-
-          {/* KPI GRID */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            <KPI label="Cash Picked" value={`₹${total(picked)}`} />
-            <KPI label="Cash Loaded" value={`₹${total(loaded)}`} />
-            <KPI label="Cash In Hand" value={`₹${total(inHand)}`} highlight />
-          </div>
-
-          {/* DENOMINATION – MOBILE ACCORDION */}
-          <Section title="Denomination-wise Cash Position">
-            <button
-              className="text-xs text-primary underline mb-2 md:hidden"
-              onClick={() => setShowAllDenoms(!showAllDenoms)}
-            >
-              {showAllDenoms ? "Hide ₹100 / ₹200" : "Show full breakdown"}
-            </button>
-
-            {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
-              <DenomTable
-                picked={picked}
-                loaded={loaded}
-                adjusted={adjusted}
-                inHand={inHand}
-              />
-            </div>
-
-            {/* Mobile Accordion */}
-            <div className="md:hidden space-y-2">
-              {[
-                ["Picked", picked],
-                ["Loaded", loaded],
-                ["Adjusted", adjusted],
-                ["In Hand", inHand],
-              ].map(([label, d]: any) => (
-                <details
-                  key={label}
-                  className="bg-white rounded-md shadow p-3"
-                >
-                  <summary className="font-medium cursor-pointer">
-                    {label} – ₹{total(d)}
-                  </summary>
-                  <div className="mt-2 text-sm space-y-1">
-                    {showAllDenoms && (
-                      <>
-                        <p>₹100 × {d.d100}</p>
-                        <p>₹200 × {d.d200}</p>
-                      </>
-                    )}
-                    <p>₹500 × {d.d500}</p>
-                    <p>₹2000 × {d.d2000}</p>
-                  </div>
-                </details>
-              ))}
-            </div>
-          </Section>
-
-          {/* LOADED ATMs – STICKY NAME */}
-          <Section title="Loaded ATMs">
-            <div className="overflow-x-auto">
-              <table className="min-w-[700px] w-full border text-xs">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="p-2 border sticky left-0 bg-slate-100">
-                      ATM
-                    </th>
-                    <th className="p-2 border">₹100</th>
-                    <th className="p-2 border">₹200</th>
-                    <th className="p-2 border">₹500</th>
-                    <th className="p-2 border">₹2000</th>
-                    <th className="p-2 border">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {atmLoads.map((a) => (
-                    <tr key={a.id}>
-                      <td className="p-2 border sticky left-0 bg-white">
-                        {a.site.bank_name} – {a.site.address}
-                      </td>
-                      <td className="p-2 border">{a.denom_100}</td>
-                      <td className="p-2 border">{a.denom_200}</td>
-                      <td className="p-2 border">{a.denom_500}</td>
-                      <td className="p-2 border">{a.denom_2000}</td>
-                      <td className="p-2 border">
-                        ₹{a.denom_100 * 100 +
-                          a.denom_200 * 200 +
-                          a.denom_500 * 500 +
-                          a.denom_2000 * 2000}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Section>
-
-          {/* PENDING ATMs */}
-          <Section title="Pending ATMs">
-            <ul className="list-disc ml-5 text-sm space-y-1">
-              {pendingSites.map((s) => (
-                <li key={s.site.id}>
-                  {s.site.bank_name} – {s.site.address}
-                </li>
-              ))}
-            </ul>
-          </Section>
-
-          <div className="text-right print:hidden">
-            <Link to="/eod-summary" className="text-primary underline">
-              View / Submit EOD Summary
-            </Link>
-          </div>
+        {/* HEADER */}
+        <div className="flex justify-between items-center">
+          <h2 className="text-lg font-semibold">Custodian Dashboard – Today</h2>
+          <button
+            onClick={() => window.print()}
+            className="bg-slate-700 text-white px-3 py-2 rounded text-sm"
+          >
+            🖨️ Print / PDF
+          </button>
         </div>
-      )}
 
-      {profile?.role === "supervisor" && (
-        <ReadOnlyTable title="Supervisor – Daily Overview" rows={supervisorAssignments} />
-      )}
+        {/* KPI GRID */}
+        {cashUtil && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Stat label="Cash Picked" value={`₹${cashUtil.picked}`} />
+            <Stat label="Cash Loaded" value={`₹${cashUtil.loaded}`} />
+            <Stat label="Cash In Hand" value={`₹${cashUtil.inHand}`} />
+          </div>
+        )}
 
-      {profile?.role === "admin" && (
-        <ReadOnlyTable title="Admin – Assignment Overview" rows={adminAssignments} admin />
-      )}
+        {/* DESKTOP DENOM TABLE */}
+        {denomSummary && (
+          <div className="hidden md:block bg-white rounded shadow p-4">
+            <h3 className="font-semibold mb-2">Denomination-wise Cash Position</h3>
+            <table className="w-full text-sm border">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="border p-2">₹</th>
+                  <th className="border p-2">Picked</th>
+                  <th className="border p-2">Loaded</th>
+                  <th className="border p-2">In Hand</th>
+                </tr>
+              </thead>
+              <tbody>
+                {DENOMS_DESKTOP.map(d => (
+                  <tr key={d}>
+                    <td className="border p-2">₹{d}</td>
+                    <td className="border p-2">{denomSummary.picked[d]}</td>
+                    <td className="border p-2">{denomSummary.loaded[d]}</td>
+                    <td className="border p-2">{denomSummary.inHand[d]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* MOBILE ACCORDION */}
+        <div className="md:hidden space-y-3">
+          <h3 className="font-semibold">Loaded ATMs</h3>
+
+          {loadedSites.map(rs => {
+            const plan = plans.find(p => p.site_id === rs.site_id);
+            const load = loads.find(l => l.site_id === rs.site_id);
+
+            return (
+              <details key={rs.id} className="bg-white rounded shadow">
+                <summary className="px-3 py-2 font-medium cursor-pointer">
+                  {formatSite(rs.site)}
+                </summary>
+
+                <div className="p-3 space-y-1 text-sm">
+                  {DENOMS_MOBILE.map(d => (
+                    <div key={d} className="flex justify-between">
+                      <span>₹{d}</span>
+                      <span>
+                        {load?.[`denom_${d}`] || 0} (Planned {plan?.[`denom_${d}`] || 0})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            );
+          })}
+
+          {pendingSites.length > 0 && (
+            <div className="bg-yellow-50 border p-3 rounded text-sm">
+              <div className="font-semibold mb-1">Pending ATMs</div>
+              {pendingSites.map(rs => (
+                <div key={rs.id}>{formatSite(rs.site)}</div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
     </AppLayout>
   );
 }
 
-/* ================= SHARED UI ================= */
-
-function KPI({ label, value, highlight }: any) {
+function Stat({ label, value }: any) {
   return (
-    <div
-      className={`rounded-md p-4 text-center shadow ${
-        highlight ? "bg-primary text-white" : "bg-white"
-      }`}
-    >
-      <div className="text-xs opacity-80">{label}</div>
-      <div className="text-xl font-semibold">{value}</div>
+    <div className="bg-white rounded shadow p-3 text-center">
+      <div className="font-bold">{value}</div>
+      <div className="text-xs text-slate-500">{label}</div>
     </div>
   );
 }
 
-function Section({ title, children }: any) {
-  return (
-    <div className="bg-white rounded-md shadow p-3">
-      <h3 className="font-semibold mb-2">{title}</h3>
-      {children}
-    </div>
-  );
-}
-
-function DenomTable({ picked, loaded, adjusted, inHand }: any) {
-  const rows = [
-    ["Picked", picked],
-    ["Loaded", loaded],
-    ["Adjusted", adjusted],
-    ["In Hand", inHand],
-  ];
-
-  return (
-    <table className="min-w-[600px] w-full border text-xs">
-      <thead className="bg-slate-100">
-        <tr>
-          <th className="p-2 border">Type</th>
-          <th className="p-2 border">₹100</th>
-          <th className="p-2 border">₹200</th>
-          <th className="p-2 border">₹500</th>
-          <th className="p-2 border">₹2000</th>
-          <th className="p-2 border">Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([label, d]: any) => (
-          <tr key={label}>
-            <td className="p-2 border font-medium">{label}</td>
-            <td className="p-2 border">{d.d100}</td>
-            <td className="p-2 border">{d.d200}</td>
-            <td className="p-2 border">{d.d500}</td>
-            <td className="p-2 border">{d.d2000}</td>
-            <td className="p-2 border">
-              ₹{d.d100 * 100 + d.d200 * 200 + d.d500 * 500 + d.d2000 * 2000}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function ReadOnlyTable({ title, rows, admin }: any) {
-  return (
-    <div className="bg-white rounded-md shadow p-4">
-      <h2 className="text-lg font-semibold mb-3">{title}</h2>
-      <div className="overflow-x-auto">
-        <table className="min-w-[600px] w-full border text-sm">
-          <thead className="bg-slate-100">
-            <tr>
-              <th className="p-2 border">Date</th>
-              <th className="p-2 border">Custodian</th>
-              <th className="p-2 border">Status</th>
-              {admin && <th className="p-2 border">EOD</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r: any) => (
-              <tr key={r.id}>
-                <td className="p-2 border">{r.assignment_date}</td>
-                <td className="p-2 border">{r.custodian?.full_name}</td>
-                <td className="p-2 border capitalize">{r.status}</td>
-                {admin && (
-                  <td className="p-2 border text-center">
-                    <Link to="/admin/approvals" className="text-primary underline">
-                      View
-                    </Link>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
