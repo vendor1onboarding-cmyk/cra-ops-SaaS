@@ -55,7 +55,7 @@ export default function Dashboard() {
     const [rs, ls, cps, adj] = await Promise.all([
       supabase
         .from("route_sites")
-        .select("*, site:site_id(bank_name,address)")
+        .select("*, site:site_id(bank_name,address,site_code)")
         .eq("assignment_id", assign.id),
       supabase
         .from("atm_replenishments")
@@ -177,7 +177,7 @@ export default function Dashboard() {
             </button>
 
             {kpiOpen && cashUtil && (
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
                 <Stat label="Cash Picked" value={`₹${cashUtil.picked}`} />
                 <Stat label="Cash Loaded" value={`₹${cashUtil.loaded}`} />
                 <Stat label="Cash Adjusted" value={`₹${cashUtil.adjusted}`} />
@@ -190,18 +190,19 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* DENOMINATION CASH */}
+          {/* DENOMINATION CASH – DESKTOP TABLE */}
           {denomSummary && (
             <div className="bg-white rounded shadow p-4">
               <h3 className="font-semibold mb-3">
                 Denomination-wise Cash Position
               </h3>
 
-              <div className="hidden sm:block">
+              {/* Desktop */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-sm border">
                   <thead className="bg-slate-100">
                     <tr>
-                      <th className="border p-2">Denom</th>
+                      <th className="border p-2">Denomination</th>
                       <th className="border p-2">Picked</th>
                       <th className="border p-2">Loaded</th>
                       <th className="border p-2">Adjusted</th>
@@ -224,6 +225,7 @@ export default function Dashboard() {
                 </table>
               </div>
 
+              {/* Mobile */}
               <div className="sm:hidden space-y-2">
                 {DENOMS.map(d => (
                   <div key={d} className="border rounded p-2 text-sm">
@@ -240,27 +242,59 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* LOADED ATMS – DENOM WISE */}
+          {/* LOADED ATMS – DESKTOP TABLE */}
           <div className="bg-white rounded shadow p-4">
             <h3 className="font-semibold mb-3">
               Loaded ATMs ({loadedSites.length}/{routeSites.length})
             </h3>
 
-            {loadedBySite.map((s: any) => (
-              <div key={s.site_id} className="border rounded p-3 mb-2">
-                <div className="font-semibold mb-1">
-                  {formatSite(s.site)}
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  {DENOMS.map(d => (
-                    <div key={d}>
-                      ₹{d}: {s.denoms[d] || 0}
-                    </div>
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-sm border">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="border p-2 text-left">ATM</th>
+                    {DENOMS.map(d => (
+                      <th key={d} className="border p-2 text-center">
+                        ₹{d}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadedBySite.map(s => (
+                    <tr key={s.site_id}>
+                      <td className="border p-2 font-medium">
+                        {formatSite(s.site)}
+                      </td>
+                      {DENOMS.map(d => (
+                        <td key={d} className="border p-2 text-center">
+                          {s.denoms[d] || 0}
+                        </td>
+                      ))}
+                    </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="sm:hidden space-y-2">
+              {loadedBySite.map(s => (
+                <div key={s.site_id} className="border rounded p-3">
+                  <div className="font-semibold mb-1">
+                    {formatSite(s.site)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {DENOMS.map(d => (
+                      <div key={d}>
+                        ₹{d}: {s.denoms[d] || 0}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           {/* PENDING ATMS */}
