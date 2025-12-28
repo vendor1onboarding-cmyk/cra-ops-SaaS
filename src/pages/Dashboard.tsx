@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
-import { useNavigate } from "react-router-dom";
 
 const DENOMS = [100, 200, 500, 2000];
 
@@ -13,7 +12,6 @@ function formatSite(site: any) {
 
 export default function Dashboard() {
   const { profile } = useAuth();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
   const [assignment, setAssignment] = useState<any>(null);
@@ -25,12 +23,11 @@ export default function Dashboard() {
   const [cashUtil, setCashUtil] = useState<any>(null);
   const [denomSummary, setDenomSummary] = useState<any>(null);
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
-
   const [kpiOpen, setKpiOpen] = useState(true);
 
   useEffect(() => {
-    if (!profile) return;
-    if (profile.role === "custodian") loadCustodianDashboard();
+    if (!profile || profile.role !== "custodian") return;
+    loadCustodianDashboard();
   }, [profile]);
 
   async function loadCustodianDashboard() {
@@ -57,18 +54,9 @@ export default function Dashboard() {
         .from("route_sites")
         .select("*, site:site_id(bank_name,address,site_code)")
         .eq("assignment_id", assign.id),
-      supabase
-        .from("atm_replenishments")
-        .select("*")
-        .eq("assignment_id", assign.id),
-      supabase
-        .from("cash_pickups")
-        .select("*")
-        .eq("assignment_id", assign.id),
-      supabase
-        .from("atm_cash_adjustments")
-        .select("*")
-        .eq("assignment_id", assign.id),
+      supabase.from("atm_replenishments").select("*").eq("assignment_id", assign.id),
+      supabase.from("cash_pickups").select("*").eq("assignment_id", assign.id),
+      supabase.from("atm_cash_adjustments").select("*").eq("assignment_id", assign.id),
     ]);
 
     setRouteSites(rs.data || []);
@@ -85,24 +73,16 @@ export default function Dashboard() {
 
   function computeCash(pickups: any[], loads: any[], adjustments: any[]) {
     const picked = pickups.reduce((s, p) => s + (p.total_amount || 0), 0);
-
     const loaded = loads.reduce(
       (s, l) =>
         s +
-        DENOMS.reduce(
-          (ds, d) => ds + (l[`denom_${d}`] || 0) * d,
-          0
-        ),
+        DENOMS.reduce((ds, d) => ds + (l[`denom_${d}`] || 0) * d, 0),
       0
     );
-
     const adjusted = adjustments.reduce(
       (s, a) =>
         s +
-        DENOMS.reduce(
-          (ds, d) => ds + (a[`denom_${d}`] || 0) * d,
-          0
-        ),
+        DENOMS.reduce((ds, d) => ds + (a[`denom_${d}`] || 0) * d, 0),
       0
     );
 
@@ -123,10 +103,7 @@ export default function Dashboard() {
     DENOMS.forEach(d => {
       picked[d] = pickups.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0);
       loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
-      adjusted[d] = adjustments.reduce(
-        (s, a) => s + (a[`denom_${d}`] || 0),
-        0
-      );
+      adjusted[d] = adjustments.reduce((s, a) => s + (a[`denom_${d}`] || 0), 0);
       inHand[d] = picked[d] - loaded[d] + adjusted[d];
     });
 
@@ -136,9 +113,7 @@ export default function Dashboard() {
   function computeLoadedBySite(routeSites: any[], loads: any[]) {
     const map: any = {};
     loads.forEach(l => {
-      if (!map[l.site_id]) {
-        map[l.site_id] = { site_id: l.site_id, denoms: {} };
-      }
+      if (!map[l.site_id]) map[l.site_id] = { site_id: l.site_id, denoms: {} };
       DENOMS.forEach(d => {
         map[l.site_id].denoms[d] =
           (map[l.site_id].denoms[d] || 0) + (l[`denom_${d}`] || 0);
@@ -153,36 +128,58 @@ export default function Dashboard() {
     );
   }
 
+  function exportCSV() {
+    if (!loadedBySite.length) return;
+
+    let csv = "ATM,100,200,500,2000\n";
+    loadedBySite.forEach(s => {
+      csv += `"${formatSite(s.site)}",${DENOMS.map(d => s.denoms[d] || 0).join(",")}\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ATM_Load_Report.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const loadedSiteIds = new Set(loads.map(l => l.site_id));
-  const loadedSites = routeSites.filter(r => loadedSiteIds.has(r.site_id));
   const pendingSites = routeSites.filter(r => !loadedSiteIds.has(r.site_id));
 
   return (
     <AppLayout>
       {loading && <div className="text-center text-sm">Loading…</div>}
 
-      {!loading && profile?.role === "custodian" && assignment && (
-        <div className="space-y-6 pb-24 px-1">
+      {!loading && assignment && (
+        <div className="space-y-6 pb-28 px-2 max-w-full overflow-x-hidden">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold">
+              Custodian Dashboard – Today ({loadedSiteIds.size}/{routeSites.length} ATMs Loaded)
+            </h2>
+            <div className="hidden sm:flex gap-2">
+              <button onClick={exportCSV} className="btn-secondary">⬇ CSV</button>
+              <button onClick={() => window.print()} className="btn-primary">🖨 Print</button>
+            </div>
+          </div>
 
-          <h2 className="text-lg font-semibold">Custodian Dashboard – Today</h2>
-
-          {/* KPI BAR */}
+          {/* KPI */}
           <div className="bg-white rounded shadow">
             <button
               onClick={() => setKpiOpen(!kpiOpen)}
-              className="w-full flex justify-between items-center px-4 py-3 font-semibold"
+              className="w-full flex justify-between px-4 py-3 font-semibold"
             >
-              Cash Summary
-              <span>{kpiOpen ? "▲" : "▼"}</span>
+              Cash Summary <span>{kpiOpen ? "▲" : "▼"}</span>
             </button>
 
             {kpiOpen && cashUtil && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
-                <Stat label="Cash Picked" value={`₹${cashUtil.picked}`} />
-                <Stat label="Cash Loaded" value={`₹${cashUtil.loaded}`} />
-                <Stat label="Cash Adjusted" value={`₹${cashUtil.adjusted}`} />
+                <Stat label="Picked" value={`₹${cashUtil.picked}`} />
+                <Stat label="Loaded" value={`₹${cashUtil.loaded}`} />
+                <Stat label="Adjusted" value={`₹${cashUtil.adjusted}`} />
                 <Stat
-                  label="Cash In Hand"
+                  label="In Hand"
                   value={`₹${cashUtil.inHand}`}
                   highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
                 />
@@ -190,19 +187,15 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* DENOMINATION CASH – DESKTOP TABLE */}
+          {/* DESKTOP: Denomination-wise Cash (WITH IN HAND) */}
           {denomSummary && (
-            <div className="bg-white rounded shadow p-4">
-              <h3 className="font-semibold mb-3">
-                Denomination-wise Cash Position
-              </h3>
-
-              {/* Desktop */}
-              <div className="hidden sm:block overflow-x-auto">
+            <div className="bg-white rounded shadow p-4 hidden sm:block">
+              <h3 className="font-semibold mb-3">Denomination-wise Cash Position</h3>
+              <div className="overflow-x-auto">
                 <table className="w-full text-sm border">
                   <thead className="bg-slate-100">
                     <tr>
-                      <th className="border p-2">Denomination</th>
+                      <th className="border p-2">₹</th>
                       <th className="border p-2">Picked</th>
                       <th className="border p-2">Loaded</th>
                       <th className="border p-2">Adjusted</th>
@@ -224,80 +217,70 @@ export default function Dashboard() {
                   </tbody>
                 </table>
               </div>
-
-              {/* Mobile */}
-              <div className="sm:hidden space-y-2">
-                {DENOMS.map(d => (
-                  <div key={d} className="border rounded p-2 text-sm">
-                    <div className="font-semibold">₹{d}</div>
-                    <div className="text-xs">
-                      Picked: {denomSummary.picked[d]} | Loaded:{" "}
-                      {denomSummary.loaded[d]} | Adjusted:{" "}
-                      {denomSummary.adjusted[d]} | In Hand:{" "}
-                      {denomSummary.inHand[d]}
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
+		  
+		  {/* DESKTOP: Loaded ATMs – Denomination-wise */}
+{loadedBySite.length > 0 && (
+  <div className="bg-white rounded shadow p-4 hidden sm:block">
+    <h3 className="font-semibold mb-3">
+      Loaded ATMs – Denomination-wise
+    </h3>
 
-          {/* LOADED ATMS – DESKTOP TABLE */}
-          <div className="bg-white rounded shadow p-4">
-            <h3 className="font-semibold mb-3">
-              Loaded ATMs ({loadedSites.length}/{routeSites.length})
-            </h3>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border">
+        <thead className="bg-slate-100">
+          <tr>
+            <th className="border p-2 text-left sticky left-0 bg-slate-100 z-10">
+              ATM
+            </th>
+            {DENOMS.map((d) => (
+              <th key={d} className="border p-2 text-right">
+                ₹{d}
+              </th>
+            ))}
+          </tr>
+        </thead>
 
-            {/* Desktop table */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-sm border">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="border p-2 text-left">ATM</th>
-                    {DENOMS.map(d => (
-                      <th key={d} className="border p-2 text-center">
-                        ₹{d}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadedBySite.map(s => (
-                    <tr key={s.site_id}>
-                      <td className="border p-2 font-medium">
-                        {formatSite(s.site)}
-                      </td>
-                      {DENOMS.map(d => (
-                        <td key={d} className="border p-2 text-center">
-                          {s.denoms[d] || 0}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <tbody>
+          {loadedBySite.map((row) => (
+            <tr key={row.site_id}>
+              <td className="border p-2 sticky left-0 bg-white z-10">
+                {formatSite(row.site)}
+              </td>
 
-            {/* Mobile cards */}
+              {DENOMS.map((d) => (
+                <td
+                  key={d}
+                  className="border p-2 text-right font-medium"
+                >
+                  {row.denoms[d] || 0}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
+
+
+          {/* MOBILE: Denomination cards (unchanged) */}
+          {denomSummary && (
             <div className="sm:hidden space-y-2">
-              {loadedBySite.map(s => (
-                <div key={s.site_id} className="border rounded p-3">
-                  <div className="font-semibold mb-1">
-                    {formatSite(s.site)}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    {DENOMS.map(d => (
-                      <div key={d}>
-                        ₹{d}: {s.denoms[d] || 0}
-                      </div>
-                    ))}
-                  </div>
+              {DENOMS.map(d => (
+                <div key={d} className="border rounded p-2 text-sm bg-white shadow">
+                  <div className="font-semibold">₹{d}</div>
+                  Picked {denomSummary.picked[d]} | Loaded {denomSummary.loaded[d]} |
+                  Adjusted {denomSummary.adjusted[d]} | In Hand{" "}
+                  <span className="font-semibold">{denomSummary.inHand[d]}</span>
                 </div>
               ))}
             </div>
-          </div>
+          )}
 
-          {/* PENDING ATMS */}
+          {/* Pending ATMs */}
           {pendingSites.length > 0 && (
             <div className="bg-white rounded shadow p-4">
               <h3 className="font-semibold mb-2">Pending ATMs</h3>
@@ -309,14 +292,10 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* STICKY PRINT */}
-          <div className="fixed bottom-0 left-0 right-0 sm:hidden bg-white border-t shadow p-3">
-            <button
-              onClick={() => window.print()}
-              className="w-full bg-slate-700 text-white py-2 rounded font-medium"
-            >
-              🖨️ Save / Print PDF
-            </button>
+          {/* Mobile Sticky */}
+          <div className="fixed bottom-0 left-0 right-0 sm:hidden bg-white border-t p-3 flex gap-2">
+            <button onClick={exportCSV} className="w-1/2 btn-secondary">CSV</button>
+            <button onClick={() => window.print()} className="w-1/2 btn-primary">Print</button>
           </div>
         </div>
       )}
@@ -324,15 +303,7 @@ export default function Dashboard() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: "warn" | "ok";
-}) {
+function Stat({ label, value, highlight }: any) {
   return (
     <div
       className={`rounded p-3 text-center ${
@@ -344,7 +315,7 @@ function Stat({
       }`}
     >
       <div className="font-bold text-lg">{value}</div>
-      <div className="text-xs text-slate-700">{label}</div>
+      <div className="text-xs">{label}</div>
     </div>
   );
 }
