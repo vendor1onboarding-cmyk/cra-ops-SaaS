@@ -20,16 +20,17 @@ export default function Dashboard() {
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [loads, setLoads] = useState<any[]>([]);
   const [pickups, setPickups] = useState<any[]>([]);
+  const [adjustments, setAdjustments] = useState<any[]>([]);
+
   const [cashUtil, setCashUtil] = useState<any>(null);
   const [denomSummary, setDenomSummary] = useState<any>(null);
+  const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
 
-  const [kpiOpen, setKpiOpen] = useState(true); // KPI COLLAPSE
+  const [kpiOpen, setKpiOpen] = useState(true);
 
   useEffect(() => {
     if (!profile) return;
-    profile.role === "custodian"
-      ? loadCustodianDashboard()
-      : loadAdminDashboard();
+    if (profile.role === "custodian") loadCustodianDashboard();
   }, [profile]);
 
   async function loadCustodianDashboard() {
@@ -51,7 +52,7 @@ export default function Dashboard() {
 
     setAssignment(assign);
 
-    const [rs, ls, cps] = await Promise.all([
+    const [rs, ls, cps, adj] = await Promise.all([
       supabase
         .from("route_sites")
         .select("*, site:site_id(bank_name,address)")
@@ -64,42 +65,92 @@ export default function Dashboard() {
         .from("cash_pickups")
         .select("*")
         .eq("assignment_id", assign.id),
+      supabase
+        .from("atm_cash_adjustments")
+        .select("*")
+        .eq("assignment_id", assign.id),
     ]);
 
     setRouteSites(rs.data || []);
     setLoads(ls.data || []);
     setPickups(cps.data || []);
+    setAdjustments(adj.data || []);
 
-    computeCash(cps.data || [], ls.data || []);
-    computeDenoms(cps.data || [], ls.data || []);
+    computeCash(cps.data || [], ls.data || [], adj.data || []);
+    computeDenoms(cps.data || [], ls.data || [], adj.data || []);
+    computeLoadedBySite(rs.data || [], ls.data || []);
+
     setLoading(false);
   }
 
-  async function loadAdminDashboard() {
-    setLoading(false); // unchanged admin logic
-  }
-
-  function computeCash(pickups: any[], loads: any[]) {
+  function computeCash(pickups: any[], loads: any[], adjustments: any[]) {
     const picked = pickups.reduce((s, p) => s + (p.total_amount || 0), 0);
+
     const loaded = loads.reduce(
       (s, l) =>
         s +
-        DENOMS.reduce((ds, d) => ds + (l[`denom_${d}`] || 0) * d, 0),
+        DENOMS.reduce(
+          (ds, d) => ds + (l[`denom_${d}`] || 0) * d,
+          0
+        ),
       0
     );
-    setCashUtil({ picked, loaded, inHand: picked - loaded });
+
+    const adjusted = adjustments.reduce(
+      (s, a) =>
+        s +
+        DENOMS.reduce(
+          (ds, d) => ds + (a[`denom_${d}`] || 0) * d,
+          0
+        ),
+      0
+    );
+
+    setCashUtil({
+      picked,
+      loaded,
+      adjusted,
+      inHand: picked - loaded + adjusted,
+    });
   }
 
-  function computeDenoms(pickups: any[], loads: any[]) {
+  function computeDenoms(pickups: any[], loads: any[], adjustments: any[]) {
     const picked: any = {};
     const loaded: any = {};
+    const adjusted: any = {};
     const inHand: any = {};
+
     DENOMS.forEach(d => {
       picked[d] = pickups.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0);
       loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
-      inHand[d] = picked[d] - loaded[d];
+      adjusted[d] = adjustments.reduce(
+        (s, a) => s + (a[`denom_${d}`] || 0),
+        0
+      );
+      inHand[d] = picked[d] - loaded[d] + adjusted[d];
     });
-    setDenomSummary({ picked, loaded, inHand });
+
+    setDenomSummary({ picked, loaded, adjusted, inHand });
+  }
+
+  function computeLoadedBySite(routeSites: any[], loads: any[]) {
+    const map: any = {};
+    loads.forEach(l => {
+      if (!map[l.site_id]) {
+        map[l.site_id] = { site_id: l.site_id, denoms: {} };
+      }
+      DENOMS.forEach(d => {
+        map[l.site_id].denoms[d] =
+          (map[l.site_id].denoms[d] || 0) + (l[`denom_${d}`] || 0);
+      });
+    });
+
+    setLoadedBySite(
+      Object.values(map).map((x: any) => ({
+        ...x,
+        site: routeSites.find(r => r.site_id === x.site_id)?.site,
+      }))
+    );
   }
 
   const loadedSiteIds = new Set(loads.map(l => l.site_id));
@@ -111,12 +162,11 @@ export default function Dashboard() {
       {loading && <div className="text-center text-sm">Loading…</div>}
 
       {!loading && profile?.role === "custodian" && assignment && (
-        <div className="space-y-6 pb-20 px-1">
+        <div className="space-y-6 pb-24 px-1">
 
-          {/* HEADER */}
           <h2 className="text-lg font-semibold">Custodian Dashboard – Today</h2>
 
-          {/* COLLAPSIBLE KPI BAR */}
+          {/* KPI BAR */}
           <div className="bg-white rounded shadow">
             <button
               onClick={() => setKpiOpen(!kpiOpen)}
@@ -127,50 +177,93 @@ export default function Dashboard() {
             </button>
 
             {kpiOpen && cashUtil && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-4">
                 <Stat label="Cash Picked" value={`₹${cashUtil.picked}`} />
                 <Stat label="Cash Loaded" value={`₹${cashUtil.loaded}`} />
-                <Stat label="Cash In Hand" value={`₹${cashUtil.inHand}`} />
+                <Stat label="Cash Adjusted" value={`₹${cashUtil.adjusted}`} />
+                <Stat
+                  label="Cash In Hand"
+                  value={`₹${cashUtil.inHand}`}
+                  highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
+                />
               </div>
             )}
           </div>
 
-          {/* DENOMINATION – MOBILE ACCORDION */}
+          {/* DENOMINATION CASH */}
           {denomSummary && (
-            <div className="bg-white rounded shadow">
-              <details open className="sm:hidden">
-                <summary className="p-3 font-semibold">
-                  Denomination-wise Cash
-                </summary>
-                <div className="p-3 space-y-2 text-sm">
-                  {DENOMS.map(d => (
-                    <div key={d} className="border rounded p-2">
-                      <div className="font-semibold">₹{d}</div>
-                      <div className="text-xs">
-                        Picked: {denomSummary.picked[d]} | Loaded:{" "}
-                        {denomSummary.loaded[d]} | In Hand:{" "}
-                        {denomSummary.inHand[d]}
-                      </div>
+            <div className="bg-white rounded shadow p-4">
+              <h3 className="font-semibold mb-3">
+                Denomination-wise Cash Position
+              </h3>
+
+              <div className="hidden sm:block">
+                <table className="w-full text-sm border">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className="border p-2">Denom</th>
+                      <th className="border p-2">Picked</th>
+                      <th className="border p-2">Loaded</th>
+                      <th className="border p-2">Adjusted</th>
+                      <th className="border p-2">In Hand</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DENOMS.map(d => (
+                      <tr key={d}>
+                        <td className="border p-2">₹{d}</td>
+                        <td className="border p-2">{denomSummary.picked[d]}</td>
+                        <td className="border p-2">{denomSummary.loaded[d]}</td>
+                        <td className="border p-2">{denomSummary.adjusted[d]}</td>
+                        <td className="border p-2 font-semibold">
+                          {denomSummary.inHand[d]}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="sm:hidden space-y-2">
+                {DENOMS.map(d => (
+                  <div key={d} className="border rounded p-2 text-sm">
+                    <div className="font-semibold">₹{d}</div>
+                    <div className="text-xs">
+                      Picked: {denomSummary.picked[d]} | Loaded:{" "}
+                      {denomSummary.loaded[d]} | Adjusted:{" "}
+                      {denomSummary.adjusted[d]} | In Hand:{" "}
+                      {denomSummary.inHand[d]}
                     </div>
-                  ))}
-                </div>
-              </details>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
-          {/* LOADED ATMs */}
+          {/* LOADED ATMS – DENOM WISE */}
           <div className="bg-white rounded shadow p-4">
-            <h3 className="font-semibold mb-2">
+            <h3 className="font-semibold mb-3">
               Loaded ATMs ({loadedSites.length}/{routeSites.length})
             </h3>
-            {loadedSites.map(rs => (
-              <div key={rs.id} className="border rounded p-2 text-sm mb-1">
-                {formatSite(rs.site)}
+
+            {loadedBySite.map((s: any) => (
+              <div key={s.site_id} className="border rounded p-3 mb-2">
+                <div className="font-semibold mb-1">
+                  {formatSite(s.site)}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  {DENOMS.map(d => (
+                    <div key={d}>
+                      ₹{d}: {s.denoms[d] || 0}
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
 
-          {/* PENDING ATMs */}
+          {/* PENDING ATMS */}
           {pendingSites.length > 0 && (
             <div className="bg-white rounded shadow p-4">
               <h3 className="font-semibold mb-2">Pending ATMs</h3>
@@ -182,7 +275,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* STICKY MOBILE PRINT BAR */}
+          {/* STICKY PRINT */}
           <div className="fixed bottom-0 left-0 right-0 sm:hidden bg-white border-t shadow p-3">
             <button
               onClick={() => window.print()}
@@ -197,11 +290,27 @@ export default function Dashboard() {
   );
 }
 
-function Stat({ label, value }: any) {
+function Stat({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: "warn" | "ok";
+}) {
   return (
-    <div className="bg-slate-50 rounded p-3 text-center">
+    <div
+      className={`rounded p-3 text-center ${
+        highlight === "warn"
+          ? "bg-yellow-100"
+          : highlight === "ok"
+          ? "bg-green-100"
+          : "bg-slate-50"
+      }`}
+    >
       <div className="font-bold text-lg">{value}</div>
-      <div className="text-xs text-slate-600">{label}</div>
+      <div className="text-xs text-slate-700">{label}</div>
     </div>
   );
 }
