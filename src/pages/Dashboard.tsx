@@ -183,7 +183,7 @@ export default function Dashboard() {
       {loading && <div className="text-center text-sm">Loading…</div>}
 
       {!loading && assignment && (
-        <div className="space-y-6 pb-28 px-2 max-w-full overflow-x-hidden">
+        <div className="space-y-3 pb-28 px-2 max-w-full overflow-x-hidden">
           <div className="flex justify-between items-center">
             <h2 className="text-lg font-semibold">
               Custodian Dashboard – Today ({loadedSiteIds.size}/{routeSites.length} ATMs Loaded)

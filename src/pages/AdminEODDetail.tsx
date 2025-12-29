@@ -171,7 +171,7 @@ export default function AdminEODDetail() {
 
   return (
     <AppLayout>
-      <div className="max-w-5xl mx-auto space-y-6 text-sm">
+      <div className="max-w-5xl mx-auto space-y-3 text-sm">
         <h2 className="text-lg font-semibold text-primary">
           EOD Detail – Assignment #{assignment.id}
         </h2>
