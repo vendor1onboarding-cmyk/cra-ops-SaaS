@@ -152,9 +152,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <NavLinks />
         </nav>
 
-        <main className="flex-1 p-4 md:p-6 bg-slate-100">
-          {children}
-        </main>
+        <main className="flex-1 bg-slate-100">
+  <div className="mx-auto w-full max-w-6xl px-3 py-3 sm:px-4 sm:py-4">
+    {children}
+  </div>
+</main>
+
       </div>
 
       {/* MOBILE DRAWER */}

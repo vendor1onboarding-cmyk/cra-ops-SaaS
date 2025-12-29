@@ -88,26 +88,26 @@ export default function Dashboard() {
 
     setCashUtil({
       picked,
-      loaded,
       adjusted,
+	  loaded,
       inHand: picked - loaded + adjusted,
     });
   }
 
   function computeDenoms(pickups: any[], loads: any[], adjustments: any[]) {
     const picked: any = {};
-    const loaded: any = {};
     const adjusted: any = {};
+	const loaded: any = {};
     const inHand: any = {};
 
     DENOMS.forEach(d => {
       picked[d] = pickups.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0);
-      loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
       adjusted[d] = adjustments.reduce((s, a) => s + (a[`denom_${d}`] || 0), 0);
+	  loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
       inHand[d] = picked[d] - loaded[d] + adjusted[d];
     });
 
-    setDenomSummary({ picked, loaded, adjusted, inHand });
+    setDenomSummary({ picked, adjusted, loaded, inHand });
   }
 
   function computeLoadedBySite(routeSites: any[], loads: any[]) {
@@ -150,6 +150,36 @@ export default function Dashboard() {
 
   return (
     <AppLayout>
+	
+		{/* PRINT HEADER WITH LOGO */}
+<div className="print-only mb-4 border-b pb-3">
+  <div className="flex justify-between items-start">
+    <div className="flex items-center gap-3">
+      {/* Bank Logo */}
+      <img
+        src="/bank-logo.png"
+        alt="Bank Logo"
+        className="h-10 w-auto"
+      />
+
+      <div>
+        <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
+        <p className="text-xs text-slate-600">
+          Cash Replenishment & ATM Operations
+        </p>
+      </div>
+    </div>
+
+    <div className="text-right text-xs">
+      <p className="font-semibold">Daily Cash Operations Report</p>
+      <p>Date: {new Date().toLocaleDateString("en-IN")}</p>
+      {profile?.full_name && (
+        <p>Custodian: {profile.full_name}</p>
+      )}
+    </div>
+  </div>
+</div>
+
       {loading && <div className="text-center text-sm">Loading…</div>}
 
       {!loading && assignment && (
@@ -176,9 +206,9 @@ export default function Dashboard() {
             {kpiOpen && cashUtil && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
                 <Stat label="Picked" value={`₹${cashUtil.picked}`} />
-                <Stat label="Loaded" value={`₹${cashUtil.loaded}`} />
                 <Stat label="Adjusted" value={`₹${cashUtil.adjusted}`} />
-                <Stat
+				<Stat label="Loaded" value={`₹${cashUtil.loaded}`} />
+                 <Stat
                   label="In Hand"
                   value={`₹${cashUtil.inHand}`}
                   highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
@@ -197,8 +227,8 @@ export default function Dashboard() {
                     <tr>
                       <th className="border p-2">₹</th>
                       <th className="border p-2">Picked</th>
-                      <th className="border p-2">Loaded</th>
                       <th className="border p-2">Adjusted</th>
+					  <th className="border p-2">Loaded</th>
                       <th className="border p-2">In Hand</th>
                     </tr>
                   </thead>
@@ -207,8 +237,8 @@ export default function Dashboard() {
                       <tr key={d}>
                         <td className="border p-2">₹{d}</td>
                         <td className="border p-2">{denomSummary.picked[d]}</td>
-                        <td className="border p-2">{denomSummary.loaded[d]}</td>
                         <td className="border p-2">{denomSummary.adjusted[d]}</td>
+						<td className="border p-2">{denomSummary.loaded[d]}</td>
                         <td className="border p-2 font-semibold">
                           {denomSummary.inHand[d]}
                         </td>
@@ -266,6 +296,7 @@ export default function Dashboard() {
 )}
 
 
+
           {/* MOBILE: Denomination cards (unchanged) */}
           {denomSummary && (
             <div className="sm:hidden space-y-2">
@@ -298,7 +329,30 @@ export default function Dashboard() {
             <button onClick={() => window.print()} className="w-1/2 btn-primary">Print</button>
           </div>
         </div>
+		
       )}
+	  {/* PRINT FOOTER – SIGNATURES */}
+<div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
+  <div className="grid grid-cols-2 gap-12">
+    <div>
+      <p className="font-semibold">Custodian Signature</p>
+      <div className="mt-6 border-b w-48"></div>
+      <p className="mt-1">Name & Date</p>
+    </div>
+
+    <div className="text-right">
+      <p className="font-semibold">Supervisor / Bank Officer</p>
+      <div className="mt-6 border-b w-48 ml-auto"></div>
+      <p className="mt-1">Name, Seal & Date</p>
+    </div>
+  </div>
+
+  <p className="mt-6 text-[10px] text-slate-500">
+    This is a system-generated report from Sruthi CRA Ops.  
+    Any discrepancy must be reported within RBI-prescribed timelines.
+  </p>
+</div>
+
     </AppLayout>
   );
 }
@@ -316,6 +370,7 @@ function Stat({ label, value, highlight }: any) {
     >
       <div className="font-bold text-lg">{value}</div>
       <div className="text-xs">{label}</div>
+	  
     </div>
   );
 }

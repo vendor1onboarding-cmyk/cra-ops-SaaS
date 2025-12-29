@@ -132,4 +132,98 @@ button {
   details {
     page-break-inside: avoid;
   }
+  .print-only {
+    display: block;
+  }
+}
+
+/* ===== PRINT VISIBILITY CONTROL ===== */
+.print-only {
+  display: none !important;
+}
+
+.no-print {
+  display: block;
+}
+
+@media print {
+  .print-only {
+    display: block !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+}
+
+@media print {
+  @page {
+    margin: 20mm;
+  }
+
+  body::after {
+    counter-increment: page;
+    content: "Page " counter(page);
+    position: fixed;
+    bottom: 10mm;
+    right: 15mm;
+    font-size: 10px;
+    color: #475569;
+  }
+}
+/* ===== FORM DENSITY NORMALIZATION ===== */
+
+/* Reduce excessive vertical spacing */
+.form-section {
+  margin-bottom: 0.75rem;
+}
+
+.form-grid {
+  gap: 0.75rem;
+}
+
+/* Inputs */
+input,
+select,
+textarea {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+/* Labels */
+label {
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+}
+
+/* Cards */
+.card {
+  padding: 0.75rem;
+}
+
+/* Tables */
+table th,
+table td {
+  padding: 0.4rem 0.5rem;
+}
+
+/* Buttons */
+button {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+/* Mobile tightening */
+@media (max-width: 640px) {
+  .space-y-6 > * + * {
+    margin-top: 0.75rem !important;
+  }
+
+  .space-y-4 > * + * {
+    margin-top: 0.5rem !important;
+  }
 }
