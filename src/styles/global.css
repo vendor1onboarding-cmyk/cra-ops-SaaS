@@ -227,3 +227,56 @@ button {
     margin-top: 0.5rem !important;
   }
 }
+/* ===== STANDARD FORM LAYOUT ===== */
+
+.form-container {
+  @apply bg-white rounded-lg shadow-sm border border-slate-200;
+}
+
+.form-header {
+  @apply px-4 py-3 border-b border-slate-200;
+}
+
+.form-title {
+  @apply text-base font-semibold text-slate-800;
+}
+
+.form-subtitle {
+  @apply text-xs text-slate-500 mt-0.5;
+}
+
+.form-body {
+  @apply px-4 py-3 space-y-3;
+}
+
+.form-footer {
+  @apply px-4 py-3 border-t border-slate-200 flex justify-end gap-2;
+}
+
+/* Inputs */
+.form-field label {
+  @apply block text-xs font-medium text-slate-600 mb-1;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  @apply w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm
+         focus:outline-none focus:ring-2 focus:ring-primary;
+}
+
+/* Compact buttons */
+.btn-primary {
+  @apply bg-primary text-white text-sm px-4 py-1.5 rounded-md hover:bg-primary-light;
+}
+
+.btn-secondary {
+  @apply bg-slate-100 text-slate-700 text-sm px-4 py-1.5 rounded-md hover:bg-slate-200;
+}
+
+/* Mobile tightening */
+@media (max-width: 640px) {
+  .form-body {
+    @apply space-y-2;
+  }
+}

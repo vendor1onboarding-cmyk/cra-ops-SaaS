@@ -57,7 +57,6 @@ export default function ATMReplenishment() {
   const selectedSite = sites.find((s) => s.id === selectedSiteId);
 
   const [timeIn, setTimeIn] = useState<string | null>(null);
-
   const [remarks, setRemarks] = useState("");
 
   const [denoms, setDenoms] = useState({
@@ -168,19 +167,19 @@ export default function ATMReplenishment() {
       denoms.denom_2000;
 
     if (totalNotes === 0) {
-      setError("At least one denomination must be entered.");
+      setError("Enter at least one denomination.");
       setSaving(false);
       return;
     }
 
     if (!timeIn) {
-      setError("Time In not captured. Please reselect the site.");
+      setError("Time In not captured.");
       setSaving(false);
       return;
     }
 
     if (geoMode === "SOFT" && geoStatus !== "verified" && !photo) {
-      setError("GPS validation failed. ATM photo is mandatory.");
+      setError("ATM photo is required due to GPS mismatch.");
       setSaving(false);
       return;
     }
@@ -224,57 +223,59 @@ export default function ATMReplenishment() {
       return;
     }
 
-    /* -------- Reset Form -------- */
-
+    /* Reset form */
     setSelectedSiteId(null);
     setTimeIn(null);
     setRemarks("");
-    setDenoms({
-      denom_100: 0,
-      denom_200: 0,
-      denom_500: 0,
-      denom_2000: 0,
-    });
+    setDenoms({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
     setGeoStatus("unknown");
     setGeoMessage(null);
     setGeoDistance(null);
     setLoadLat(null);
     setLoadLng(null);
     setPhoto(null);
-    setError(null);
+    setSaving(false);
 
     alert("ATM Replenishment saved successfully.");
-    setSaving(false);
   }
 
   /* -------- UI -------- */
 
   return (
     <AppLayout>
-      <div className="max-w-xl mx-auto space-y-4">
-        <h2 className="text-xl font-semibold text-primary">
+      <div className="max-w-xl mx-auto bg-white rounded-lg shadow p-4 space-y-3">
+        <h2 className="text-lg font-semibold text-primary">
           ATM Replenishment
         </h2>
 
         {geoMessage && (
-          <div className="p-2 bg-yellow-100 text-sm rounded">
+          <div
+            className={`text-sm rounded px-3 py-2 ${
+              geoStatus === "verified"
+                ? "bg-green-100 text-green-800"
+                : "bg-yellow-100 text-yellow-800"
+            }`}
+          >
             {geoMessage}
           </div>
         )}
 
         <div>
-          <label className="text-sm">Select ATM Site</label>
+          <label className="text-sm font-medium text-slate-700">
+            ATM Site
+          </label>
           <select
             className="w-full border rounded px-2 py-1 text-sm"
             value={selectedSiteId ?? ""}
             onChange={(e) => {
-              const siteId = Number(e.target.value);
-              setSelectedSiteId(siteId);
-              if (siteId) setTimeIn(toIST());
-              else setTimeIn(null);
+              const id = Number(e.target.value);
+              setSelectedSiteId(id);
+              setTimeIn(id ? toIST() : null);
+              setGeoStatus("unknown");
+              setGeoMessage(null);
             }}
           >
-            <option value="">-- Select ATM --</option>
+            <option value="">Select ATM</option>
             {sites.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.bank_name} – {s.address}
@@ -286,14 +287,16 @@ export default function ATMReplenishment() {
         <button
           onClick={handleAcquireGPS}
           disabled={!selectedSiteId}
-          className="px-3 py-1 bg-primary text-white rounded text-sm"
+          className="w-full bg-primary text-white py-1.5 rounded text-sm disabled:opacity-50"
         >
           Acquire GPS Location
         </button>
 
         {(geoStatus === "mismatch" || geoStatus === "no_gps") && (
           <div>
-            <label className="text-sm">ATM Photo (Required)</label>
+            <label className="text-sm font-medium text-slate-700">
+              ATM Photo (Required)
+            </label>
             <input
               type="file"
               accept="image/*"
@@ -303,19 +306,12 @@ export default function ATMReplenishment() {
           </div>
         )}
 
-        <div>
-          <label className="text-sm">Remarks</label>
-          <textarea
-            className="w-full border rounded px-2 py-1 text-sm"
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-          />
-        </div>
-
         <div className="grid grid-cols-2 gap-2">
           {(["100", "200", "500", "2000"] as const).map((d) => (
             <div key={d}>
-              <label className="text-sm">₹{d}</label>
+              <label className="text-sm font-medium text-slate-700">
+                ₹{d}
+              </label>
               <input
                 type="number"
                 min={0}
@@ -332,12 +328,24 @@ export default function ATMReplenishment() {
           ))}
         </div>
 
+        <div>
+          <label className="text-sm font-medium text-slate-700">
+            Remarks
+          </label>
+          <textarea
+            className="w-full border rounded px-2 py-1 text-sm"
+            rows={2}
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+          />
+        </div>
+
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <button
           onClick={handleSave}
           disabled={saving}
-          className="w-full py-2 bg-green-600 text-white rounded text-sm"
+          className="w-full bg-green-600 text-white py-2 rounded text-sm disabled:opacity-50"
         >
           {saving ? "Saving…" : "Save ATM Replenishment"}
         </button>
