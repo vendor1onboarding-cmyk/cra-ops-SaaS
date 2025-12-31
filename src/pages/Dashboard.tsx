@@ -30,6 +30,8 @@ export default function Dashboard() {
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
 
+
+
   useEffect(() => {
     if (!profile || profile.role !== "custodian") return;
     loadDashboard();
@@ -162,6 +164,13 @@ export default function Dashboard() {
 
   const loadedSiteIds = new Set(loads.map(l => l.site_id));
   const pendingSites = routeSites.filter(r => !loadedSiteIds.has(r.site_id));
+  
+  // ATM completion calculation
+const totalATMs = routeSites.length;
+const loadedATMs = loadedBySite.length;
+const completionPct =
+  totalATMs > 0 ? Math.round((loadedATMs / totalATMs) * 100) : 0;
+
 
   return (
     <AppLayout>
@@ -192,6 +201,33 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+		  
+		  {/* ATM Completion Progress */}
+{totalATMs > 0 && (
+  <div className="bg-white rounded shadow p-4 mb-4">
+    <div className="flex justify-between text-sm mb-2">
+      <span className="font-semibold">ATMs Loaded Today</span>
+      <span className="text-slate-600">
+        {loadedATMs} / {totalATMs} ({completionPct}%)
+      </span>
+    </div>
+
+    <div className="w-full h-3 bg-slate-200 rounded overflow-hidden">
+      <div
+        className={`h-3 rounded transition-all ${
+          completionPct === 100
+            ? "bg-green-600"
+            : completionPct >= 70
+            ? "bg-blue-600"
+            : "bg-orange-500"
+        }`}
+        style={{ width: `${completionPct}%` }}
+      />
+    </div>
+  </div>
+)}
+
+
 
           {/* DENOMINATION-WISE CASH POSITION */}
           {denomSummary && (
@@ -250,6 +286,62 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+		  
+		  {/* MOBILE: Loaded ATMs – Denomination wise */}
+{loadedBySite.length > 0 && (
+  <div className="sm:hidden bg-white rounded shadow p-4">
+    <h3 className="font-semibold mb-3">
+      Loaded ATMs – Denomination Details
+    </h3>
+
+    <div className="space-y-3">
+      {loadedBySite.map(row => (
+        <div
+          key={row.site_id}
+          className="border rounded-lg p-3 text-sm"
+        >
+          <div className="font-semibold mb-2 text-slate-800">
+            {formatSite(row.site)}
+          </div>
+
+          {/* Denomination rows */}
+          <div className="space-y-1">
+            {DENOMS.map(d => (
+              <div
+                key={d}
+                className="flex justify-between text-xs"
+              >
+                <span>₹{d}</span>
+                <span>
+                  {row.denoms[d] || 0} × ₹{d} = ₹
+                  {denomValue(row.denoms[d] || 0, d)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Totals */}
+          <div className="border-t mt-2 pt-2 text-xs space-y-0.5">
+            <div>
+              Planned: <span className="font-medium">₹{row.plannedValue}</span>
+            </div>
+            <div>
+              Loaded: <span className="font-medium">₹{row.loadedValue}</span>
+            </div>
+            <div
+              className={`font-semibold ${
+                row.variance !== 0 ? "text-red-600" : "text-green-700"
+              }`}
+            >
+              Variance: ₹{row.variance}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
 
           {/* Loaded ATMs */}
           {loadedBySite.length > 0 && (
@@ -297,6 +389,8 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+		  
+		
 
           {/* Pending ATMs */}
           {pendingSites.length > 0 && (
