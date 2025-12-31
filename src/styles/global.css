@@ -280,3 +280,12 @@ button {
     @apply space-y-2;
   }
 }
+
+@keyframes progressGrow {
+  from {
+    width: 0%;
+  }
+  to {
+    width: var(--final-width);
+  }
+}

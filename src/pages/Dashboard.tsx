@@ -29,6 +29,7 @@ export default function Dashboard() {
   const [denomSummary, setDenomSummary] = useState<any>(null);
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
+  const [showPending, setShowPending] = useState(false);
 
 
 
@@ -171,14 +172,66 @@ const loadedATMs = loadedBySite.length;
 const completionPct =
   totalATMs > 0 ? Math.round((loadedATMs / totalATMs) * 100) : 0;
 
+ function exportCSV() {
+    if (!loadedBySite.length) return;
 
+    let csv = "ATM,100,200,500,2000\n";
+    loadedBySite.forEach(s => {
+      csv += `"${formatSite(s.site)}",${DENOMS.map(d => s.denoms[d] || 0).join(",")}\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ATM_Load_Report.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <AppLayout>
+	
+			{/* PRINT HEADER WITH LOGO */}
+<div className="print-only mb-4 border-b pb-3">
+  <div className="flex justify-between items-start">
+    <div className="flex items-center gap-3">
+      {/* Bank Logo */}
+      <img
+        src="/bank-logo.png"
+        alt="Bank Logo"
+        className="h-10 w-auto"
+      />
+
+      <div>
+        <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
+        <p className="text-xs text-slate-600">
+          Cash Replenishment & ATM Operations
+        </p>
+      </div>
+    </div>
+
+    <div className="text-right text-xs">
+      <p className="font-semibold">Daily Cash Operations Report</p>
+      <p>Date: {new Date().toLocaleDateString("en-IN")}</p>
+      {profile?.full_name && (
+        <p>Custodian: {profile.full_name}</p>
+      )}
+    </div>
+  </div>
+</div>
       {loading && <div className="text-center text-sm">Loading…</div>}
 
       {!loading && assignment && (
         <div className="space-y-4 pb-24 px-2 max-w-full overflow-x-hidden">
-
+<div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold">
+              Custodian Dashboard – Today ({loadedSiteIds.size}/{routeSites.length} ATMs Loaded)
+            </h2>
+            <div className="hidden sm:flex gap-2">
+              <button onClick={exportCSV} className="btn-secondary">⬇ CSV</button>
+              <button onClick={() => window.print()} className="btn-primary">🖨 Print</button>
+            </div>
+          </div>
           {/* KPI */}
           <div className="bg-white rounded shadow">
             <button
@@ -214,15 +267,18 @@ const completionPct =
 
     <div className="w-full h-3 bg-slate-200 rounded overflow-hidden">
       <div
-        className={`h-3 rounded transition-all ${
-          completionPct === 100
-            ? "bg-green-600"
-            : completionPct >= 70
-            ? "bg-blue-600"
-            : "bg-orange-500"
-        }`}
-        style={{ width: `${completionPct}%` }}
-      />
+  className={`h-3 rounded transition-all duration-700 ease-out ${
+    completionPct === 100
+      ? "bg-green-600"
+      : completionPct >= 70
+      ? "bg-blue-600"
+      : "bg-orange-500"
+  }`}
+  style={{
+    width: `${completionPct}%`,
+    animation: "progressGrow 0.8s ease-out",
+  }}
+/>
     </div>
   </div>
 )}
@@ -394,17 +450,76 @@ const completionPct =
 
           {/* Pending ATMs */}
           {pendingSites.length > 0 && (
-            <div className="bg-white rounded shadow p-4">
-              <h3 className="font-semibold mb-2">Pending ATMs</h3>
-              {pendingSites.map(rs => (
-                <div key={rs.id} className="text-sm border-b py-1">
-                  {formatSite(rs.site)}
-                </div>
-              ))}
-            </div>
-          )}
+  <div className="bg-white rounded shadow p-4">
+    <button
+      onClick={() => setShowPending(!showPending)}
+      className="w-full flex justify-between items-center font-semibold text-sm"
+    >
+      <span>Pending ATMs</span>
+      <span className="text-xs text-slate-500">
+        {pendingSites.length} {showPending ? "▲" : "▼"}
+      </span>
+    </button>
+
+    {showPending && (
+      <div className="mt-3 space-y-2">
+        {pendingSites.map(rs => (
+          <div
+            key={rs.id}
+            className="text-sm border rounded px-3 py-2 bg-slate-50"
+          >
+            {formatSite(rs.site)}
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
+
         </div>
       )}
+	{/* Mobile Sticky CSV / Print Actions */}
+<div className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-white border-t shadow-md">
+  <div className="flex gap-3 px-4 py-3">
+    <button
+      onClick={exportCSV}
+      className="flex-1 rounded-lg border border-slate-300 bg-slate-100 py-2 text-sm font-semibold text-slate-700 active:scale-95 transition"
+    >
+      Export CSV
+    </button>
+
+    <button
+      onClick={() => window.print()}
+      className="flex-1 rounded-lg bg-primary py-2 text-sm font-semibold text-white active:scale-95 transition"
+    >
+      Print PDF
+    </button>
+  </div>
+</div>
+  
+	  
+	  	  {/* PRINT FOOTER – SIGNATURES */}
+<div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
+  <div className="grid grid-cols-2 gap-12">
+    <div>
+      <p className="font-semibold">Custodian Signature</p>
+      <div className="mt-6 border-b w-48"></div>
+      <p className="mt-1">Name & Date</p>
+    </div>
+
+    <div className="text-right">
+      <p className="font-semibold">Supervisor / Bank Officer</p>
+      <div className="mt-6 border-b w-48 ml-auto"></div>
+      <p className="mt-1">Name, Seal & Date</p>
+    </div>
+  </div>
+
+  <p className="mt-6 text-[10px] text-slate-500">
+    This is a system-generated report from Sruthi CRA Ops.  
+    Any discrepancy must be reported within RBI-prescribed timelines.
+  </p>
+</div>
+
     </AppLayout>
   );
 }
