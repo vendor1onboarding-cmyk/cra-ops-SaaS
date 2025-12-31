@@ -97,42 +97,48 @@ export default function ATMReplenishment() {
   /* ---------------- GPS ---------------- */
 
   async function acquireGPS() {
-    setGpsMsg("Acquiring GPS…");
-    setGpsStatus("unknown");
-    setPhoto(null);
+  setGpsMsg("Acquiring GPS signal… please wait");
+  setGpsStatus("unknown");
+  setDistance(null);
+  setLat(null);
+  setLng(null);
+  setPhoto(null); // reset photo on every retry
 
-    try {
-      const g = await getGPS();
-      setLat(g.lat);
-      setLng(g.lng);
+  try {
+    const g = await getGPS();
+    setLat(g.lat);
+    setLng(g.lng);
 
-      if (!site?.latitude || !site?.longitude) {
-        setGpsStatus("no_gps");
-        setGpsMsg("ATM GPS not configured");
-        return;
-      }
-
-      const d = distanceMeters(
-        g.lat,
-        g.lng,
-        Number(site.latitude),
-        Number(site.longitude)
-      );
-
-      setDistance(d);
-
-      if (d <= GPS_RADIUS_METERS) {
-        setGpsStatus("verified");
-        setGpsMsg(`GPS verified (${d.toFixed(1)} m)`);
-      } else {
-        setGpsStatus("mismatch");
-        setGpsMsg(`GPS mismatch (${d.toFixed(1)} m). Photo required.`);
-      }
-    } catch {
+    if (!site?.latitude || !site?.longitude) {
       setGpsStatus("no_gps");
-      setGpsMsg("Unable to get GPS. Photo required.");
+      setGpsMsg("ATM GPS not configured. Photo required.");
+      return;
     }
+
+    const d = distanceMeters(
+      g.lat,
+      g.lng,
+      Number(site.latitude),
+      Number(site.longitude)
+    );
+
+    setDistance(d);
+
+    if (d <= GPS_RADIUS_METERS) {
+      setGpsStatus("verified");
+      setGpsMsg(`GPS verified successfully (${d.toFixed(1)} m)`);
+    } else {
+      setGpsStatus("mismatch");
+      setGpsMsg(
+        `GPS mismatch (${d.toFixed(1)} m). Move closer to ATM and retry.`
+      );
+    }
+  } catch (err) {
+    setGpsStatus("no_gps");
+    setGpsMsg("Unable to fetch GPS. Ensure location is enabled.");
   }
+}
+
 
   /* ---------------- Amount Calculation ---------------- */
 
@@ -272,12 +278,14 @@ export default function ATMReplenishment() {
         </select>
 
         <button
-          onClick={acquireGPS}
-          disabled={!siteId}
-          className="w-full bg-primary text-white py-2 rounded text-sm"
-        >
-          Acquire GPS
-        </button>
+  type="button"
+  onClick={acquireGPS}
+  disabled={!siteId || saving}
+  className="w-full bg-primary text-white py-2 rounded text-sm flex items-center justify-center gap-2"
+>
+  📍 Acquire GPS Location
+</button>
+
 
         {(gpsStatus === "mismatch" || gpsStatus === "no_gps") && (
           <>
