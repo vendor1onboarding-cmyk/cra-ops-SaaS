@@ -30,13 +30,17 @@ export default function Dashboard() {
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
   const [showPending, setShowPending] = useState(false);
+const [travelKmToday, setTravelKmToday] = useState(0);
+const [travelAllowanceToday, setTravelAllowanceToday] = useState(0);
 
 
 
   useEffect(() => {
     if (!profile || profile.role !== "custodian") return;
     loadDashboard();
+	
   }, [profile]);
+
 
   async function loadDashboard() {
     setLoading(true);
@@ -67,6 +71,7 @@ export default function Dashboard() {
       supabase.from("atm_cash_adjustments").select("*").eq("assignment_id", assign.id),
       supabase.from("denomination_plans").select("*").eq("assignment_id", assign.id),
     ]);
+	
 
     setRouteSites(rs.data || []);
     setLoads(ls.data || []);
@@ -251,6 +256,18 @@ const completionPct =
                   value={`₹${cashUtil.inHand}`}
                   highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
                 />
+				<div className="bg-white rounded-xl shadow p-4 border-l-4 border-indigo-600">
+  <p className="text-xs text-slate-500 flex items-center gap-1">
+    🚗 Travel Today
+  </p>
+  <p className="text-lg font-semibold text-slate-800">
+    {travelKmToday} km
+  </p>
+  <p className="text-sm font-medium text-indigo-600">
+    ₹{travelAllowanceToday}
+  </p>
+</div>
+
               </div>
             )}
           </div>

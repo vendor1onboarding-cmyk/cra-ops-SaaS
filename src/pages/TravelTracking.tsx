@@ -10,7 +10,7 @@ export default function TravelTracking() {
 
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
   const [vehicleType, setVehicleType] = useState<VehicleType>("bike");
-  const [tracking, setTracking] = useState(false);
+  const [source, setSource] = useState<"gps" | "odometer">("gps");
 
   const [startGPS, setStartGPS] = useState<any>(null);
   const [endGPS, setEndGPS] = useState<any>(null);
@@ -19,10 +19,10 @@ export default function TravelTracking() {
   const [odoEnd, setOdoEnd] = useState<number | null>(null);
 
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
-  const [source, setSource] = useState<"gps" | "odometer">("gps");
+  const [allowance, setAllowance] = useState<number | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // --------------------------------------------------
   // Load today's assignment
@@ -30,11 +30,13 @@ export default function TravelTracking() {
   useEffect(() => {
     if (!profile) return;
 
+    const today = new Date().toISOString().slice(0, 10);
+
     supabase
       .from("assignments")
       .select("id")
       .eq("custodian_id", profile.id)
-      .eq("assignment_date", new Date().toISOString().slice(0, 10))
+      .eq("assignment_date", today)
       .single()
       .then(({ data }) => {
         if (data) setAssignmentId(data.id);
@@ -42,7 +44,7 @@ export default function TravelTracking() {
   }, [profile]);
 
   // --------------------------------------------------
-  // GPS helpers
+  // GPS helper
   // --------------------------------------------------
   function acquireGPS(setter: Function) {
     navigator.geolocation.getCurrentPosition(
@@ -50,11 +52,11 @@ export default function TravelTracking() {
         setter({
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
-          time: new Date().toISOString()
+          time: new Date().toISOString(),
         });
       },
       () => {
-        setError("Unable to capture GPS. Switch to odometer mode.");
+        setError("GPS unavailable. Please use odometer entry.");
         setSource("odometer");
       },
       { enableHighAccuracy: true, timeout: 15000 }
@@ -74,36 +76,32 @@ export default function TravelTracking() {
   }
 
   // --------------------------------------------------
-  // Start Travel
+  // Start / End travel
   // --------------------------------------------------
   function startTravel() {
     setError(null);
-    setTracking(true);
+    setStartGPS(null);
+    setEndGPS(null);
+    setDistanceKm(null);
+    setAllowance(null);
 
-    if (source === "gps") {
-      acquireGPS(setStartGPS);
-    }
+    if (source === "gps") acquireGPS(setStartGPS);
   }
 
-  // --------------------------------------------------
-  // End Travel
-  // --------------------------------------------------
   function endTravel() {
-    setError(null);
-
     if (source === "gps") {
       acquireGPS(setEndGPS);
-    } else if (source === "odometer") {
-      if (odoStart === null || odoEnd === null || odoEnd <= odoStart) {
+    } else {
+      if (!odoStart || !odoEnd || odoEnd <= odoStart) {
         setError("Invalid odometer readings.");
         return;
       }
-      setDistanceKm(odoEnd - odoStart);
+      setDistanceKm(Number((odoEnd - odoStart).toFixed(2)));
     }
   }
 
   // --------------------------------------------------
-  // Compute distance once GPS end captured
+  // Compute distance from GPS
   // --------------------------------------------------
   useEffect(() => {
     if (startGPS && endGPS && source === "gps") {
@@ -113,7 +111,25 @@ export default function TravelTracking() {
   }, [startGPS, endGPS, source]);
 
   // --------------------------------------------------
-  // Save travel log
+  // Compute allowance
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!distanceKm) return;
+
+    supabase
+      .from("vehicle_rates")
+      .select("rate_per_km")
+      .eq("vehicle_type", vehicleType)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setAllowance(Number((distanceKm * data.rate_per_km).toFixed(2)));
+        }
+      });
+  }, [distanceKm, vehicleType]);
+
+  // --------------------------------------------------
+  // Save travel
   // --------------------------------------------------
   async function saveTravel() {
     if (!assignmentId || distanceKm === null) {
@@ -124,19 +140,9 @@ export default function TravelTracking() {
     setSaving(true);
     setError(null);
 
-    const { data: rate } = await supabase
-      .from("vehicle_rates")
-      .select("rate_per_km")
-      .eq("vehicle_type", vehicleType)
-      .single();
-
-    const allowance = rate ? distanceKm * rate.rate_per_km : 0;
-
     const { error } = await supabase.from("travel_logs").insert({
       assignment_id: assignmentId,
       custodian_id: profile?.id,
-      vehicle_type: vehicleType,
-      source,
       start_time: startGPS?.time,
       end_time: endGPS?.time,
       gps_start_lat: startGPS?.lat,
@@ -145,13 +151,17 @@ export default function TravelTracking() {
       gps_end_lng: endGPS?.lng,
       odometer_start: odoStart,
       odometer_end: odoEnd,
-      distance_km: distanceKm,
-      allowance_amount: allowance
+      km_covered: distanceKm,
+      vehicle_type: vehicleType,
+      source,
+      allowance_amount: allowance,
+      status: "completed",
     });
 
     setSaving(false);
 
     if (error) {
+      console.error(error);
       setError("Failed to save travel log.");
       return;
     }
@@ -166,7 +176,7 @@ export default function TravelTracking() {
   return (
     <AppLayout>
       <div className="max-w-xl mx-auto space-y-4">
-        <h2 className="text-lg font-semibold">Travel Tracking</h2>
+        <h2 className="text-lg font-semibold">Travel Log</h2>
 
         <select
           className="w-full border rounded px-3 py-2"
@@ -179,18 +189,10 @@ export default function TravelTracking() {
         </select>
 
         <div className="flex gap-2">
-          <button
-            onClick={startTravel}
-            disabled={tracking}
-            className="btn-secondary w-1/2"
-          >
+          <button className="btn-secondary w-1/2" onClick={startTravel}>
             Start Travel
           </button>
-          <button
-            onClick={endTravel}
-            disabled={!tracking}
-            className="btn-secondary w-1/2"
-          >
+          <button className="btn-secondary w-1/2" onClick={endTravel}>
             End Travel
           </button>
         </div>
@@ -213,8 +215,11 @@ export default function TravelTracking() {
         )}
 
         {distanceKm !== null && (
-          <div className="p-3 bg-slate-100 rounded text-sm">
-            Distance: <b>{distanceKm} km</b>
+          <div className="bg-slate-100 rounded p-3 text-sm">
+            <div>Distance: <b>{distanceKm} km</b></div>
+            {allowance !== null && (
+              <div>Allowance: <b>₹{allowance}</b></div>
+            )}
           </div>
         )}
 
