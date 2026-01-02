@@ -12,6 +12,8 @@ import ATMExcessCashPage from "./pages/ATMExcessCash";
 import ATMCashAdjustmentPage from "./pages/ATMCashAdjustment";
 import TechnicalIssuesPage from "./pages/TechnicalIssues";
 import EODSummaryPage from "./pages/EODSummary";
+import TravelTrackingPage from "./pages/TravelTracking";
+
 
 import AdminApprovalsPage from "./pages/AdminApprovals";
 import AdminEODDetailPage from "./pages/AdminEODDetail";
@@ -114,6 +116,16 @@ export default function App() {
             </PrivateRoute>
           }
         />
+		
+		<Route
+  path="/travel-log"
+  element={
+    <PrivateRoute>
+      <TravelTrackingPage />
+    </PrivateRoute>
+  }
+/>
+
 
         {/* ----------------- ADMIN ROUTES ----------------- */}
         <Route
@@ -134,6 +146,8 @@ export default function App() {
             </RequireAdmin>
           }
         />
+		
+				
 		{/* ----------------- ADMIN ROUTES ASSIGNMENT----------------- */}
 		<Route
   path="/admin/route-assignment"

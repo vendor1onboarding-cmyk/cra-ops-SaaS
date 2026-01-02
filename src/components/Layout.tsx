@@ -11,11 +11,12 @@ const ICONS: Record<string, string> = {
   Denomination: "💰",
   "Cash Pickup": "🏦",
   "ATM Load": "🏧",
+  "Travel Log": "🚗", // ✅ NEW
   "ATM Excess Cash": "🧾💵",
   "ATM Cash Adjustment": "🔄💵",
   "Tech Issues": "⚠️",
   EOD: "🧾",
-  "Route Assignment": "🗺️",
+   "Route Assignment": "🗺️",
   "EOD Approvals": "✅",
 };
 
@@ -50,7 +51,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
 	{ to: "/atm-adjustment", label: "ATM Cash Adjustment" },
     { to: "/technical-issues", label: "Tech Issues" },
     { to: "/eod-summary", label: "EOD" },
-	
+	{ to: "/travel-log", label: "Travel Log" },
+
   ];
 
   if (profile?.role === "admin") {
