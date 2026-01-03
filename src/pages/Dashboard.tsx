@@ -30,8 +30,6 @@ export default function Dashboard() {
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
   const [showPending, setShowPending] = useState(false);
-const [travelKmToday, setTravelKmToday] = useState(0);
-const [travelAllowanceToday, setTravelAllowanceToday] = useState(0);
 
 const today = new Date().toISOString().slice(0, 10);
 const monthStart = new Date(
