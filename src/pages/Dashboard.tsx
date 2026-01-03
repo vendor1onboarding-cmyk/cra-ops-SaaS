@@ -33,11 +33,61 @@ export default function Dashboard() {
 const [travelKmToday, setTravelKmToday] = useState(0);
 const [travelAllowanceToday, setTravelAllowanceToday] = useState(0);
 
+const today = new Date().toISOString().slice(0, 10);
+const monthStart = new Date(
+  new Date().getFullYear(),
+  new Date().getMonth(),
+  1
+)
+  .toISOString()
+  .slice(0, 10);
+
+const [todayKm, setTodayKm] = useState(0);
+const [monthlyKm, setMonthlyKm] = useState(0);
 
 
   useEffect(() => {
     if (!profile || profile.role !== "custodian") return;
     loadDashboard();
+	async function loadTravelKPI() {
+  if (!profile) return;
+
+  // Today KM
+  const { data: todayLogs } = await supabase
+    .from("travel_logs")
+    .select("km_covered")
+    .eq("custodian_id", profile.id)
+    .eq("status", "completed")
+    .gte("start_time", `${today}T00:00:00`)
+    .lte("start_time", `${today}T23:59:59`);
+
+  const todayTotal =
+    todayLogs?.reduce(
+      (sum, r) => sum + (Number(r.km_covered) || 0),
+      0
+    ) || 0;
+
+  setTodayKm(todayTotal);
+
+  // Monthly KM
+  const { data: monthLogs } = await supabase
+    .from("travel_logs")
+    .select("km_covered")
+    .eq("custodian_id", profile.id)
+    .eq("status", "completed")
+    .gte("start_time", `${monthStart}T00:00:00`);
+
+  const monthTotal =
+    monthLogs?.reduce(
+      (sum, r) => sum + (Number(r.km_covered) || 0),
+      0
+    ) || 0;
+
+  setMonthlyKm(monthTotal);
+}
+
+loadTravelKPI();
+
 	
   }, [profile]);
 
@@ -256,17 +306,20 @@ const completionPct =
                   value={`₹${cashUtil.inHand}`}
                   highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
                 />
-				<div className="bg-white rounded-xl shadow p-4 border-l-4 border-indigo-600">
-  <p className="text-xs text-slate-500 flex items-center gap-1">
-    🚗 Travel Today
-  </p>
-  <p className="text-lg font-semibold text-slate-800">
-    {travelKmToday} km
-  </p>
-  <p className="text-sm font-medium text-indigo-600">
-    ₹{travelAllowanceToday}
-  </p>
-</div>
+				
+{profile?.role === "custodian" && (
+  <>
+    <div className="bg-white rounded-xl shadow p-4 border-l-4 border-indigo-600">
+      <div className="text-xs text-slate-500 flex items-center gap-1"> 🚗 Today KM</div>
+      <div className="text-lg font-semibold text-slate-800">{todayKm.toFixed(2)} km</div>
+    </div>
+
+    <div className="bg-white rounded-xl shadow p-4 border-l-4 border-indigo-600">
+      <div className="text-xs text-slate-500 flex items-center gap-1">🚗 This Month KM</div>
+      <div className="text-lg font-semibold text-slate-800">{monthlyKm.toFixed(2)} km</div>
+    </div>
+  </>
+)}
 
               </div>
             )}

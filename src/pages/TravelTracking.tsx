@@ -1,237 +1,283 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { AppLayout } from "../components/Layout";
 
-type VehicleType = "bike" | "car" | "van";
+type VehicleType = "bike" | "car" | "van" | "other";
 
 export default function TravelTracking() {
   const { profile } = useAuth();
 
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
-  const [vehicleType, setVehicleType] = useState<VehicleType>("bike");
-  const [source, setSource] = useState<"gps" | "odometer">("gps");
+  const [activeTravelId, setActiveTravelId] = useState<number | null>(null);
 
-  const [startGPS, setStartGPS] = useState<any>(null);
-  const [endGPS, setEndGPS] = useState<any>(null);
+  const [vehicleType, setVehicleType] = useState<VehicleType | "">("");
 
-  const [odoStart, setOdoStart] = useState<number | null>(null);
-  const [odoEnd, setOdoEnd] = useState<number | null>(null);
+  const [odometerStart, setOdometerStart] = useState("");
+  const [odometerEnd, setOdometerEnd] = useState("");
 
-  const [distanceKm, setDistanceKm] = useState<number | null>(null);
-  const [allowance, setAllowance] = useState<number | null>(null);
+  const [startLat, setStartLat] = useState<number | null>(null);
+  const [startLng, setStartLng] = useState<number | null>(null);
+  const [endLat, setEndLat] = useState<number | null>(null);
+  const [endLng, setEndLng] = useState<number | null>(null);
 
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
-  // --------------------------------------------------
-  // Load today's assignment
-  // --------------------------------------------------
+  /* ----------------------------------------
+     Load assignment + active travel
+  ---------------------------------------- */
   useEffect(() => {
     if (!profile) return;
 
-    const today = new Date().toISOString().slice(0, 10);
+    async function init() {
+      const { data: assignment } = await supabase
+        .from("assignments")
+        .select("id")
+        .eq("custodian_id", profile.id)
+        .eq("assignment_date", new Date().toISOString().slice(0, 10))
+        .in("status", ["open", "submitted"])
+        .order("id", { ascending: false })
+        .limit(1)
+        .single();
 
-    supabase
-      .from("assignments")
-      .select("id")
-      .eq("custodian_id", profile.id)
-      .eq("assignment_date", today)
-      .single()
-      .then(({ data }) => {
-        if (data) setAssignmentId(data.id);
-      });
+      if (!assignment) return;
+      setAssignmentId(assignment.id);
+
+      const { data: travel } = await supabase
+        .from("travel_logs")
+        .select("id, vehicle_type")
+        .eq("assignment_id", assignment.id)
+        .eq("custodian_id", profile.id)
+        .eq("status", "in_progress")
+        .limit(1)
+        .single();
+
+      if (travel) {
+        setActiveTravelId(travel.id);
+        setVehicleType(travel.vehicle_type as VehicleType);
+      }
+    }
+
+    init();
   }, [profile]);
 
-  // --------------------------------------------------
-  // GPS helper
-  // --------------------------------------------------
-  function acquireGPS(setter: Function) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setter({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          time: new Date().toISOString(),
-        });
-      },
-      () => {
-        setError("GPS unavailable. Please use odometer entry.");
-        setSource("odometer");
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
-  }
-
-  function haversineKm(a: any, b: any) {
-    const R = 6371;
-    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-    const x =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos((a.lat * Math.PI) / 180) *
-        Math.cos((b.lat * Math.PI) / 180) *
-        Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-  }
-
-  // --------------------------------------------------
-  // Start / End travel
-  // --------------------------------------------------
-  function startTravel() {
-    setError(null);
-    setStartGPS(null);
-    setEndGPS(null);
-    setDistanceKm(null);
-    setAllowance(null);
-
-    if (source === "gps") acquireGPS(setStartGPS);
-  }
-
-  function endTravel() {
-    if (source === "gps") {
-      acquireGPS(setEndGPS);
-    } else {
-      if (!odoStart || !odoEnd || odoEnd <= odoStart) {
-        setError("Invalid odometer readings.");
+  /* ----------------------------------------
+     GPS helper
+  ---------------------------------------- */
+  function acquireGPS(): Promise<{ lat: number; lng: number }> {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject("GPS not supported");
         return;
       }
-      setDistanceKm(Number((odoEnd - odoStart).toFixed(2)));
-    }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) =>
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          }),
+        () => reject("Unable to acquire GPS"),
+        { enableHighAccuracy: true, timeout: 15000 }
+      );
+    });
   }
 
-  // --------------------------------------------------
-  // Compute distance from GPS
-  // --------------------------------------------------
-  useEffect(() => {
-    if (startGPS && endGPS && source === "gps") {
-      const km = haversineKm(startGPS, endGPS);
-      setDistanceKm(Number(km.toFixed(2)));
+  /* ----------------------------------------
+     Start Travel
+  ---------------------------------------- */
+  async function startTravel() {
+    if (!assignmentId || !profile || !vehicleType) {
+      setMessage("Please select vehicle type before starting travel.");
+      return;
     }
-  }, [startGPS, endGPS, source]);
 
-  // --------------------------------------------------
-  // Compute allowance
-  // --------------------------------------------------
-  useEffect(() => {
-    if (!distanceKm) return;
+    setLoading(true);
+    setMessage(null);
 
-    supabase
+    try {
+      const gps = await acquireGPS();
+      setStartLat(gps.lat);
+      setStartLng(gps.lng);
+
+      const { data, error } = await supabase
+        .from("travel_logs")
+        .insert({
+          assignment_id: assignmentId,
+          custodian_id: profile.id,
+          vehicle_type: vehicleType,
+          start_time: new Date().toISOString(),
+          odometer_start: odometerStart || null,
+          gps_start_lat: gps.lat,
+          gps_start_lng: gps.lng,
+          status: "in_progress",
+        })
+        .select("id")
+        .single();
+
+      if (error) throw error;
+
+      setActiveTravelId(data.id);
+      setMessage("Travel started successfully.");
+    } catch {
+      setMessage("Failed to start travel. Please acquire GPS.");
+    }
+
+    setLoading(false);
+  }
+
+  /* ----------------------------------------
+     End Travel
+  ---------------------------------------- */
+  async function endTravel() {
+  if (!activeTravelId || !vehicleType) return;
+
+  setLoading(true);
+  setMessage(null);
+
+  try {
+    // 1️⃣ Acquire GPS
+    const gps = await acquireGPS();
+    setEndLat(gps.lat);
+    setEndLng(gps.lng);
+
+    // 2️⃣ Calculate KM
+    const kmCovered =
+      odometerStart && odometerEnd
+        ? Number(odometerEnd) - Number(odometerStart)
+        : null;
+
+    if (!kmCovered || kmCovered <= 0) {
+      throw new Error("Invalid KM covered");
+    }
+
+    // 3️⃣ Fetch vehicle rate (MASTER DATA)
+    const { data: rateRow, error: rateError } = await supabase
       .from("vehicle_rates")
       .select("rate_per_km")
       .eq("vehicle_type", vehicleType)
-      .single()
-      .then(({ data }) => {
-        if (data) {
-          setAllowance(Number((distanceKm * data.rate_per_km).toFixed(2)));
-        }
-      });
-  }, [distanceKm, vehicleType]);
+      .eq("active", true)
+      .order("effective_from", { ascending: false })
+      .limit(1)
+      .single();
 
-  // --------------------------------------------------
-  // Save travel
-  // --------------------------------------------------
-  async function saveTravel() {
-    if (!assignmentId || distanceKm === null) {
-      setError("Travel data incomplete.");
-      return;
+    if (rateError || !rateRow) {
+      throw new Error("Vehicle rate not configured");
     }
 
-    setSaving(true);
-    setError(null);
+    const ratePerKm = Number(rateRow.rate_per_km);
+    const allowanceAmount = kmCovered * ratePerKm;
 
-    const { error } = await supabase.from("travel_logs").insert({
-      assignment_id: assignmentId,
-      custodian_id: profile?.id,
-      start_time: startGPS?.time,
-      end_time: endGPS?.time,
-      gps_start_lat: startGPS?.lat,
-      gps_start_lng: startGPS?.lng,
-      gps_end_lat: endGPS?.lat,
-      gps_end_lng: endGPS?.lng,
-      odometer_start: odoStart,
-      odometer_end: odoEnd,
-      km_covered: distanceKm,
-      vehicle_type: vehicleType,
-      source,
-      allowance_amount: allowance,
-      status: "completed",
-    });
+    // 4️⃣ Update travel log (ATOMIC, AUDITABLE)
+    const { error } = await supabase
+      .from("travel_logs")
+      .update({
+        end_time: new Date().toISOString(),
+        odometer_end: odometerEnd || null,
+        km_covered: kmCovered,
+        rate_per_km: ratePerKm,
+        allowance_amount: allowanceAmount,
+        gps_end_lat: gps.lat,
+        gps_end_lng: gps.lng,
+        status: "completed",
+      })
+      .eq("id", activeTravelId);
 
-    setSaving(false);
+    if (error) throw error;
 
-    if (error) {
-      console.error(error);
-      setError("Failed to save travel log.");
-      return;
-    }
-
-    alert("Travel recorded successfully.");
-    window.location.reload();
+    setActiveTravelId(null);
+    setVehicleType("");
+    setOdometerEnd("");
+    setMessage(
+      `Travel ended. Allowance ₹${allowanceAmount.toFixed(2)}`
+    );
+  } catch (err: any) {
+    setMessage(err.message || "Failed to end travel");
   }
 
-  // --------------------------------------------------
-  // UI
-  // --------------------------------------------------
+  setLoading(false);
+}
+
+
+  /* ----------------------------------------
+     UI
+  ---------------------------------------- */
   return (
     <AppLayout>
-      <div className="max-w-xl mx-auto space-y-4">
-        <h2 className="text-lg font-semibold">Travel Log</h2>
+      <div className="container max-w-xl space-y-5">
+        <h2 className="text-xl font-semibold text-primary">
+          Travel Tracking
+        </h2>
 
-        <select
-          className="w-full border rounded px-3 py-2"
-          value={vehicleType}
-          onChange={(e) => setVehicleType(e.target.value as VehicleType)}
-        >
-          <option value="bike">Bike</option>
-          <option value="car">Car</option>
-          <option value="van">Van</option>
-        </select>
+        {message && (
+          <div className="p-3 bg-yellow-100 rounded text-sm">
+            {message}
+          </div>
+        )}
 
-        <div className="flex gap-2">
-          <button className="btn-secondary w-1/2" onClick={startTravel}>
+        {/* Vehicle Type */}
+        <div>
+          <label className="text-sm font-medium">Vehicle Type</label>
+          <select
+            className="w-full border rounded px-2 py-2 text-sm"
+            value={vehicleType}
+            onChange={(e) =>
+              setVehicleType(e.target.value as VehicleType)
+            }
+            disabled={!!activeTravelId}
+          >
+            <option value="">Select Vehicle</option>
+            <option value="bike">Bike</option>
+            <option value="car">Car</option>
+            <option value="van">Van</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        {/* Odometer */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm">Odometer Start</label>
+            <input
+              type="number"
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={odometerStart}
+              onChange={(e) => setOdometerStart(e.target.value)}
+              disabled={!!activeTravelId}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm">Odometer End</label>
+            <input
+              type="number"
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={odometerEnd}
+              onChange={(e) => setOdometerEnd(e.target.value)}
+              disabled={!activeTravelId}
+            />
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <button
+            onClick={startTravel}
+            disabled={loading || !!activeTravelId}
+            className="flex-1 btn-primary"
+          >
             Start Travel
           </button>
-          <button className="btn-secondary w-1/2" onClick={endTravel}>
+
+          <button
+            onClick={endTravel}
+            disabled={loading || !activeTravelId}
+            className="flex-1 bg-green-600 text-white py-2 rounded"
+          >
             End Travel
           </button>
         </div>
-
-        {source === "odometer" && (
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="number"
-              placeholder="Odometer Start"
-              className="border rounded px-2 py-1"
-              onChange={(e) => setOdoStart(Number(e.target.value))}
-            />
-            <input
-              type="number"
-              placeholder="Odometer End"
-              className="border rounded px-2 py-1"
-              onChange={(e) => setOdoEnd(Number(e.target.value))}
-            />
-          </div>
-        )}
-
-        {distanceKm !== null && (
-          <div className="bg-slate-100 rounded p-3 text-sm">
-            <div>Distance: <b>{distanceKm} km</b></div>
-            {allowance !== null && (
-              <div>Allowance: <b>₹{allowance}</b></div>
-            )}
-          </div>
-        )}
-
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-
-        <button
-          onClick={saveTravel}
-          disabled={saving || distanceKm === null}
-          className="btn-primary w-full"
-        >
-          {saving ? "Saving..." : "Save Travel"}
-        </button>
       </div>
     </AppLayout>
   );
