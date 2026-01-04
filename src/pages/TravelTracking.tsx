@@ -1,282 +1,308 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import { useAuth } from "../context/AuthContext";
 
-type VehicleType = "bike" | "car" | "van" | "other";
+/* ---------------------------------------------
+   Utils
+---------------------------------------------- */
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
+function calculateKm({
+  startGPS,
+  endGPS,
+  odoStart,
+  odoEnd,
+}: {
+  startGPS?: { lat: number; lng: number } | null;
+  endGPS?: { lat: number; lng: number } | null;
+  odoStart?: string;
+  odoEnd?: string;
+}): { km: number; source: "gps" | "odometer" } {
+  if (startGPS && endGPS) {
+    const km = haversineKm(
+      startGPS.lat,
+      startGPS.lng,
+      endGPS.lat,
+      endGPS.lng
+    );
+    if (km >= 0.01) return { km, source: "gps" };
+  }
+
+  if (odoStart && odoEnd) {
+    const diff = Number(odoEnd) - Number(odoStart);
+    if (diff > 0) return { km: diff, source: "odometer" };
+  }
+
+  throw new Error(
+    "Unable to calculate distance. Please capture GPS or enter odometer values."
+  );
+}
+
+/* ---------------------------------------------
+   Component
+---------------------------------------------- */
 export default function TravelTracking() {
   const { profile } = useAuth();
 
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
-  const [activeTravelId, setActiveTravelId] = useState<number | null>(null);
+  const [activeLog, setActiveLog] = useState<any>(null);
 
-  const [vehicleType, setVehicleType] = useState<VehicleType | "">("");
+  const [vehicleType, setVehicleType] = useState("bike");
+  const [ratePerKm, setRatePerKm] = useState<number>(0);
+
+  const [startGPS, setStartGPS] = useState<any>(null);
+  const [endGPS, setEndGPS] = useState<any>(null);
 
   const [odometerStart, setOdometerStart] = useState("");
   const [odometerEnd, setOdometerEnd] = useState("");
 
-  const [startLat, setStartLat] = useState<number | null>(null);
-  const [startLng, setStartLng] = useState<number | null>(null);
-  const [endLat, setEndLat] = useState<number | null>(null);
-  const [endLng, setEndLng] = useState<number | null>(null);
-
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  /* ----------------------------------------
-     Load assignment + active travel
-  ---------------------------------------- */
+  /* ---------------------------------------------
+     Load assignment + rate
+  ---------------------------------------------- */
   useEffect(() => {
     if (!profile) return;
 
-    async function init() {
+    async function load() {
       const { data: assignment } = await supabase
         .from("assignments")
         .select("id")
         .eq("custodian_id", profile.id)
-        .eq("assignment_date", new Date().toISOString().slice(0, 10))
-        .in("status", ["open", "submitted"])
-        .order("id", { ascending: false })
+        .eq("status", "open")
+        .order("assignment_date", { ascending: false })
         .limit(1)
         .single();
 
-      if (!assignment) return;
-      setAssignmentId(assignment.id);
+      if (assignment) setAssignmentId(assignment.id);
 
-      const { data: travel } = await supabase
+      const { data: rate } = await supabase
+        .from("vehicle_rates")
+        .select("rate_per_km")
+        .eq("vehicle_type", vehicleType)
+        .single();
+
+      setRatePerKm(rate?.rate_per_km || 0);
+
+      const { data: active } = await supabase
         .from("travel_logs")
-        .select("id, vehicle_type")
-        .eq("assignment_id", assignment.id)
+        .select("*")
         .eq("custodian_id", profile.id)
         .eq("status", "in_progress")
+        .order("created_at", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
-      if (travel) {
-        setActiveTravelId(travel.id);
-        setVehicleType(travel.vehicle_type as VehicleType);
-      }
+      setActiveLog(active || null);
     }
 
-    init();
-  }, [profile]);
+    load();
+  }, [profile, vehicleType]);
 
-  /* ----------------------------------------
-     GPS helper
-  ---------------------------------------- */
-  function acquireGPS(): Promise<{ lat: number; lng: number }> {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject("GPS not supported");
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        (pos) =>
-          resolve({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          }),
-        () => reject("Unable to acquire GPS"),
-        { enableHighAccuracy: true, timeout: 15000 }
-      );
-    });
+  /* ---------------------------------------------
+     GPS capture
+  ---------------------------------------------- */
+  function acquireGPS(setter: any) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        setter({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        }),
+      () => setError("Unable to acquire GPS location"),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
   }
 
-  /* ----------------------------------------
+  /* ---------------------------------------------
      Start Travel
-  ---------------------------------------- */
+  ---------------------------------------------- */
   async function startTravel() {
-    if (!assignmentId || !profile || !vehicleType) {
-      setMessage("Please select vehicle type before starting travel.");
-      return;
-    }
+    if (!assignmentId) return;
 
     setLoading(true);
-    setMessage(null);
+    setError(null);
 
     try {
-      const gps = await acquireGPS();
-      setStartLat(gps.lat);
-      setStartLng(gps.lng);
+      const gps = await new Promise<any>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) =>
+            resolve({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+            }),
+          reject,
+          { enableHighAccuracy: true, timeout: 15000 }
+        );
+      });
 
       const { data, error } = await supabase
         .from("travel_logs")
         .insert({
           assignment_id: assignmentId,
-          custodian_id: profile.id,
-          vehicle_type: vehicleType,
+          custodian_id: profile!.id,
           start_time: new Date().toISOString(),
-          odometer_start: odometerStart || null,
           gps_start_lat: gps.lat,
           gps_start_lng: gps.lng,
+          odometer_start: odometerStart || null,
           status: "in_progress",
         })
-        .select("id")
+        .select()
         .single();
 
       if (error) throw error;
 
-      setActiveTravelId(data.id);
-      setMessage("Travel started successfully.");
-    } catch {
-      setMessage("Failed to start travel. Please acquire GPS.");
+      setActiveLog(data);
+      setStartGPS(gps);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
-  /* ----------------------------------------
+  /* ---------------------------------------------
      End Travel
-  ---------------------------------------- */
+  ---------------------------------------------- */
   async function endTravel() {
-  if (!activeTravelId || !vehicleType) return;
+    if (!activeLog) return;
 
-  setLoading(true);
-  setMessage(null);
+    setLoading(true);
+    setError(null);
 
-  try {
-    // 1️⃣ Acquire GPS
-    const gps = await acquireGPS();
-    setEndLat(gps.lat);
-    setEndLng(gps.lng);
+    try {
+      const gps = await new Promise<any>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) =>
+            resolve({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+            }),
+          reject,
+          { enableHighAccuracy: true, timeout: 15000 }
+        );
+      });
 
-    // 2️⃣ Calculate KM
-    const kmCovered =
-      odometerStart && odometerEnd
-        ? Number(odometerEnd) - Number(odometerStart)
-        : null;
+      const { km, source } = calculateKm({
+        startGPS: {
+          lat: activeLog.gps_start_lat,
+          lng: activeLog.gps_start_lng,
+        },
+        endGPS: gps,
+        odoStart: activeLog.odometer_start,
+        odoEnd: odometerEnd,
+      });
 
-    if (!kmCovered || kmCovered <= 0) {
-      throw new Error("Invalid KM covered");
+      const allowance = km * ratePerKm;
+
+      const { error } = await supabase
+        .from("travel_logs")
+        .update({
+          end_time: new Date().toISOString(),
+          gps_end_lat: gps.lat,
+          gps_end_lng: gps.lng,
+          odometer_end: odometerEnd || null,
+          km_covered: km,
+          allowance_amount: allowance,
+          status: "completed",
+        })
+        .eq("id", activeLog.id);
+
+      if (error) throw error;
+
+      setActiveLog(null);
+      setOdometerStart("");
+      setOdometerEnd("");
+      setStartGPS(null);
+      setEndGPS(null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
-
-    // 3️⃣ Fetch vehicle rate (MASTER DATA)
-    const { data: rateRow, error: rateError } = await supabase
-      .from("vehicle_rates")
-      .select("rate_per_km")
-      .eq("vehicle_type", vehicleType)
-      .eq("active", true)
-      .order("effective_from", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (rateError || !rateRow) {
-      throw new Error("Vehicle rate not configured");
-    }
-
-    const ratePerKm = Number(rateRow.rate_per_km);
-    const allowanceAmount = kmCovered * ratePerKm;
-
-    // 4️⃣ Update travel log (ATOMIC, AUDITABLE)
-    const { error } = await supabase
-      .from("travel_logs")
-      .update({
-        end_time: new Date().toISOString(),
-        odometer_end: odometerEnd || null,
-        km_covered: kmCovered,
-        rate_per_km: ratePerKm,
-        allowance_amount: allowanceAmount,
-        gps_end_lat: gps.lat,
-        gps_end_lng: gps.lng,
-        status: "completed",
-      })
-      .eq("id", activeTravelId);
-
-    if (error) throw error;
-
-    setActiveTravelId(null);
-    setVehicleType("");
-    setOdometerEnd("");
-    setMessage(
-      `Travel ended. Allowance ₹${allowanceAmount.toFixed(2)}`
-    );
-  } catch (err: any) {
-    setMessage(err.message || "Failed to end travel");
   }
 
-  setLoading(false);
-}
-
-
-  /* ----------------------------------------
+  /* ---------------------------------------------
      UI
-  ---------------------------------------- */
+  ---------------------------------------------- */
   return (
     <AppLayout>
-      <div className="container max-w-xl space-y-5">
-        <h2 className="text-xl font-semibold text-primary">
-          Travel Tracking
-        </h2>
+      <div className="container mx-auto max-w-xl space-y-4">
+        <h2 className="text-lg font-semibold text-primary">Travel Tracking</h2>
 
-        {message && (
-          <div className="p-3 bg-yellow-100 rounded text-sm">
-            {message}
+        {error && (
+          <div className="bg-red-100 text-red-700 text-sm p-2 rounded">
+            {error}
           </div>
         )}
 
-        {/* Vehicle Type */}
-        <div>
-          <label className="text-sm font-medium">Vehicle Type</label>
-          <select
-            className="w-full border rounded px-2 py-2 text-sm"
-            value={vehicleType}
-            onChange={(e) =>
-              setVehicleType(e.target.value as VehicleType)
-            }
-            disabled={!!activeTravelId}
-          >
-            <option value="">Select Vehicle</option>
-            <option value="bike">Bike</option>
-            <option value="car">Car</option>
-            <option value="van">Van</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-
-        {/* Odometer */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded shadow p-4 space-y-3">
           <div>
-            <label className="text-sm">Odometer Start</label>
-            <input
-              type="number"
+            <label className="text-sm">Vehicle Type</label>
+            <select
+              value={vehicleType}
+              onChange={(e) => setVehicleType(e.target.value)}
               className="w-full border rounded px-2 py-1 text-sm"
-              value={odometerStart}
-              onChange={(e) => setOdometerStart(e.target.value)}
-              disabled={!!activeTravelId}
-            />
+            >
+              <option value="bike">Bike</option>
+              <option value="car">Car</option>
+              <option value="van">Van</option>
+            </select>
           </div>
 
-          <div>
-            <label className="text-sm">Odometer End</label>
-            <input
-              type="number"
-              className="w-full border rounded px-2 py-1 text-sm"
-              value={odometerEnd}
-              onChange={(e) => setOdometerEnd(e.target.value)}
-              disabled={!activeTravelId}
-            />
-          </div>
-        </div>
+          {!activeLog && (
+            <>
+              <div>
+                <label className="text-sm">Odometer Start (optional)</label>
+                <input
+                  value={odometerStart}
+                  onChange={(e) => setOdometerStart(e.target.value)}
+                  className="w-full border rounded px-2 py-1 text-sm"
+                />
+              </div>
 
-        {/* Actions */}
-        <div className="flex gap-3">
-          <button
-            onClick={startTravel}
-            disabled={loading || !!activeTravelId}
-            className="flex-1 btn-primary"
-          >
-            Start Travel
-          </button>
+              <button
+                onClick={startTravel}
+                disabled={loading}
+                className="btn-primary w-full"
+              >
+                Start Travel
+              </button>
+            </>
+          )}
 
-          <button
-            onClick={endTravel}
-            disabled={loading || !activeTravelId}
-            className="flex-1 bg-green-600 text-white py-2 rounded"
-          >
-            End Travel
-          </button>
+          {activeLog && (
+            <>
+              <div>
+                <label className="text-sm">Odometer End (optional)</label>
+                <input
+                  value={odometerEnd}
+                  onChange={(e) => setOdometerEnd(e.target.value)}
+                  className="w-full border rounded px-2 py-1 text-sm"
+                />
+              </div>
+
+              <button
+                onClick={endTravel}
+                disabled={loading}
+                className="btn-success w-full"
+              >
+                End Travel
+              </button>
+            </>
+          )}
         </div>
       </div>
     </AppLayout>
