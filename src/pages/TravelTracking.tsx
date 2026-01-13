@@ -9,21 +9,27 @@ import {
   Marker,
   Popup,
 } from "react-leaflet";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatIST } from "../utils/time";
 
-/* -------------------- Utilities -------------------- */
+/* ---------------- Utilities ---------------- */
 
 function isValidCoord(v: any) {
   return typeof v === "number" && !isNaN(v);
 }
 
-function haversineKm(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-) {
+function isToday(utc: string) {
+  const d = new Date(utc);
+  const now = new Date();
+  return (
+    d.getUTCFullYear() === now.getUTCFullYear() &&
+    d.getUTCMonth() === now.getUTCMonth() &&
+    d.getUTCDate() === now.getUTCDate()
+  );
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
@@ -38,18 +44,14 @@ function haversineKm(
 function getGPS(): Promise<{ lat: number; lng: number }> {
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
-      pos =>
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        }),
+      p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => reject(new Error("Unable to acquire GPS location")),
       { enableHighAccuracy: true, timeout: 15000 }
     );
   });
 }
 
-/* -------------------- Component -------------------- */
+/* ---------------- Component ---------------- */
 
 export default function TravelTracking() {
   const { profile } = useAuth();
@@ -68,15 +70,12 @@ export default function TravelTracking() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  /* -------------------- Load data -------------------- */
+  /* ---------------- Load ---------------- */
 
   useEffect(() => {
     if (!profile) return;
 
-    let mounted = true;
-
     async function load() {
-      // Open assignment
       const { data: assignment } = await supabase
         .from("assignments")
         .select("id")
@@ -86,25 +85,21 @@ export default function TravelTracking() {
         .limit(1)
         .maybeSingle();
 
-      if (mounted && assignment) setAssignmentId(assignment.id);
+      if (assignment) setAssignmentId(assignment.id);
 
-      // Vehicle rate
       const { data: rate } = await supabase
         .from("vehicle_rates")
         .select("rate_per_km")
         .eq("vehicle_type", vehicleType)
         .maybeSingle();
 
-      if (mounted) setRatePerKm(rate?.rate_per_km || 0);
+      setRatePerKm(rate?.rate_per_km || 0);
 
-      // Travel logs
       const { data: logs } = await supabase
         .from("travel_logs")
         .select("*")
         .eq("custodian_id", profile.id)
         .order("created_at", { ascending: true });
-
-      if (!mounted) return;
 
       const clean = (logs || []).filter(
         l =>
@@ -119,25 +114,21 @@ export default function TravelTracking() {
     }
 
     load();
-    return () => {
-      mounted = false;
-    };
   }, [profile, vehicleType]);
 
-  /* -------------------- Start Travel -------------------- */
+  /* ---------------- Start / End ---------------- */
 
   async function startTravel() {
     if (!assignmentId || activeTravel) return;
 
     setLoading(true);
     setError(null);
-    setInfo(null);
 
     try {
       const gps = await getGPS();
       const nowUTC = new Date().toISOString();
 
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("travel_logs")
         .insert({
           assignment_id: assignmentId,
@@ -153,12 +144,10 @@ export default function TravelTracking() {
         .select()
         .single();
 
-      if (error) throw error;
-
       setActiveTravel(data);
       setSegments(prev => [...prev, data]);
-      setInfo("Travel started successfully.");
       setOdoStart("");
+      setInfo("Travel started.");
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -166,21 +155,14 @@ export default function TravelTracking() {
     }
   }
 
-  /* -------------------- End Travel -------------------- */
-
   async function endTravel() {
-    if (!activeTravel) {
-      setError("No active travel to end.");
-      return;
-    }
+    if (!activeTravel) return;
 
     setLoading(true);
     setError(null);
-    setInfo(null);
 
     try {
       const gpsEnd = await getGPS();
-
       let km = haversineKm(
         activeTravel.gps_start_lat,
         activeTravel.gps_start_lng,
@@ -192,8 +174,7 @@ export default function TravelTracking() {
         km = Number(odoEnd) - Number(odoStart);
       }
 
-      if (km < 0.05) throw new Error("Distance too small.");
-      if (km > 300) throw new Error("Distance exceeds sanity limit.");
+      if (km < 0.05) throw new Error("Distance too small");
 
       const allowance = km * ratePerKm;
       const nowUTC = new Date().toISOString();
@@ -211,14 +192,9 @@ export default function TravelTracking() {
         })
         .eq("id", activeTravel.id);
 
-      setInfo(
-        `Travel completed: ${km.toFixed(
-          2
-        )} km, allowance ₹${allowance.toFixed(2)}`
-      );
-
       setActiveTravel(null);
       setOdoEnd("");
+      setInfo(`Travel completed (${km.toFixed(2)} km).`);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -226,108 +202,185 @@ export default function TravelTracking() {
     }
   }
 
-  /* -------------------- Derived -------------------- */
+  /* ---------------- Map Data (TODAY ONLY) ---------------- */
 
-  const firstSegment = segments.length > 0 ? segments[0] : null;
+  const todaySegments = segments.filter(s => isToday(s.start_time));
+  const mapCenter = activeTravel
+    ? [activeTravel.gps_start_lat, activeTravel.gps_start_lng]
+    : todaySegments.length > 0
+    ? [todaySegments[0].gps_start_lat, todaySegments[0].gps_start_lng]
+    : null;
 
-  /* -------------------- UI -------------------- */
+  /* ---------------- UI ---------------- */
 
   return (
     <AppLayout>
-      <div className="container py-4 space-y-4">
-        <h2 className="text-lg font-semibold text-primary">Travel Tracking</h2>
+      <div className="container py-4 space-y-4 relative">
+        <h2 className="text-lg font-semibold text-primary">
+          Travel Tracking
+        </h2>
 
         {error && (
-          <div className="bg-red-50 border border-red-300 p-3 rounded text-sm text-red-700">
+          <div className="bg-red-50 border border-red-300 p-3 rounded text-sm">
             {error}
           </div>
         )}
 
         {info && (
-          <div className="bg-green-50 border border-green-300 p-3 rounded text-sm text-green-700">
+          <div className="bg-green-50 border border-green-300 p-3 rounded text-sm">
             {info}
           </div>
         )}
 
         {activeTravel && (
           <div className="text-sm text-slate-700">
-            🚗 Travel in progress since{" "}
-            {formatIST(activeTravel.start_time)}{" "}
-            <span className="text-xs text-slate-500">(IST)</span>
+            🚗 Travel in progress since {formatIST(activeTravel.start_time)}
           </div>
         )}
 
-        {/* MAP */}
-        {firstSegment && (
+        {/* MAP – TODAY ONLY */}
+       
+	   {mapCenter && (
+<div className="relative z-0 overflow-hidden">
           <div className="bg-white rounded-xl border shadow-sm p-3">
-            <div className="h-72 w-full rounded overflow-hidden border">
-              <MapContainer
-                center={[
-                  firstSegment.gps_start_lat,
-                  firstSegment.gps_start_lng,
-                ]}
+            <div className="h-72 rounded overflow-hidden">
+			 <MapContainer
+                center={mapCenter as any}
                 zoom={14}
                 className="h-full w-full"
               >
                 <TileLayer
-                  attribution="© OpenStreetMap contributors"
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
-                {segments.map((s, i) => {
-                  const hasEnd =
-                    isValidCoord(s.gps_end_lat) &&
-                    isValidCoord(s.gps_end_lng);
+                {todaySegments.map((s, i) => {
+  if (!s.gps_end_lat || !s.gps_end_lng) return null;
 
-                  return (
-                    <React.Fragment key={i}>
-                      <Polyline
-                        positions={
-                          hasEnd
-                            ? [
-                                [s.gps_start_lat, s.gps_start_lng],
-                                [s.gps_end_lat, s.gps_end_lng],
-                              ]
-                            : [
-                                [s.gps_start_lat, s.gps_start_lng],
-                                [s.gps_start_lat, s.gps_start_lng],
-                              ]
-                        }
-                        pathOptions={
-                          hasEnd
-                            ? { color: "#2563eb", weight: 4 }
-                            : {
-                                color: "#f59e0b",
-                                dashArray: "6,6",
-                                weight: 4,
-                              }
-                        }
-                      />
+  return (
+    <React.Fragment key={i}>
+      {/* Polyline */}
+      <Polyline
+        positions={[
+          [s.gps_start_lat, s.gps_start_lng],
+          [s.gps_end_lat, s.gps_end_lng],
+        ]}
+        pathOptions={{ color: "#2563eb", weight: 5 }}
+      />
+{/* 🚦 Start marker */}
+<Marker
+  position={[s.gps_start_lat, s.gps_start_lng]}
+  icon={L.divIcon({
+    className: "",
+    iconSize: [26, 26],
+    iconAnchor: [13, 26],
+    html: `<div style="font-size:22px;">🚦</div>`,
+  })}
+>
+  <Popup>Start</Popup>
+</Marker>
 
-                      {hasEnd && (
-                        <Marker
-                          position={[s.gps_end_lat, s.gps_end_lng]}
-                        >
-                          <Popup>
-                            🏁 {s.km_covered?.toFixed(2)} km
-                          </Popup>
-                        </Marker>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+{/* 🏁 End marker */}
+<Marker
+  position={[s.gps_end_lat, s.gps_end_lng]}
+  icon={L.divIcon({
+    className: "",
+    iconSize: [26, 26],
+    iconAnchor: [13, 26],
+    html: `<div style="font-size:22px;">🏁</div>`,
+  })}
+>
+  <Popup>End</Popup>
+</Marker>
+
+      {/* 📏 Distance label */}
+      {typeof s.km_covered === "number" && s.km_covered > 0 && (
+        <Marker
+          position={[
+            (s.gps_start_lat + s.gps_end_lat) / 2,
+            (s.gps_start_lng + s.gps_end_lng) / 2,
+          ]}
+          icon={L.divIcon({
+            className: "",
+            iconSize: [64, 22],
+            iconAnchor: [32, 11],
+            html: `
+              <div style="
+                background:#1e293b;
+                color:white;
+                padding:2px 6px;
+                border-radius:6px;
+                font-size:11px;
+                font-weight:600;
+                white-space:nowrap;
+                box-shadow:0 2px 6px rgba(0,0,0,0.25);
+              ">
+                ${s.km_covered.toFixed(2)} km
+              </div>
+            `,
+          })}
+        />
+      )}
+    </React.Fragment>
+  );
+})}
+
+{activeTravel &&
+  isValidCoord(activeTravel.gps_start_lat) &&
+  isValidCoord(activeTravel.gps_start_lng) && (
+    <Marker
+      position={[
+        activeTravel.gps_start_lat,
+        activeTravel.gps_start_lng,
+      ]}
+      icon={L.divIcon({
+        className: "",
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+        html: `
+          <div style="
+            width:14px;
+            height:14px;
+            background:#22c55e;
+            border-radius:50%;
+            border:3px solid white;
+            box-shadow:0 0 10px rgba(34,197,94,0.9);
+            animation:pulse 1.5s infinite;
+          "></div>
+        `,
+      })}
+    >
+      <Popup>🧭 You are here</Popup>
+    </Marker>
+)}
+
               </MapContainer>
+			  
+  </div>
+
+{/* Legend */}
+      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-600">
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-1 bg-blue-600 rounded" />
+          Completed Travel
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-4 h-1 border-t-2 border-dashed border-amber-500" />
+          In-Progress Travel
+<div className="flex items-center gap-2">🧭 You are here</div>
+        </div>
+        <div className="flex items-center gap-2">🚦 Start</div>
+        <div className="flex items-center gap-2">🏁 End       </div>
+				      </div>
             </div>
           </div>
         )}
 
         {/* FORM */}
         <div className="bg-white rounded shadow p-4 space-y-3">
-          <label className="text-sm">Vehicle Type</label>
           <select
             value={vehicleType}
             onChange={e => setVehicleType(e.target.value)}
-            className="w-full border rounded px-2 py-1 text-sm"
+            className="w-full border rounded px-2 py-1"
           >
             <option value="bike">Bike</option>
             <option value="car">Car</option>
@@ -335,10 +388,10 @@ export default function TravelTracking() {
           </select>
 
           <input
-            placeholder="Odometer Start (optional)"
+            placeholder="Odometer Start"
             value={odoStart}
             onChange={e => setOdoStart(e.target.value)}
-            className="w-full border rounded px-2 py-1 text-sm"
+            className="w-full border rounded px-2 py-1"
           />
 
           <button
@@ -350,10 +403,10 @@ export default function TravelTracking() {
           </button>
 
           <input
-            placeholder="Odometer End (optional)"
+            placeholder="Odometer End"
             value={odoEnd}
             onChange={e => setOdoEnd(e.target.value)}
-            className="w-full border rounded px-2 py-1 text-sm"
+            className="w-full border rounded px-2 py-1"
           />
 
           <button
