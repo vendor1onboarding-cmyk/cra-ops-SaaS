@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import AdminRouteAssignmentPage from "./pages/AdminRouteAssignment";
+import AdminDashboard from "./pages/AdminDashboard";
+
 
 
 import Login from "./pages/Login";
@@ -52,6 +54,16 @@ export default function App() {
             </PrivateRoute>
           }
         />
+		
+		<Route
+  path="/admin"
+  element={
+    <RequireAdmin>
+      <AdminDashboard />
+    </RequireAdmin>
+  }
+/>
+
 
         <Route
           path="/denomination-plan"

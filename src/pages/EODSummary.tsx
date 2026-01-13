@@ -107,9 +107,26 @@ export default function EODSummary() {
     setLoading(false);
   }
 
+
+
   // --------------------------------------------------
   // SUBMIT EOD (NEW)
   // --------------------------------------------------
+
+const isLocked = assignment?.status === "approved";
+const isEditable = assignment?.status === "open" || assignment?.status === "rejected";
+
+
+  <input disabled={isLocked} />
+  
+
+  {assignment?.status === "rejected" && assignment.rejection_reason && (
+  <div className="bg-red-50 border border-red-200 p-3 rounded text-sm text-red-700">
+    <strong>Rejected:</strong> {assignment.rejection_reason}
+  </div>
+)}
+
+
   async function submitEOD() {
     if (!assignment) return;
 

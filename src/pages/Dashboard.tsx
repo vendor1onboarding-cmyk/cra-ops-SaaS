@@ -30,6 +30,11 @@ export default function Dashboard() {
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
   const [showPending, setShowPending] = useState(false);
+const isSubmitted = assignment?.status === "submitted";
+const isRejected = assignment?.status === "rejected";
+const isApproved = assignment?.status === "approved";
+const isEditable = assignment?.status === "open" || assignment?.status === "rejected";
+
 
 const today = new Date().toISOString().slice(0, 10);
 const monthStart = new Date(
@@ -99,8 +104,10 @@ loadTravelKPI();
       .select("*")
       .eq("custodian_id", profile.id)
       .eq("assignment_date", today)
-      .eq("status", "open")
-      .maybeSingle();
+      .in("status", ["open", "submitted", "rejected", "approved"])
+	  .order("created_at", { ascending: false })
+	  .limit(1)
+	  .maybeSingle();
 
     if (!assign) {
       setLoading(false);
@@ -273,6 +280,23 @@ const completionPct =
   </div>
 </div>
       {loading && <div className="text-center text-sm">Loading…</div>}
+{isSubmitted && (
+  <div className="bg-yellow-50 border border-yellow-300 p-3 rounded text-sm text-yellow-800">
+    ⏳ EOD submitted. Awaiting admin approval.
+  </div>
+)}
+
+{isRejected && assignment?.rejection_reason && (
+  <div className="bg-red-50 border border-red-300 p-3 rounded text-sm text-red-700">
+    ❌ EOD rejected: {assignment.rejection_reason}
+  </div>
+)}
+
+{isApproved && (
+  <div className="bg-green-50 border border-green-300 p-3 rounded text-sm text-green-700">
+    ✅ EOD approved. Day is locked.
+  </div>
+)}
 
       {!loading && assignment && (
         <div className="space-y-4 pb-24 px-2 max-w-full overflow-x-hidden">
@@ -587,6 +611,7 @@ const completionPct =
     Any discrepancy must be reported within RBI-prescribed timelines.
   </p>
 </div>
+
 
     </AppLayout>
   );

@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
  */
 const ICONS: Record<string, string> = {
   Dashboard: "📊",
+  "Admin Dashboard": "📊",
   Denomination: "💰",
   "Cash Pickup": "🏦",
   "ATM Load": "🏧",
@@ -41,8 +42,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  /* ---------------- NAV ITEMS ---------------- */
-  const navItems = [
+ const isAdmin = profile?.role === "admin" || profile?.role === "supervisor";
+
+const navItems = isAdmin
+  ? [
+      { to: "/admin", label: "Admin Dashboard" },
+      { to: "/admin/approvals", label: "EOD Approvals" },
+      { to: "/admin/route-assignment", label: "Route Assignment" },
+    ]
+  : [
     { to: "/", label: "Dashboard" },
     { to: "/denomination-plan", label: "Denomination" },
     { to: "/cash-pickup", label: "Cash Pickup" },
@@ -52,15 +60,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     { to: "/technical-issues", label: "Tech Issues" },
     { to: "/eod-summary", label: "EOD" },
 	{ to: "/travel-log", label: "Travel Log" },
-
-  ];
-
-  if (profile?.role === "admin") {
-    navItems.push(
-      { to: "/admin/route-assignment", label: "Route Assignment" },
-      { to: "/admin/approvals", label: "EOD Approvals" }
-    );
-  }
+    ];
 
   function NavLinks({ onClick }: { onClick?: () => void }) {
     return (

@@ -1,12 +1,29 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import {
+  MapContainer,
+  TileLayer,
+  Polyline,
+  Marker,
+  Popup,
+} from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import { formatIST } from "../utils/time";
 
-/* ---------------------------------------------
-   Utils
----------------------------------------------- */
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+/* -------------------- Utilities -------------------- */
+
+function isValidCoord(v: any) {
+  return typeof v === "number" && !isNaN(v);
+}
+
+function haversineKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
@@ -18,65 +35,48 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function calculateKm({
-  startGPS,
-  endGPS,
-  odoStart,
-  odoEnd,
-}: {
-  startGPS?: { lat: number; lng: number } | null;
-  endGPS?: { lat: number; lng: number } | null;
-  odoStart?: string;
-  odoEnd?: string;
-}): { km: number; source: "gps" | "odometer" } {
-  if (startGPS && endGPS) {
-    const km = haversineKm(
-      startGPS.lat,
-      startGPS.lng,
-      endGPS.lat,
-      endGPS.lng
+function getGPS(): Promise<{ lat: number; lng: number }> {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      pos =>
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        }),
+      () => reject(new Error("Unable to acquire GPS location")),
+      { enableHighAccuracy: true, timeout: 15000 }
     );
-    if (km >= 0.01) return { km, source: "gps" };
-  }
-
-  if (odoStart && odoEnd) {
-    const diff = Number(odoEnd) - Number(odoStart);
-    if (diff > 0) return { km: diff, source: "odometer" };
-  }
-
-  throw new Error(
-    "Unable to calculate distance. Please capture GPS or enter odometer values."
-  );
+  });
 }
 
-/* ---------------------------------------------
-   Component
----------------------------------------------- */
+/* -------------------- Component -------------------- */
+
 export default function TravelTracking() {
   const { profile } = useAuth();
 
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
-  const [activeLog, setActiveLog] = useState<any>(null);
-
   const [vehicleType, setVehicleType] = useState("bike");
-  const [ratePerKm, setRatePerKm] = useState<number>(0);
+  const [ratePerKm, setRatePerKm] = useState(0);
 
-  const [startGPS, setStartGPS] = useState<any>(null);
-  const [endGPS, setEndGPS] = useState<any>(null);
+  const [segments, setSegments] = useState<any[]>([]);
+  const [activeTravel, setActiveTravel] = useState<any | null>(null);
 
-  const [odometerStart, setOdometerStart] = useState("");
-  const [odometerEnd, setOdometerEnd] = useState("");
+  const [odoStart, setOdoStart] = useState("");
+  const [odoEnd, setOdoEnd] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
-  /* ---------------------------------------------
-     Load assignment + rate
-  ---------------------------------------------- */
+  /* -------------------- Load data -------------------- */
+
   useEffect(() => {
     if (!profile) return;
 
+    let mounted = true;
+
     async function load() {
+      // Open assignment
       const { data: assignment } = await supabase
         .from("assignments")
         .select("id")
@@ -84,88 +84,81 @@ export default function TravelTracking() {
         .eq("status", "open")
         .order("assignment_date", { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
-      if (assignment) setAssignmentId(assignment.id);
+      if (mounted && assignment) setAssignmentId(assignment.id);
 
+      // Vehicle rate
       const { data: rate } = await supabase
         .from("vehicle_rates")
         .select("rate_per_km")
         .eq("vehicle_type", vehicleType)
-        .single();
+        .maybeSingle();
 
-      setRatePerKm(rate?.rate_per_km || 0);
+      if (mounted) setRatePerKm(rate?.rate_per_km || 0);
 
-      const { data: active } = await supabase
+      // Travel logs
+      const { data: logs } = await supabase
         .from("travel_logs")
         .select("*")
         .eq("custodian_id", profile.id)
-        .eq("status", "in_progress")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order("created_at", { ascending: true });
 
-      setActiveLog(active || null);
+      if (!mounted) return;
+
+      const clean = (logs || []).filter(
+        l =>
+          l &&
+          l.start_time &&
+          isValidCoord(l.gps_start_lat) &&
+          isValidCoord(l.gps_start_lng)
+      );
+
+      setSegments(clean);
+      setActiveTravel(clean.find(l => l.status === "in_progress") || null);
     }
 
     load();
+    return () => {
+      mounted = false;
+    };
   }, [profile, vehicleType]);
 
-  /* ---------------------------------------------
-     GPS capture
-  ---------------------------------------------- */
-  function acquireGPS(setter: any) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        setter({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        }),
-      () => setError("Unable to acquire GPS location"),
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
-  }
+  /* -------------------- Start Travel -------------------- */
 
-  /* ---------------------------------------------
-     Start Travel
-  ---------------------------------------------- */
   async function startTravel() {
-    if (!assignmentId) return;
+    if (!assignmentId || activeTravel) return;
 
     setLoading(true);
     setError(null);
+    setInfo(null);
 
     try {
-      const gps = await new Promise<any>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) =>
-            resolve({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-            }),
-          reject,
-          { enableHighAccuracy: true, timeout: 15000 }
-        );
-      });
+      const gps = await getGPS();
+      const nowUTC = new Date().toISOString();
 
       const { data, error } = await supabase
         .from("travel_logs")
         .insert({
           assignment_id: assignmentId,
           custodian_id: profile!.id,
-          start_time: new Date().toISOString(),
+          start_time: nowUTC,
           gps_start_lat: gps.lat,
           gps_start_lng: gps.lng,
-          odometer_start: odometerStart || null,
+          odometer_start: odoStart || null,
           status: "in_progress",
+          vehicle_type: vehicleType,
+          rate_per_km: ratePerKm,
         })
         .select()
         .single();
 
       if (error) throw error;
 
-      setActiveLog(data);
-      setStartGPS(gps);
+      setActiveTravel(data);
+      setSegments(prev => [...prev, data]);
+      setInfo("Travel started successfully.");
+      setOdoStart("");
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -173,60 +166,59 @@ export default function TravelTracking() {
     }
   }
 
-  /* ---------------------------------------------
-     End Travel
-  ---------------------------------------------- */
+  /* -------------------- End Travel -------------------- */
+
   async function endTravel() {
-    if (!activeLog) return;
+    if (!activeTravel) {
+      setError("No active travel to end.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
+    setInfo(null);
 
     try {
-      const gps = await new Promise<any>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) =>
-            resolve({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-            }),
-          reject,
-          { enableHighAccuracy: true, timeout: 15000 }
-        );
-      });
+      const gpsEnd = await getGPS();
 
-      const { km, source } = calculateKm({
-        startGPS: {
-          lat: activeLog.gps_start_lat,
-          lng: activeLog.gps_start_lng,
-        },
-        endGPS: gps,
-        odoStart: activeLog.odometer_start,
-        odoEnd: odometerEnd,
-      });
+      let km = haversineKm(
+        activeTravel.gps_start_lat,
+        activeTravel.gps_start_lng,
+        gpsEnd.lat,
+        gpsEnd.lng
+      );
+
+      if (km < 0.05 && odoStart && odoEnd) {
+        km = Number(odoEnd) - Number(odoStart);
+      }
+
+      if (km < 0.05) throw new Error("Distance too small.");
+      if (km > 300) throw new Error("Distance exceeds sanity limit.");
 
       const allowance = km * ratePerKm;
+      const nowUTC = new Date().toISOString();
 
-      const { error } = await supabase
+      await supabase
         .from("travel_logs")
         .update({
-          end_time: new Date().toISOString(),
-          gps_end_lat: gps.lat,
-          gps_end_lng: gps.lng,
-          odometer_end: odometerEnd || null,
+          end_time: nowUTC,
+          gps_end_lat: gpsEnd.lat,
+          gps_end_lng: gpsEnd.lng,
+          odometer_end: odoEnd || null,
           km_covered: km,
           allowance_amount: allowance,
           status: "completed",
         })
-        .eq("id", activeLog.id);
+        .eq("id", activeTravel.id);
 
-      if (error) throw error;
+      setInfo(
+        `Travel completed: ${km.toFixed(
+          2
+        )} km, allowance ₹${allowance.toFixed(2)}`
+      );
 
-      setActiveLog(null);
-      setOdometerStart("");
-      setOdometerEnd("");
-      setStartGPS(null);
-      setEndGPS(null);
+      setActiveTravel(null);
+      setOdoEnd("");
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -234,75 +226,143 @@ export default function TravelTracking() {
     }
   }
 
-  /* ---------------------------------------------
-     UI
-  ---------------------------------------------- */
+  /* -------------------- Derived -------------------- */
+
+  const firstSegment = segments.length > 0 ? segments[0] : null;
+
+  /* -------------------- UI -------------------- */
+
   return (
     <AppLayout>
-      <div className="container mx-auto max-w-xl space-y-4">
+      <div className="container py-4 space-y-4">
         <h2 className="text-lg font-semibold text-primary">Travel Tracking</h2>
 
         {error && (
-          <div className="bg-red-100 text-red-700 text-sm p-2 rounded">
+          <div className="bg-red-50 border border-red-300 p-3 rounded text-sm text-red-700">
             {error}
           </div>
         )}
 
-        <div className="bg-white rounded shadow p-4 space-y-3">
-          <div>
-            <label className="text-sm">Vehicle Type</label>
-            <select
-              value={vehicleType}
-              onChange={(e) => setVehicleType(e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm"
-            >
-              <option value="bike">Bike</option>
-              <option value="car">Car</option>
-              <option value="van">Van</option>
-            </select>
+        {info && (
+          <div className="bg-green-50 border border-green-300 p-3 rounded text-sm text-green-700">
+            {info}
           </div>
+        )}
 
-          {!activeLog && (
-            <>
-              <div>
-                <label className="text-sm">Odometer Start (optional)</label>
-                <input
-                  value={odometerStart}
-                  onChange={(e) => setOdometerStart(e.target.value)}
-                  className="w-full border rounded px-2 py-1 text-sm"
-                />
-              </div>
+        {activeTravel && (
+          <div className="text-sm text-slate-700">
+            🚗 Travel in progress since{" "}
+            {formatIST(activeTravel.start_time)}{" "}
+            <span className="text-xs text-slate-500">(IST)</span>
+          </div>
+        )}
 
-              <button
-                onClick={startTravel}
-                disabled={loading}
-                className="btn-primary w-full"
+        {/* MAP */}
+        {firstSegment && (
+          <div className="bg-white rounded-xl border shadow-sm p-3">
+            <div className="h-72 w-full rounded overflow-hidden border">
+              <MapContainer
+                center={[
+                  firstSegment.gps_start_lat,
+                  firstSegment.gps_start_lng,
+                ]}
+                zoom={14}
+                className="h-full w-full"
               >
-                Start Travel
-              </button>
-            </>
-          )}
-
-          {activeLog && (
-            <>
-              <div>
-                <label className="text-sm">Odometer End (optional)</label>
-                <input
-                  value={odometerEnd}
-                  onChange={(e) => setOdometerEnd(e.target.value)}
-                  className="w-full border rounded px-2 py-1 text-sm"
+                <TileLayer
+                  attribution="© OpenStreetMap contributors"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-              </div>
 
-              <button
-                onClick={endTravel}
-                disabled={loading}
-                className="btn-success w-full"
-              >
-                End Travel
-              </button>
-            </>
-          )}
+                {segments.map((s, i) => {
+                  const hasEnd =
+                    isValidCoord(s.gps_end_lat) &&
+                    isValidCoord(s.gps_end_lng);
+
+                  return (
+                    <React.Fragment key={i}>
+                      <Polyline
+                        positions={
+                          hasEnd
+                            ? [
+                                [s.gps_start_lat, s.gps_start_lng],
+                                [s.gps_end_lat, s.gps_end_lng],
+                              ]
+                            : [
+                                [s.gps_start_lat, s.gps_start_lng],
+                                [s.gps_start_lat, s.gps_start_lng],
+                              ]
+                        }
+                        pathOptions={
+                          hasEnd
+                            ? { color: "#2563eb", weight: 4 }
+                            : {
+                                color: "#f59e0b",
+                                dashArray: "6,6",
+                                weight: 4,
+                              }
+                        }
+                      />
+
+                      {hasEnd && (
+                        <Marker
+                          position={[s.gps_end_lat, s.gps_end_lng]}
+                        >
+                          <Popup>
+                            🏁 {s.km_covered?.toFixed(2)} km
+                          </Popup>
+                        </Marker>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </MapContainer>
+            </div>
+          </div>
+        )}
+
+        {/* FORM */}
+        <div className="bg-white rounded shadow p-4 space-y-3">
+          <label className="text-sm">Vehicle Type</label>
+          <select
+            value={vehicleType}
+            onChange={e => setVehicleType(e.target.value)}
+            className="w-full border rounded px-2 py-1 text-sm"
+          >
+            <option value="bike">Bike</option>
+            <option value="car">Car</option>
+            <option value="van">Van</option>
+          </select>
+
+          <input
+            placeholder="Odometer Start (optional)"
+            value={odoStart}
+            onChange={e => setOdoStart(e.target.value)}
+            className="w-full border rounded px-2 py-1 text-sm"
+          />
+
+          <button
+            onClick={startTravel}
+            disabled={loading || !!activeTravel}
+            className="btn-primary w-full"
+          >
+            Start Travel
+          </button>
+
+          <input
+            placeholder="Odometer End (optional)"
+            value={odoEnd}
+            onChange={e => setOdoEnd(e.target.value)}
+            className="w-full border rounded px-2 py-1 text-sm"
+          />
+
+          <button
+            onClick={endTravel}
+            disabled={loading || !activeTravel}
+            className="btn-success w-full"
+          >
+            End Travel
+          </button>
         </div>
       </div>
     </AppLayout>
