@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState , useRef} from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -12,6 +12,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatIST } from "../utils/time";
+import "leaflet-polylinedecorator";
 
 /* ---------------- Utilities ---------------- */
 
@@ -51,6 +52,7 @@ function getGPS(): Promise<{ lat: number; lng: number }> {
   });
 }
 
+
 /* ---------------- Component ---------------- */
 
 export default function TravelTracking() {
@@ -69,10 +71,16 @@ export default function TravelTracking() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-
+  
+  const [playIndex, setPlayIndex] = useState<number | null>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+const playbackTimerRef = useRef<number | null>(null);
+const isPlayingRef = useRef(false);
+	
+  
   /* ---------------- Load ---------------- */
-
-  useEffect(() => {
+  
+    useEffect(() => {
     if (!profile) return;
 
     async function load() {
@@ -115,6 +123,26 @@ export default function TravelTracking() {
 
     load();
   }, [profile, vehicleType]);
+
+
+const todayKey = segments
+  .filter(s => s.start_time)
+  .map(s => s.id)
+  .join(",");
+  
+useEffect(() => {
+  return () => {
+    if (playbackTimerRef.current) {
+      clearInterval(playbackTimerRef.current);
+    }
+  };
+}, []);
+
+useEffect(() => {
+  if (todaySegments.length === 0) return;
+  setPlayIndex(null);
+}, [todayKey]);
+
 
   /* ---------------- Start / End ---------------- */
 
@@ -210,6 +238,41 @@ export default function TravelTracking() {
     : todaySegments.length > 0
     ? [todaySegments[0].gps_start_lat, todaySegments[0].gps_start_lng]
     : null;
+/* ---------------- Derived playback segments ---------------- */
+const playbackSegments =
+  playIndex === null
+    ? todaySegments
+    : todaySegments.slice(0, playIndex + 1);
+
+function startPlayback() {
+  if (todaySegments.length === 0) return;
+
+  stopPlayback();
+  isPlayingRef.current = true;
+  setIsPlaying(true);
+
+  playbackTimerRef.current = setInterval(() => {
+    setPlayIndex(prev => {
+      if (prev === null) return 0;
+      if (prev >= todaySegments.length - 1) {
+        stopPlayback();
+        return prev;
+      }
+      return prev + 1;
+    });
+  }, 800);
+}
+
+function stopPlayback() {
+  isPlayingRef.current = false;
+  setIsPlaying(false);
+
+  if (playbackTimerRef.current) {
+    clearInterval(playbackTimerRef.current);
+    playbackTimerRef.current = null;
+  }
+}
+
 
   /* ---------------- UI ---------------- */
 
@@ -253,19 +316,22 @@ export default function TravelTracking() {
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
-                {todaySegments.map((s, i) => {
+                {playbackSegments.map((s, i) => {
   if (!s.gps_end_lat || !s.gps_end_lng) return null;
 
   return (
     <React.Fragment key={i}>
       {/* Polyline */}
+	  
       <Polyline
         positions={[
           [s.gps_start_lat, s.gps_start_lng],
           [s.gps_end_lat, s.gps_end_lng],
         ]}
+		
         pathOptions={{ color: "#2563eb", weight: 5 }}
       />
+	  
 {/* 🚦 Start marker */}
 <Marker
   position={[s.gps_start_lat, s.gps_start_lng]}
@@ -356,6 +422,28 @@ export default function TravelTracking() {
               </MapContainer>
 			  
   </div>
+<input
+  type="range"
+  min={0}
+  max={todaySegments.length - 1}
+  value={playIndex ?? todaySegments.length - 1}
+  onChange={(e) => {
+    stopPlayback();
+    setPlayIndex(Number(e.target.value));
+  }}
+  className="w-full"
+/>
+
+<button
+  onClick={() => {
+    if (isPlaying) stopPlayback();
+    else startPlayback();
+  }}
+  className="text-sm font-semibold text-slate-700 mb-2"
+>
+  {isPlaying ? "⏸ Pause" : "▶ Route Playback"}
+</button>
+
 
 {/* Legend */}
       <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-600">
@@ -374,6 +462,7 @@ export default function TravelTracking() {
             </div>
           </div>
         )}
+
 
         {/* FORM */}
         <div className="bg-white rounded shadow p-4 space-y-3">
