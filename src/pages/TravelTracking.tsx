@@ -14,6 +14,7 @@ import "leaflet/dist/leaflet.css";
 import { formatIST } from "../utils/time";
 import "leaflet-polylinedecorator";
 
+
 /* ---------------- Utilities ---------------- */
 
 function isValidCoord(v: any) {
@@ -50,6 +51,19 @@ function getGPS(): Promise<{ lat: number; lng: number }> {
       { enableHighAccuracy: true, timeout: 15000 }
     );
   });
+}
+
+/* ---------------- Arrow Map ---------------- */
+
+function bearing(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+  const x =
+    Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+    Math.sin(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.cos(toRad(lon2 - lon1));
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
 
@@ -239,13 +253,20 @@ useEffect(() => {
     ? [todaySegments[0].gps_start_lat, todaySegments[0].gps_start_lng]
     : null;
 /* ---------------- Derived playback segments ---------------- */
+const completedTodaySegments = todaySegments.filter(
+  s =>
+    isValidCoord(s.gps_end_lat) &&
+    isValidCoord(s.gps_end_lng)
+);
+
 const playbackSegments =
   playIndex === null
-    ? todaySegments
-    : todaySegments.slice(0, playIndex + 1);
+    ? completedTodaySegments
+    : completedTodaySegments.slice(0, playIndex + 1);
 
 function startPlayback() {
-  if (todaySegments.length === 0) return;
+  if (completedTodaySegments.length === 0) return;
+  if (playbackTimerRef.current) return; // 🛑 prevent double start
 
   stopPlayback();
   isPlayingRef.current = true;
@@ -317,7 +338,12 @@ function stopPlayback() {
                 />
 
                 {playbackSegments.map((s, i) => {
-  if (!s.gps_end_lat || !s.gps_end_lng) return null;
+  const hasEnd =
+    isValidCoord(s.gps_end_lat) &&
+    isValidCoord(s.gps_end_lng);
+
+  if (!hasEnd) return null;
+
 
   return (
     <React.Fragment key={i}>
@@ -452,10 +478,13 @@ function stopPlayback() {
           Completed Travel
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-1 border-t-2 border-dashed border-amber-500" />
-          In-Progress Travel
-<div className="flex items-center gap-2">🧭 You are here</div>
-        </div>
+  <span className="w-4 h-1 border-t-2 border-dashed border-amber-500" />
+  In-Progress Travel
+</div>
+<div className="flex items-center gap-2">
+  🧭 You are here
+</div>
+
         <div className="flex items-center gap-2">🚦 Start</div>
         <div className="flex items-center gap-2">🏁 End       </div>
 				      </div>
@@ -483,13 +512,18 @@ function stopPlayback() {
             className="w-full border rounded px-2 py-1"
           />
 
-          <button
-            onClick={startTravel}
-            disabled={loading || !!activeTravel}
-            className="btn-primary w-full"
-          >
-            Start Travel
-          </button>
+         <button
+  onClick={startTravel}
+  disabled={loading || !!activeTravel}
+  className={`w-full ${
+    activeTravel
+      ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+      : "bg-blue-600 hover:bg-blue-700 text-white"
+  } px-4 py-2 rounded font-semibold`}
+>
+  🚦 Start Travel
+</button>
+
 
           <input
             placeholder="Odometer End"
@@ -498,13 +532,18 @@ function stopPlayback() {
             className="w-full border rounded px-2 py-1"
           />
 
-          <button
-            onClick={endTravel}
-            disabled={loading || !activeTravel}
-            className="btn-success w-full"
-          >
-            End Travel
-          </button>
+         <button
+  onClick={endTravel}
+  disabled={loading || !activeTravel}
+  className={`w-full ${
+    !activeTravel
+      ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+      : "bg-green-600 hover:bg-green-700 text-white"
+  } px-4 py-2 rounded font-semibold`}
+>
+  🏁 End Travel
+</button>
+
         </div>
       </div>
     </AppLayout>
