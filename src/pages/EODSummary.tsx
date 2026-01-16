@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState , useRef} from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import SignatureCanvas from "react-signature-canvas";
+
 
 // 🔹 Standard site label formatter
 function formatSite(site: any) {
@@ -22,6 +24,7 @@ export default function EODSummary() {
   const [taskSummary, setTaskSummary] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
+  
 
   // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
@@ -112,13 +115,6 @@ export default function EODSummary() {
   // --------------------------------------------------
   // SUBMIT EOD (NEW)
   // --------------------------------------------------
-
-const isLocked = assignment?.status === "approved";
-const isEditable = assignment?.status === "open" || assignment?.status === "rejected";
-
-
-  <input disabled={isLocked} />
-  
 
   {assignment?.status === "rejected" && assignment.rejection_reason && (
   <div className="bg-red-50 border border-red-200 p-3 rounded text-sm text-red-700">
@@ -230,6 +226,60 @@ function CustodianEOD({
   submitting,
   submitMsg,
 }: any) {
+  const sigPadRef = useRef<any>(null);
+  const [signing, setSigning] = useState(false);
+  const [sigError, setSigError] = useState<string | null>(null);
+
+  async function submitSignature() {
+    if (!assignment?.id) return;
+
+    if (!sigPadRef.current || sigPadRef.current.isEmpty()) {
+      setSigError("Please sign before submitting.");
+      return;
+    }
+
+    try {
+      setSigning(true);
+      setSigError(null);
+
+      // Convert signature to image
+      const dataUrl = sigPadRef.current.toDataURL("image/png");
+      const blob = await (await fetch(dataUrl)).blob();
+
+      const path = `eod_signature_assignment_${assignment.id}_${Date.now()}.png`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from("eod-signatures")
+        .upload(path, blob, { contentType: "image/png" });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("eod-signatures")
+        .getPublicUrl(path);
+
+      // Lock EOD
+      const { error } = await supabase
+        .from("assignments")
+        .update({
+          eod_signed: true,
+          eod_signed_at: new Date().toISOString(),
+          eod_signature_url: data.publicUrl,
+        })
+        .eq("id", assignment.id);
+
+      if (error) throw error;
+
+      alert("EOD signed and locked successfully.");
+      sigPadRef.current.clear();
+    } catch (err) {
+      setSigError("Failed to save signature. Please try again.");
+    } finally {
+      setSigning(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-primary">
@@ -245,43 +295,26 @@ function CustodianEOD({
       {assignment && (
         <>
           <div className="p-4 bg-white rounded shadow text-sm">
-            <div className="font-semibold">
-              Assignment ID: {assignment.id}
-            </div>
+            <div className="font-semibold">Assignment ID: {assignment.id}</div>
             <div>Status: {assignment.status}</div>
           </div>
 
           <h3 className="font-semibold">Route Sites</h3>
           {routeSites.map((rs: any, idx: number) => (
-            <div
-              key={rs.id}
-              className="p-3 bg-white rounded shadow text-sm"
-            >
+            <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
               {idx + 1}. {formatSite(rs.site)}
             </div>
           ))}
 
           <h3 className="font-semibold">Tasks Summary</h3>
           <div className="grid grid-cols-2 gap-3">
-            <SummaryBox
-              label="Denomination Plans"
-              value={taskSummary?.denomCount}
-            />
-            <SummaryBox
-              label="Cash Pickup"
-              value={taskSummary?.pickupCount}
-            />
-            <SummaryBox
-              label="ATM Loads"
-              value={taskSummary?.loadCount}
-            />
-            <SummaryBox
-              label="Issues Logged"
-              value={taskSummary?.issueCount}
-            />
+            <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
+            <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
+            <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
+            <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
           </div>
 
-          {/* 🔹 EOD SUBMIT BUTTON (NEW) */}
+          {/* Submit EOD */}
           {assignment.status === "open" && (
             <div className="pt-4">
               <button
@@ -295,15 +328,100 @@ function CustodianEOD({
           )}
 
           {submitMsg && (
-            <p className="text-sm text-center text-green-700">
-              {submitMsg}
-            </p>
+            <p className="text-sm text-center text-green-700">{submitMsg}</p>
           )}
         </>
+      )}
+
+      {/* ✍️ DIGITAL SIGNATURE */}
+      {assignment?.status === "submitted" && !assignment.eod_signed && (
+        <div className="mt-6 p-4 bg-white rounded shadow">
+          <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
+
+          <p className="text-xs text-slate-500 mb-2">
+            Please sign to confirm today’s cash operations are accurate.
+          </p>
+
+          <div className="border rounded bg-slate-50">
+            <SignatureCanvas
+              ref={sigPadRef}
+              penColor="black"
+              canvasProps={{ width: 500, height: 180, className: "w-full" }}
+            />
+          </div>
+
+          {sigError && <p className="text-xs text-red-600 mt-2">{sigError}</p>}
+
+          <div className="flex gap-3 mt-3">
+            <button
+              className="btn-secondary"
+              onClick={() => sigPadRef.current?.clear()}
+            >
+              Clear
+            </button>
+
+            <button
+              className="btn-primary"
+              onClick={submitSignature}
+              disabled={signing}
+            >
+              {signing ? "Saving..." : "Sign & Lock EOD"}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
 }
+
+
+  async function submitSignature() {
+    if (!assignment?.id) return;
+
+    if (!sigPadRef.current || sigPadRef.current.isEmpty()) {
+      setSigError("Please sign before submitting.");
+      return;
+    }
+
+    try {
+      setSigning(true);
+      setSigError(null);
+
+      const dataUrl = sigPadRef.current.toDataURL("image/png");
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+
+      const path = `assignment_${assignment.id}_${Date.now()}.png`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("eod-signatures")
+        .upload(path, blob, { contentType: "image/png" });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("eod-signatures")
+        .getPublicUrl(path);
+
+      const { error } = await supabase
+        .from("assignments")
+        .update({
+          eod_signed: true,
+          eod_signed_at: new Date().toISOString(),
+          eod_signature_url: data.publicUrl,
+        })
+        .eq("id", assignment.id);
+
+      if (error) throw error;
+
+      alert("EOD signed successfully.");
+      sigPadRef.current.clear();
+    } catch (e) {
+      setSigError("Failed to save signature.");
+    } finally {
+      setSigning(false);
+    }
+  }
 
 // --------------------------------------------------
 // Admin UI
