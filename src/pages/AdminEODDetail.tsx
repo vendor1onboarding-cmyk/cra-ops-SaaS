@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
+import { useAuth } from "../context/AuthContext";
+
 
 /**
  * Standard site formatter
@@ -17,6 +19,8 @@ function formatSite(site: any) {
 export default function AdminEODDetail() {
   const params = useParams();
   const navigate = useNavigate();
+const { profile } = useAuth();
+const [rejectReason, setRejectReason] = useState("");
 
   // 🔑 FIX: parse assignmentId as number
   const assignmentId = Number(params.assignmentId);
@@ -220,23 +224,87 @@ export default function AdminEODDetail() {
             </div>
           ))}
         </Section>
+{/* ---------- Signature Review ---------- */}
+        {assignment.eod_signed && assignment.eod_signature_url && (
+          <div className="bg-white border rounded-xl p-4">
+            <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
+            <div className="border bg-slate-50 p-3 inline-block">
+              <img
+                src={assignment.eod_signature_url}
+                alt="Custodian Signature"
+                className="max-h-40 object-contain"
+              />
+            </div>
+            <div className="text-xs text-slate-500 mt-2">
+              Signed on{" "}
+              {new Date(assignment.eod_signed_at).toLocaleString("en-IN")}
+            </div>
+          </div>
+        )}
 
+        {/* ---------- Approval Actions ---------- */}
         {assignment.status === "submitted" && (
-          <div className="flex gap-4">
+          <div className="bg-white border rounded-xl p-4 space-y-3">
+            <div className="flex gap-3">
+              <button
+                className="btn-primary"
+                onClick={async () => {
+                  await supabase
+                    .from("assignments")
+                    .update({
+                      status: "approved",
+                      approved_at: new Date().toISOString(),
+                      approved_by: profile?.id,
+                    })
+                    .eq("id", assignment.id);
+
+                  navigate("/admin/approvals");
+                }}
+              >
+                ✅ Approve EOD
+              </button>
+
+              <button
+                className="btn-secondary"
+                onClick={() => navigate("/admin/approvals")}
+              >
+                Back
+              </button>
+            </div>
+
+            <textarea
+              placeholder="Reason for rejection (mandatory)"
+              className="w-full border rounded p-2 text-sm"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+            />
+
             <button
-              onClick={() => updateStatus("approved")}
-              className="bg-green-600 text-white px-4 py-2 rounded"
+              className="btn-danger"
+              onClick={async () => {
+                if (!rejectReason.trim()) {
+                  alert("Rejection reason is mandatory");
+                  return;
+                }
+
+                await supabase
+                  .from("assignments")
+                  .update({
+                    status: "rejected",
+                    rejected_at: new Date().toISOString(),
+                    rejected_by: profile?.id,
+                    rejection_reason: rejectReason,
+                  })
+                  .eq("id", assignment.id);
+
+                navigate("/admin/approvals");
+              }}
             >
-              Approve
-            </button>
-            <button
-              onClick={() => updateStatus("rejected")}
-              className="bg-red-600 text-white px-4 py-2 rounded"
-            >
-              Reject
+              ❌ Reject EOD
             </button>
           </div>
         )}
+
       </div>
     </AppLayout>
   );

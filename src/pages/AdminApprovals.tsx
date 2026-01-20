@@ -10,7 +10,7 @@ type Assignment = {
   title: string | null;
   status: string;
   custodian_id: string;
-  custodian_name?: string;
+  custodian_name: string;
 };
 
 export default function AdminApprovals() {
@@ -24,7 +24,7 @@ export default function AdminApprovals() {
     async function load() {
       setLoading(true);
 
-      // 1️⃣ Load submitted assignments ONLY (no joins)
+      /* ---- 1. Load submitted assignments ONLY ---- */
       const { data: assignmentData, error } = await supabase
         .from("assignments")
         .select("id, assignment_date, title, status, custodian_id")
@@ -37,9 +37,9 @@ export default function AdminApprovals() {
         return;
       }
 
-      // 2️⃣ Load custodian profiles separately
+      /* ---- 2. Load custodian names separately (RLS-safe) ---- */
       const custodianIds = [
-        ...new Set(assignmentData.map((a) => a.custodian_id)),
+        ...new Set(assignmentData.map(a => a.custodian_id)),
       ];
 
       const { data: profiles } = await supabase
@@ -47,14 +47,14 @@ export default function AdminApprovals() {
         .select("id, full_name")
         .in("id", custodianIds);
 
-      const profileMap = new Map(
-        profiles?.map((p) => [p.id, p.full_name]) || []
+      const nameMap = new Map(
+        profiles?.map(p => [p.id, p.full_name]) || []
       );
 
-      // 3️⃣ Merge safely
-      const merged = assignmentData.map((a) => ({
+      /* ---- 3. Merge cleanly ---- */
+      const merged = assignmentData.map(a => ({
         ...a,
-        custodian_name: profileMap.get(a.custodian_id) || "—",
+        custodian_name: nameMap.get(a.custodian_id) || "—",
       }));
 
       setAssignments(merged);
@@ -66,7 +66,7 @@ export default function AdminApprovals() {
 
   return (
     <AppLayout>
-      <div className="max-w-5xl mx-auto space-y-3">
+      <div className="max-w-6xl mx-auto space-y-4">
         <h2 className="text-xl font-semibold text-primary">
           Admin – EOD Approvals
         </h2>
@@ -82,7 +82,7 @@ export default function AdminApprovals() {
         {!loading && assignments.length > 0 && (
           <div className="bg-white shadow rounded overflow-x-auto">
             <table className="w-full text-sm border-collapse">
-              <thead className="bg-slate-100 text-left">
+              <thead className="bg-slate-100">
                 <tr>
                   <th className="p-3 border">Date</th>
                   <th className="p-3 border">Assignment</th>
@@ -92,26 +92,20 @@ export default function AdminApprovals() {
                 </tr>
               </thead>
               <tbody>
-                {assignments.map((a) => (
+                {assignments.map(a => (
                   <tr key={a.id} className="hover:bg-slate-50">
-                    <td className="p-3 border">
-                      {a.assignment_date}
-                    </td>
+                    <td className="p-3 border">{a.assignment_date}</td>
                     <td className="p-3 border">
                       {a.title || `Assignment #${a.id}`}
                     </td>
-                    <td className="p-3 border">
-                      {a.custodian_name}
-                    </td>
-                    <td className="p-3 border capitalize">
-                      {a.status}
-                    </td>
+                    <td className="p-3 border">{a.custodian_name}</td>
+                    <td className="p-3 border capitalize">{a.status}</td>
                     <td className="p-3 border text-center">
                       <Link
                         to={`/admin/approvals/${a.id}`}
-                        className="px-3 py-1 bg-slate-700 text-white rounded text-xs"
+                        className="btn-primary text-xs"
                       >
-                        View
+                        View EOD
                       </Link>
                     </td>
                   </tr>
