@@ -12,6 +12,7 @@ const ICONS: Record<string, string> = {
   Denomination: "💰",
   "Cash Pickup": "🏦",
   "ATM Load": "🏧",
+  "Statement of Accounts": "📑",
   "Travel Log": "🚗", // ✅ NEW
   "ATM Excess Cash": "🧾💵",
   "ATM Cash Adjustment": "🔄💵",
@@ -19,6 +20,7 @@ const ICONS: Record<string, string> = {
   EOD: "🧾",
    "Route Assignment": "🗺️",
   "EOD Approvals": "✅",
+  "SOA Adjustments": "🧮",
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -49,6 +51,7 @@ const navItems = isAdmin
       { to: "/admin", label: "Admin Dashboard" },
       { to: "/admin/approvals", label: "EOD Approvals" },
       { to: "/admin/route-assignment", label: "Route Assignment" },
+      { to: "/admin/soa-adjustments", label: "SOA Adjustments" },
     ]
   : [
     { to: "/", label: "Dashboard" },
@@ -59,7 +62,9 @@ const navItems = isAdmin
 	{ to: "/atm-adjustment", label: "ATM Cash Adjustment" },
     { to: "/technical-issues", label: "Tech Issues" },
     { to: "/eod-summary", label: "EOD" },
+	{ to: "/soa", label: "Statement of Accounts" },
 	{ to: "/travel-log", label: "Travel Log" },
+	
     ];
 
   function NavLinks({ onClick }: { onClick?: () => void }) {

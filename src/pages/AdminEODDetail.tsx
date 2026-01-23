@@ -4,10 +4,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 
-
-/**
- * Standard site formatter
- */
+/* ---------------- Utilities ---------------- */
 function formatSite(site: any) {
   if (!site) return "Unknown Site";
   const bank = site.bank_name || "Bank";
@@ -16,17 +13,28 @@ function formatSite(site: any) {
   return `${bank} – ${address}${atm}`;
 }
 
-export default function AdminEODDetail() {
-  const params = useParams();
-  const navigate = useNavigate();
-const { profile } = useAuth();
-const [rejectReason, setRejectReason] = useState("");
+function denomTotal(row: any) {
+  return (
+    (row.denom_100 || 0) * 100 +
+    (row.denom_200 || 0) * 200 +
+    (row.denom_500 || 0) * 500 +
+    (row.denom_2000 || 0) * 2000
+  );
+}
 
-  // 🔑 FIX: parse assignmentId as number
-  const assignmentId = Number(params.assignmentId);
+/* ---------------- Component ---------------- */
+export default function AdminEODDetail() {
+  const { assignmentId } = useParams();
+  const navigate = useNavigate();
+  const { profile } = useAuth();
+
+  const id = Number(assignmentId);
 
   const [loading, setLoading] = useState(true);
   const [assignment, setAssignment] = useState<any>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showSignature, setShowSignature] = useState(false);
+
   const [data, setData] = useState<any>({
     routeSites: [],
     denominations: [],
@@ -36,20 +44,17 @@ const [rejectReason, setRejectReason] = useState("");
     travel: [],
   });
 
+  /* ---------------- Load Data ---------------- */
   useEffect(() => {
-    if (!assignmentId || Number.isNaN(assignmentId)) {
-      setLoading(false);
-      return;
-    }
+    if (!id) return;
 
     async function load() {
       setLoading(true);
 
-      /* ---------------- Assignment ---------------- */
       const { data: assignmentData } = await supabase
         .from("assignments")
         .select("*")
-        .eq("id", assignmentId)
+        .eq("id", id)
         .maybeSingle();
 
       if (!assignmentData) {
@@ -57,7 +62,6 @@ const [rejectReason, setRejectReason] = useState("");
         return;
       }
 
-      /* ---------------- All EOD Data ---------------- */
       const [
         routeSites,
         denominations,
@@ -68,66 +72,34 @@ const [rejectReason, setRejectReason] = useState("");
       ] = await Promise.all([
         supabase
           .from("route_sites")
-          .select(`
-            sequence_no,
-            site:site_id(
-              site_code,
-              bank_name,
-              address,
-              atm_id
-            )
-          `)
-          .eq("assignment_id", assignmentId)
+          .select(`sequence_no, site:site_id(*)`)
+          .eq("assignment_id", id)
           .order("sequence_no"),
 
         supabase
           .from("denomination_plans")
-          .select(`
-            *,
-            site:site_id(
-              site_code,
-              bank_name,
-              address,
-              atm_id
-            )
-          `)
-          .eq("assignment_id", assignmentId),
+          .select(`*, site:site_id(*)`)
+          .eq("assignment_id", id),
 
         supabase
           .from("cash_pickups")
           .select("*")
-          .eq("assignment_id", assignmentId),
+          .eq("assignment_id", id),
 
         supabase
           .from("atm_replenishments")
-          .select(`
-            *,
-            site:site_id(
-              site_code,
-              bank_name,
-              address,
-              atm_id
-            )
-          `)
-          .eq("assignment_id", assignmentId),
+          .select(`*, site:site_id(*)`)
+          .eq("assignment_id", id),
 
         supabase
           .from("technical_issues")
-          .select(`
-            *,
-            site:site_id(
-              site_code,
-              bank_name,
-              address,
-              atm_id
-            )
-          `)
-          .eq("assignment_id", assignmentId),
+          .select(`*, site:site_id(*)`)
+          .eq("assignment_id", id),
 
         supabase
           .from("travel_logs")
           .select("*")
-          .eq("assignment_id", assignmentId),
+          .eq("assignment_id", id),
       ]);
 
       setAssignment(assignmentData);
@@ -144,21 +116,12 @@ const [rejectReason, setRejectReason] = useState("");
     }
 
     load();
-  }, [assignmentId]);
-
-  async function updateStatus(status: "approved" | "rejected") {
-    await supabase
-      .from("assignments")
-      .update({ status })
-      .eq("id", assignmentId);
-
-    navigate("/admin/approvals");
-  }
+  }, [id]);
 
   if (loading) {
     return (
       <AppLayout>
-        <p className="text-sm">Loading EOD…</p>
+        <div className="container">Loading EOD details…</div>
       </AppLayout>
     );
   }
@@ -166,53 +129,99 @@ const [rejectReason, setRejectReason] = useState("");
   if (!assignment) {
     return (
       <AppLayout>
-        <p className="text-sm text-red-600">
-          Assignment not found.
-        </p>
+        <div className="container text-red-600">Assignment not found.</div>
       </AppLayout>
     );
   }
 
+  /* ---------------- Render ---------------- */
   return (
     <AppLayout>
-      <div className="max-w-5xl mx-auto space-y-3 text-sm">
-        <h2 className="text-lg font-semibold text-primary">
+      <div className="container space-y-6 text-sm">
+        <h2 className="text-xl font-semibold text-primary">
           EOD Detail – Assignment #{assignment.id}
         </h2>
 
-        <Section title="Assignment">
+        <Section title="Assignment Summary">
           <div>Date: {assignment.assignment_date}</div>
           <div>Status: {assignment.status}</div>
         </Section>
 
         <Section title="Route Sites">
-          {data.routeSites.map((r: any, i: number) => (
-            <div key={i}>
+          {data.routeSites.map((r: any) => (
+            <div key={r.sequence_no}>
               {r.sequence_no}. {formatSite(r.site)}
             </div>
           ))}
         </Section>
 
-        <Section title="Denomination Plans">
-          {data.denominations.map((d: any, i: number) => (
-            <div key={i}>
-              {formatSite(d.site)}
-            </div>
-          ))}
-        </Section>
+        <Section title="Cash Pickups (Detailed)">
+  {data.cashPickups.map((c: any, i: number) => {
+    const total =
+      (c.denom_100 || 0) * 100 +
+      (c.denom_200 || 0) * 200 +
+      (c.denom_500 || 0) * 500 +
+      (c.denom_2000 || 0) * 2000;
 
-        <Section title="Cash Pickups">
-          {data.cashPickups.map((c: any, i: number) => (
-            <div key={i}>
-              {c.bank_name} – ₹{c.total_amount}
-            </div>
-          ))}
-        </Section>
+    return (
+      <div key={i} className="border rounded p-3 mb-3">
+        <div className="font-medium">
+          {c.bank_name} {c.branch && `– ${c.branch}`}
+        </div>
 
-        <Section title="ATM Replenishments">
+        <div className="text-xs text-slate-600">
+          Pickup Time:{" "}
+          {new Date(c.pickup_time).toLocaleString("en-IN")}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+          <div>₹100 × {c.denom_100}</div>
+          <div>₹200 × {c.denom_200}</div>
+          <div>₹500 × {c.denom_500}</div>
+          <div>₹2000 × {c.denom_2000}</div>
+        </div>
+
+        <div className="mt-2 font-semibold">
+          Total Picked: ₹{total}
+        </div>
+
+        {c.slip_url && (
+          <a
+            href={c.slip_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-blue-600 underline mt-1 inline-block"
+          >
+            View Pickup Slip
+          </a>
+        )}
+      </div>
+    );
+  })}
+</Section>
+
+
+        <Section title="ATM Replenishments (Detailed)">
           {data.atmLoads.map((a: any, i: number) => (
-            <div key={i}>
-              {formatSite(a.site)} – Closing ₹{a.closing_balance}
+            <div key={i} className="border rounded p-3 mb-2">
+              <div className="font-medium">{formatSite(a.site)}</div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                <div>₹100 × {a.denom_100}</div>
+                <div>₹200 × {a.denom_200}</div>
+                <div>₹500 × {a.denom_500}</div>
+                <div>₹2000 × {a.denom_2000}</div>
+              </div>
+
+              <div className="mt-2 font-semibold">
+                Total Loaded: ₹{denomTotal(a)}
+              </div>
+
+              {a.closing_balance != null && (
+                <div className="text-xs text-slate-600">
+                  Closing Balance: ₹{a.closing_balance}
+                </div>
+              )}
             </div>
           ))}
         </Section>
@@ -224,27 +233,43 @@ const [rejectReason, setRejectReason] = useState("");
             </div>
           ))}
         </Section>
-{/* ---------- Signature Review ---------- */}
+
+        {/* ---------------- Signature Review ---------------- */}
         {assignment.eod_signed && assignment.eod_signature_url && (
-          <div className="bg-white border rounded-xl p-4">
-            <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
-            <div className="border bg-slate-50 p-3 inline-block">
-              <img
-                src={assignment.eod_signature_url}
-                alt="Custodian Signature"
-                className="max-h-40 object-contain"
-              />
-            </div>
-            <div className="text-xs text-slate-500 mt-2">
-              Signed on{" "}
-              {new Date(assignment.eod_signed_at).toLocaleString("en-IN")}
-            </div>
-          </div>
+          <Section title="Custodian Signature">
+            <button
+              className="btn-secondary"
+              onClick={() => setShowSignature(true)}
+            >
+              View Signature
+            </button>
+
+            {showSignature && (
+              <div
+                className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+                onClick={() => setShowSignature(false)}
+              >
+                <div className="bg-white p-4 rounded shadow max-w-lg w-full">
+                  <img
+                    src={assignment.eod_signature_url}
+                    alt="Signature"
+                    className="w-full border"
+                  />
+                  <div className="text-xs mt-2 text-slate-500">
+                    Signed on{" "}
+                    {new Date(
+                      assignment.eod_signed_at
+                    ).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              </div>
+            )}
+          </Section>
         )}
 
-        {/* ---------- Approval Actions ---------- */}
+        {/* ---------------- Approval Actions ---------------- */}
         {assignment.status === "submitted" && (
-          <div className="bg-white border rounded-xl p-4 space-y-3">
+          <Section title="Approval Actions">
             <div className="flex gap-3">
               <button
                 className="btn-primary"
@@ -273,14 +298,14 @@ const [rejectReason, setRejectReason] = useState("");
             </div>
 
             <textarea
-              placeholder="Reason for rejection (mandatory)"
-              className="w-full border rounded p-2 text-sm"
+              className="w-full border rounded p-2 text-sm mt-3"
+              placeholder="Rejection reason (mandatory)"
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
             />
 
             <button
-              className="btn-danger"
+              className="btn-danger mt-2"
               onClick={async () => {
                 if (!rejectReason.trim()) {
                   alert("Rejection reason is mandatory");
@@ -302,27 +327,22 @@ const [rejectReason, setRejectReason] = useState("");
             >
               ❌ Reject EOD
             </button>
-          </div>
+          </Section>
         )}
-
       </div>
     </AppLayout>
   );
 }
 
-/* ---------------- Safe Section Wrapper ---------------- */
+/* ---------------- Section Wrapper ---------------- */
 function Section({ title, children }: any) {
-  const hasContent = Array.isArray(children)
-    ? children.length > 0
-    : !!children;
+  const hasContent = React.Children.count(children) > 0;
 
   return (
-    <div className="bg-white p-4 rounded shadow space-y-1">
-      <h3 className="font-semibold">{title}</h3>
-      {hasContent ? (
-        children
-      ) : (
-        <p className="text-slate-500 text-xs">No records</p>
+    <div className="bg-white p-4 rounded shadow">
+      <h3 className="font-semibold mb-2">{title}</h3>
+      {hasContent ? children : (
+        <p className="text-xs text-slate-500">No records</p>
       )}
     </div>
   );

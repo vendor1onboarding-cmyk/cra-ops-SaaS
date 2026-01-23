@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import AdminRouteAssignmentPage from "./pages/AdminRouteAssignment";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminSOAAdjustments from "./pages/AdminSOAAdjustments";
 
 
 
@@ -15,6 +16,7 @@ import ATMCashAdjustmentPage from "./pages/ATMCashAdjustment";
 import TechnicalIssuesPage from "./pages/TechnicalIssues";
 import EODSummaryPage from "./pages/EODSummary";
 import TravelTrackingPage from "./pages/TravelTracking";
+import StatementOfAccounts from "./pages/StatementOfAccounts";
 
 
 import AdminApprovalsPage from "./pages/AdminApprovals";
@@ -138,6 +140,14 @@ export default function App() {
   }
 />
 
+<Route
+  path="/soa"
+  element={
+    <PrivateRoute>
+      <StatementOfAccounts />
+    </PrivateRoute>
+  }
+/>
 
         {/* ----------------- ADMIN ROUTES ----------------- */}
         <Route
@@ -169,6 +179,15 @@ export default function App() {
     </RequireAdmin>
   }
 />
+<Route
+  path="/admin/soa-adjustments"
+  element={
+    <RequireAdmin>
+      <AdminSOAAdjustments />
+    </RequireAdmin>
+  }
+/>
+
 
         {/* ----------------- FALLBACK ----------------- */}
         <Route path="*" element={<Navigate to="/" replace />} />
