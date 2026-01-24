@@ -24,9 +24,7 @@ export default function EODSummary() {
   const [taskSummary, setTaskSummary] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
-  const [showSignatureModal, setShowSignatureModal] = useState(false);
-  const modalSigPadRef = useRef<any>(null);
-
+  
 
   // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
@@ -336,110 +334,42 @@ function CustodianEOD({
       )}
 
       {/* ✍️ DIGITAL SIGNATURE */}
-{assignment?.status === "submitted" && !assignment.eod_signed && (
-  <>
-    <div className="mt-6 p-4 bg-white rounded shadow">
-      <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
+      {assignment?.status === "submitted" && !assignment.eod_signed && (
+        <div className="mt-6 p-4 bg-white rounded shadow">
+          <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
 
-      <p className="text-xs text-slate-500 mb-2">
-        Please sign to confirm today’s cash operations are accurate.
-      </p>
+          <p className="text-xs text-slate-500 mb-2">
+            Please sign to confirm today’s cash operations are accurate.
+          </p>
 
-      {/* Preview / Tap to expand */}
-      <div
-        className="border rounded bg-slate-50 cursor-pointer"
-        onClick={() => setShowSignatureModal(true)}
-      >
-        <SignatureCanvas
-          ref={sigPadRef}
-          penColor="black"
-          canvasProps={{
-            width: 500,
-            height: 180,
-            className: "w-full pointer-events-none",
-          }}
-        />
-        <p className="text-center text-xs text-slate-500 py-1">
-          Tap to sign (full screen)
-        </p>
-      </div>
-
-      {sigError && (
-        <p className="text-xs text-red-600 mt-2">{sigError}</p>
-      )}
-
-      <div className="flex gap-3 mt-3">
-        <button
-          className="btn-secondary"
-          onClick={() => sigPadRef.current?.clear()}
-        >
-          Clear
-        </button>
-
-        <button
-          className="btn-primary"
-          onClick={submitSignature}
-          disabled={signing}
-        >
-          {signing ? "Saving..." : "Sign & Lock EOD"}
-        </button>
-      </div>
-    </div>
-
-    {/* ================= FULL SCREEN SIGNATURE MODAL ================= */}
-    {showSignatureModal && (
-      <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center">
-        <div className="bg-white w-full h-full sm:w-[90%] sm:h-[90%] rounded-lg p-4 flex flex-col">
-
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="font-semibold text-lg">✍️ Sign Here</h3>
-            <button
-              className="text-sm text-red-600"
-              onClick={() => setShowSignatureModal(false)}
-            >
-              Close ✖
-            </button>
-          </div>
-
-          <div className="flex-1 border rounded bg-slate-50">
+          <div className="border rounded bg-slate-50">
             <SignatureCanvas
-              ref={modalSigPadRef}
+              ref={sigPadRef}
               penColor="black"
-              canvasProps={{
-                className: "w-full h-full",
-              }}
+              canvasProps={{ width: 500, height: 180, className: "w-full" }}
             />
           </div>
 
-          <div className="flex gap-3 mt-3 justify-end">
+          {sigError && <p className="text-xs text-red-600 mt-2">{sigError}</p>}
+
+          <div className="flex gap-3 mt-3">
             <button
               className="btn-secondary"
-              onClick={() => modalSigPadRef.current?.clear()}
+              onClick={() => sigPadRef.current?.clear()}
             >
               Clear
             </button>
 
             <button
               className="btn-primary"
-              onClick={() => {
-                // Copy signature from modal → main canvas
-                const data =
-                  modalSigPadRef.current?.toDataURL();
-                if (data) {
-                  sigPadRef.current?.fromDataURL(data);
-                }
-                setShowSignatureModal(false);
-              }}
+              onClick={submitSignature}
+              disabled={signing}
             >
-              Done
+              {signing ? "Saving..." : "Sign & Lock EOD"}
             </button>
           </div>
         </div>
-      </div>
-    )}
-  </>
-)}
-
+      )}
     </div>
   );
 }
