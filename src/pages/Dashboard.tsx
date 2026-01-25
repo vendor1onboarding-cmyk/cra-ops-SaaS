@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import { getISTDateString, getISTMonthStart } from "../utils/time";
 
 const DENOMS = [100, 200, 500, 2000];
 
@@ -36,14 +37,8 @@ const isApproved = assignment?.status === "approved";
 const isEditable = assignment?.status === "open" || assignment?.status === "rejected";
 
 
-const today = new Date().toISOString().slice(0, 10);
-const monthStart = new Date(
-  new Date().getFullYear(),
-  new Date().getMonth(),
-  1
-)
-  .toISOString()
-  .slice(0, 10);
+const today = getISTDateString();
+const monthStart = getISTMonthStart();
 
 const [todayKm, setTodayKm] = useState(0);
 const [monthlyKm, setMonthlyKm] = useState(0);
@@ -97,7 +92,7 @@ loadTravelKPI();
 
   async function loadDashboard() {
     setLoading(true);
-    const today = new Date().toISOString().split("T")[0];
+    const today = getISTDateString();
 
     const { data: assign } = await supabase
       .from("assignments")

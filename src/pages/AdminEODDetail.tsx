@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { formatIST, formatISTAudit } from "../utils/time";
 
 /* ---------------- Utilities ---------------- */
 function formatSite(site: any) {
@@ -170,8 +171,9 @@ export default function AdminEODDetail() {
         </div>
 
         <div className="text-xs text-slate-600">
-          Pickup Time:{" "}
-          {new Date(c.pickup_time).toLocaleString("en-IN")}
+          Pickup Time:
+          {" "}
+          {formatIST(c.pickup_time)}
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs mt-2">

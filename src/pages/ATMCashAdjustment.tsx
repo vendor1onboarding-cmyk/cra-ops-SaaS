@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { getISTDateString } from "../utils/time";
 
 /* ================= CONFIG ================= */
 const GEO_MODE: "OFF" | "SOFT" = "SOFT";
@@ -86,7 +87,7 @@ export default function ATMCashAdjustment() {
     if (!profile) return;
 
     async function load() {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getISTDateString();
 
       const { data: assignment } = await supabase
         .from("assignments")

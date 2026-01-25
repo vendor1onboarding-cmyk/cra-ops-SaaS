@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { getISTDateString } from "../utils/time";
 
 const GPS_RADIUS_METERS = 100;
 
@@ -73,7 +74,7 @@ export default function ATMReplenishment() {
     if (!profile) return;
 
     (async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getISTDateString();
 
       const { data: a } = await supabase
         .from("assignments")

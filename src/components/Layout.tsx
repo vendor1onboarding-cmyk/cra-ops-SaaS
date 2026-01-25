@@ -51,6 +51,7 @@ const navItems = isAdmin
       { to: "/admin", label: "Admin Dashboard" },
       { to: "/admin/approvals", label: "EOD Approvals" },
       { to: "/admin/route-assignment", label: "Route Assignment" },
+      { to: "/soa", label: "Statement of Accounts" },
       { to: "/admin/soa-adjustments", label: "SOA Adjustments" },
     ]
   : [

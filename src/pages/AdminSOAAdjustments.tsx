@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import {
+  formatISTDate,
+  formatIST,
+  formatISTAudit,
+} from "../utils/time";
 
 type SOA = {
   id: number;
@@ -43,12 +48,11 @@ export default function AdminSOAAdjustments() {
         const { data, error: queryError } = await supabase
           .from("v_soa_effective")
           .select(
-            `id,
+            `soa_id,
             assignment_id,
             custodian_id,
             assignment_date,
-            final_net_cash_position,
-            custodian:custodian_id(full_name)`
+            final_net_cash_position`
           )
           .order("assignment_date", { ascending: false });
 
@@ -57,9 +61,27 @@ export default function AdminSOAAdjustments() {
           console.error("Query Error:", queryError);
           setSoaList([]);
         } else {
+          // Fetch custodian names separately from profiles table
+          const custodianIds = [...new Set((data || []).map((row: any) => row.custodian_id))];
+          
+          let custodianMap: { [key: string]: string } = {};
+          if (custodianIds.length > 0) {
+            const { data: custodians } = await supabase
+              .from("profiles")
+              .select("id, full_name")
+              .in("id", custodianIds);
+            
+            if (custodians) {
+              custodians.forEach((c: any) => {
+                custodianMap[c.id] = c.full_name;
+              });
+            }
+          }
+
           const processedData = (data || []).map((row: any) => ({
+            id: row.soa_id,
             ...row,
-            full_name: row.custodian?.full_name || undefined,
+            full_name: custodianMap[row.custodian_id] || "Unknown",
           }));
           setSoaList(processedData);
         }
@@ -239,8 +261,8 @@ export default function AdminSOAAdjustments() {
                 <option value="">-- Select an Assignment --</option>
                 {soaList.map((s) => (
                   <option key={s.id} value={s.id}>
-                    📅 {new Date(s.assignment_date).toLocaleDateString()} |
-                    Assignment #{s.assignment_id} | {s.full_name}
+                    📅 {formatISTDate(s.assignment_date, "short")} | Assignment
+                    #{s.assignment_id} | {s.full_name}
                   </option>
                 ))}
               </select>
@@ -282,7 +304,7 @@ export default function AdminSOAAdjustments() {
                     Assignment Date
                   </p>
                   <p className="text-sm font-semibold text-blue-900">
-                    {new Date(selectedSOA.assignment_date).toLocaleDateString()}
+                    {formatISTDate(selectedSOA.assignment_date, "short")}
                   </p>
                 </div>
               </div>

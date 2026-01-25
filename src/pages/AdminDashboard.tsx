@@ -3,6 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
+import { getISTDateString, formatISTDate } from "../utils/time";
 
 export default function AdminDashboard() {
   const { profile } = useAuth();
@@ -20,7 +21,7 @@ export default function AdminDashboard() {
       setLoading(true);
 
       try {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = getISTDateString();
 
         // Fetch all assignment counts in parallel
         const [
@@ -137,7 +138,7 @@ export default function AdminDashboard() {
               <tbody>
                 {eods.map((eod) => (
                   <tr key={eod.id} className="border-t">
-                    <td className="p-3">{eod.assignment_date}</td>
+                    <td className="p-3">{formatISTDate(eod.assignment_date, "short")}</td>
                     <td className="p-3">
                       {eod.custodian?.full_name || "—"}
                     </td>

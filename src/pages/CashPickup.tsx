@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import { getISTDateString } from "../utils/time";
 
 export default function CashPickup() {
   const { profile } = useAuth();
@@ -24,7 +25,7 @@ export default function CashPickup() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = getISTDateString();
 
   // --------------------------------------------------
   // Load TODAY's assignment ONLY (NO FALLBACK)

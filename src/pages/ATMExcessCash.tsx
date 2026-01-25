@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { getISTDateString } from "../utils/time";
 
 export default function ATMExcessCash() {
   const { profile } = useAuth();
@@ -28,7 +29,7 @@ export default function ATMExcessCash() {
     if (!profile) return;
 
     async function loadData() {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getISTDateString();
 
       const { data: assignment } = await supabase
         .from("assignments")

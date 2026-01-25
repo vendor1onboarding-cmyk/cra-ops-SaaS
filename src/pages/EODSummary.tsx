@@ -3,6 +3,11 @@ import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 import SignatureCanvas from "react-signature-canvas";
+import {
+  getISTDateString,
+  formatISTDate,
+  formatIST,
+} from "../utils/time";
 
 
 // 🔹 Standard site label formatter
@@ -31,7 +36,7 @@ export default function EODSummary() {
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
   const [issueSummary, setIssueSummary] = useState<any>(null);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = getISTDateString();
 
   useEffect(() => {
     if (!profile) return;
@@ -360,7 +365,7 @@ function CustodianEOD({
         <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded shadow">
           <h3 className="font-semibold mb-2 text-green-800">✍️ Signed EOD</h3>
           <p className="text-xs text-slate-600 mb-4">
-            Signed on: {new Date(assignment.eod_signed_at).toLocaleString()}
+            Signed on: {formatIST(assignment.eod_signed_at)}
           </p>
           {assignment.eod_signature_url && (
             <div className="border rounded bg-white p-2">

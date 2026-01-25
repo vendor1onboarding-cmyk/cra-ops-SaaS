@@ -2,6 +2,11 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import {
+  getISTDateString,
+  getISTMonthStart,
+  formatISTDate,
+} from "../utils/time";
 
 type SOARow = {
   soa_id: number;
@@ -24,14 +29,10 @@ export default function StatementOfAccounts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [fromDate, setFromDate] = useState(
-    new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-      .toISOString()
-      .slice(0, 10)
-  );
-  const [toDate, setToDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  // Initialize dates based on IST timezone
+  // These are used for database queries (stored in DATE format, not timestamps)
+  const [fromDate, setFromDate] = useState(getISTMonthStart());
+  const [toDate, setToDate] = useState(getISTDateString());
 
   const isAdmin = profile?.role === "admin" || profile?.role === "supervisor";
 
@@ -56,8 +57,7 @@ export default function StatementOfAccounts() {
             travel_allowance,
             final_net_cash_position,
             posted_at,
-            custodian_id
-            ${isAdmin ? ",custodian:custodian_id(full_name)" : ""}`
+            custodian_id`
           )
           .gte("assignment_date", fromDate)
           .lte("assignment_date", toDate)
@@ -75,11 +75,26 @@ export default function StatementOfAccounts() {
           console.error("SOA Query Error:", queryError);
           setRows([]);
         } else {
-          const processedData = (data || []).map((row: any) => ({
-            ...row,
-            full_name: row.custodian?.full_name || undefined,
-          }));
-          setRows(processedData);
+          // Fetch custodian names for admin view
+          if (isAdmin && data && data.length > 0) {
+            const custodianIds = [...new Set(data.map((r: any) => r.custodian_id))];
+            const { data: custodians } = await supabase
+              .from("profiles")
+              .select("id, full_name")
+              .in("id", custodianIds);
+
+            const custodianMap = new Map(
+              (custodians || []).map((c: any) => [c.id, c.full_name])
+            );
+
+            const processedData = data.map((row: any) => ({
+              ...row,
+              full_name: custodianMap.get(row.custodian_id) || "Unknown",
+            }));
+            setRows(processedData);
+          } else {
+            setRows(data || []);
+          }
         }
       } catch (err) {
         setError("An unexpected error occurred while loading SOA records.");
@@ -155,8 +170,38 @@ export default function StatementOfAccounts() {
   return (
     <AppLayout>
       <div className="container space-y-6">
-        {/* ===== Page Header ===== */}
-        <div className="space-y-2">
+        {/* ===== PRINT HEADER WITH LOGO ===== */}
+        <div className="print-only mb-4 border-b pb-3">
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-3">
+              {/* Bank Logo */}
+              <img
+                src="/bank-logo.png"
+                alt="Bank Logo"
+                className="h-10 w-auto"
+              />
+
+              <div>
+                <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
+                <p className="text-xs text-slate-600">
+                  Cash Replenishment & ATM Operations
+                </p>
+              </div>
+            </div>
+
+            <div className="text-right text-xs">
+              <p className="font-semibold">Statement of Accounts Report</p>
+              <p>Period: {fromDate} to {toDate}</p>
+              <p>Date: {new Date().toLocaleDateString("en-IN")}</p>
+              {profile?.full_name && (
+                <p>Custodian: {profile.full_name}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ===== Page Header (Hidden on Print) ===== */}
+        <div className="space-y-2 print:hidden">
           <h1 className="text-2xl font-bold text-slate-900">
             Statement of Accounts
           </h1>
@@ -225,7 +270,7 @@ export default function StatementOfAccounts() {
           {isAdmin && (
             <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
               <p className="text-xs text-blue-700">
-                💡 Tip: To filter by custodian, use the admin dashboard filters
+                💡 Consolidated View: Displaying all working custodians' SOA records. Use date filters to refine the period. Custodian names shown in the table.
               </p>
             </div>
           )}
@@ -332,7 +377,7 @@ export default function StatementOfAccounts() {
                       className="hover:bg-slate-50 transition-colors"
                     >
                       <td className="px-4 py-3 text-slate-900">
-                        {new Date(r.assignment_date).toLocaleDateString()}
+                        {formatISTDate(r.assignment_date, "short")}
                       </td>
                       {isAdmin && (
                         <td className="px-4 py-3 text-slate-700">
@@ -393,59 +438,60 @@ export default function StatementOfAccounts() {
                     </tr>
                   ))}
                 </tbody>
+                {/* Table Footer Summary */}
+                <tfoot className="bg-slate-50 border-t border-slate-200">
+                  <tr>
+                    <td className="px-4 py-3 font-semibold text-slate-900">
+                      Total ({rows.length} records)
+                    </td>
+                    {isAdmin && <td></td>}
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                      {totals.cashPicked.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                      {totals.cashLoaded.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </td>
+                    <td colSpan={3}></td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                      {totals.allowance.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
+                      {totals.net.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
-
-              {/* Table Footer Summary */}
-              <tfoot className="bg-slate-50 border-t border-slate-200">
-                <tr>
-                  <td className="px-4 py-3 font-semibold text-slate-900">
-                    Total ({rows.length} records)
-                  </td>
-                  {isAdmin && <td></td>}
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                    {totals.cashPicked.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                    {totals.cashLoaded.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td colSpan={3}></td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                    {totals.allowance.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
-                    {totals.net.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-                </tr>
-              </tfoot>
             </div>
           )}
         </div>
 
-        {/* ===== Print Footer ===== */}
-        <div className="hidden print:block space-y-4 mt-10 pt-8 border-t-2 border-slate-300">
-          <div className="flex justify-between text-xs text-slate-700">
+        {/* ===== PRINT FOOTER – SIGNATURES ===== */}
+        <div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
+          <div className="grid grid-cols-2 gap-12">
             <div>
-              <p className="font-semibold mb-6">Custodian Signature:</p>
-              <p>________________________</p>
-              <p className="text-xs mt-1">Date & Time</p>
+              <p className="font-semibold">Custodian Signature</p>
+              <div className="mt-6 border-b w-48"></div>
+              <p className="mt-1">Name & Date</p>
             </div>
+
             <div className="text-right">
-              <p className="font-semibold mb-6">Authorized Signatory:</p>
-              <p>________________________</p>
-              <p className="text-xs mt-1">Date & Time</p>
+              <p className="font-semibold">Supervisor / Bank Officer</p>
+              <div className="mt-6 border-b w-48 ml-auto"></div>
+              <p className="mt-1">Name, Seal & Date</p>
             </div>
           </div>
-          <p className="text-xs text-slate-500 text-center mt-6">
-            This is a computer-generated document. No signature required for
-            digital records.
+
+          <p className="mt-6 text-[10px] text-slate-500">
+            This is a system-generated report from Sruthi CRA Ops.
+            Any discrepancy must be reported within RBI-prescribed timelines.
           </p>
         </div>
       </div>
