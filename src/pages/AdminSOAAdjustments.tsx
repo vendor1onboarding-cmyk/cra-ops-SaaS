@@ -9,6 +9,7 @@ type SOA = {
   custodian_id: string;
   assignment_date: string;
   final_net_cash_position: number;
+  full_name?: string;
 };
 
 export default function AdminSOAAdjustments() {
@@ -23,6 +24,10 @@ export default function AdminSOAAdjustments() {
 
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const [showPreview, setShowPreview] = useState(false);
 
   // =========================
   // ROLE GUARD + LOAD SOA
@@ -32,36 +37,56 @@ export default function AdminSOAAdjustments() {
 
     async function loadSOA() {
       setInitialLoad(true);
+      setError(null);
 
-      const { data, error } = await supabase
-        .from("v_soa_effective")
-        .select(`
-          id,
-          assignment_id,
-          custodian_id,
-          assignment_date,
-          final_net_cash_position
-        `)
-        .order("assignment_date", { ascending: false });
+      try {
+        const { data, error: queryError } = await supabase
+          .from("v_soa_effective")
+          .select(
+            `id,
+            assignment_id,
+            custodian_id,
+            assignment_date,
+            final_net_cash_position,
+            custodian:custodian_id(full_name)`
+          )
+          .order("assignment_date", { ascending: false });
 
-      if (error) {
-        console.error("Failed to load SOA:", error);
+        if (queryError) {
+          setError("Failed to load SOA records. Please try again.");
+          console.error("Query Error:", queryError);
+          setSoaList([]);
+        } else {
+          const processedData = (data || []).map((row: any) => ({
+            ...row,
+            full_name: row.custodian?.full_name || undefined,
+          }));
+          setSoaList(processedData);
+        }
+      } catch (err) {
+        setError("An unexpected error occurred.");
+        console.error("Unexpected Error:", err);
         setSoaList([]);
-      } else {
-        setSoaList(data || []);
+      } finally {
+        setInitialLoad(false);
       }
-
-      setInitialLoad(false);
     }
 
     loadSOA();
   }, [profile]);
 
   // =========================
-  // PREVIEW CALCULATION
+  // VALIDATION
   // =========================
   const parsedAmount = Number(amount || 0);
+  const isValidAmount =
+    amount !== "" && !isNaN(parsedAmount) && parsedAmount !== 0;
+  const isValidReason = reason.trim().length > 0;
+  const canSubmit = selectedSOA && isValidAmount && isValidReason && !loading;
 
+  // =========================
+  // PREVIEW CALCULATION
+  // =========================
   const previewNetPosition = useMemo(() => {
     if (!selectedSOA) return null;
     return selectedSOA.final_net_cash_position + parsedAmount;
@@ -71,48 +96,69 @@ export default function AdminSOAAdjustments() {
   // SUBMIT ADJUSTMENT
   // =========================
   async function submitAdjustment() {
-    if (!selectedSOA) {
-      alert("Please select an SOA");
-      return;
-    }
-
-    if (!amount || isNaN(parsedAmount) || parsedAmount === 0) {
-      alert("Enter a valid adjustment amount");
-      return;
-    }
-
-    if (!reason.trim()) {
-      alert("Reason is mandatory");
+    if (!canSubmit) {
+      setError("Please fill in all required fields correctly");
       return;
     }
 
     setLoading(true);
+    setError(null);
+    setSuccessMessage(null);
 
-    const { error } = await supabase.from("soa_adjustments").insert({
-      soa_id: selectedSOA.id,
-      assignment_id: selectedSOA.assignment_id,
-      custodian_id: selectedSOA.custodian_id,
-      adjustment_type: parsedAmount >= 0 ? "CREDIT" : "DEBIT",
-      adjustment_amount: parsedAmount,
-      reason: reason.trim(),
-      reference: reference.trim() || null,
-      created_by: profile?.id,
-    });
+    try {
+      const { error: insertError } = await supabase
+        .from("soa_adjustments")
+        .insert({
+          soa_id: selectedSOA!.id,
+          assignment_id: selectedSOA!.assignment_id,
+          custodian_id: selectedSOA!.custodian_id,
+          adjustment_type: parsedAmount >= 0 ? "CREDIT" : "DEBIT",
+          adjustment_amount: Math.abs(parsedAmount),
+          reason: reason.trim(),
+          reference: reference.trim() || null,
+          created_by: profile?.id,
+        });
 
-    if (error) {
-      console.error(error);
-      alert("Failed to post SOA adjustment");
-    } else {
-      alert("SOA adjustment posted successfully");
+      if (insertError) {
+        setError(
+          "Failed to post SOA adjustment. " +
+            (insertError.message || "Please try again.")
+        );
+        console.error("Insert Error:", insertError);
+      } else {
+        setSuccessMessage(
+          `✅ SOA adjustment posted successfully! New net position: ₹${previewNetPosition?.toFixed(2)}`
+        );
 
-      // Reset safely
-      setAmount("");
-      setReason("");
-      setReference("");
-      setSelectedSOA(null);
+        // Reset form
+        setTimeout(() => {
+          setAmount("");
+          setReason("");
+          setReference("");
+          setSelectedSOA(null);
+          setShowPreview(false);
+          setSuccessMessage(null);
+
+          // Reload SOA list
+          window.location.href = window.location.href;
+        }, 2000);
+      }
+    } catch (err) {
+      setError("An unexpected error occurred. Please try again.");
+      console.error("Unexpected Error:", err);
+    } finally {
+      setLoading(false);
     }
+  }
 
-    setLoading(false);
+  function resetForm() {
+    setAmount("");
+    setReason("");
+    setReference("");
+    setSelectedSOA(null);
+    setShowPreview(false);
+    setError(null);
+    setSuccessMessage(null);
   }
 
   // =========================
@@ -122,7 +168,11 @@ export default function AdminSOAAdjustments() {
     return (
       <AppLayout>
         <div className="container">
-          <p className="text-red-600">Access denied</p>
+          <div className="rounded-lg bg-red-50 border border-red-200 p-6 text-center">
+            <p className="text-red-700 font-medium">
+              ⛔ Access Denied. Only administrators can adjust SOA records.
+            </p>
+          </div>
         </div>
       </AppLayout>
     );
@@ -130,119 +180,311 @@ export default function AdminSOAAdjustments() {
 
   return (
     <AppLayout>
-      <div className="container space-y-6">
+      <div className="container space-y-6 max-w-2xl">
+        {/* ===== PAGE HEADER ===== */}
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold text-slate-900">
+            SOA Manual Adjustments
+          </h1>
+          <p className="text-sm text-slate-600">
+            Make corrections to Statement of Accounts records when needed
+          </p>
+        </div>
 
-        {/* HEADER */}
-        <h2 className="text-xl font-semibold text-primary">
-          Statement of Account – Adjustments
-        </h2>
+        {/* ===== ERROR MESSAGE ===== */}
+        {error && (
+          <div className="rounded-lg bg-red-50 border border-red-200 p-4">
+            <p className="text-sm text-red-700 font-medium">⚠️ {error}</p>
+          </div>
+        )}
 
-        {/* SOA SELECTOR */}
-        <div className="bg-white border rounded-xl p-4 space-y-3">
-          <label className="block text-sm font-medium">
-            Select Assignment / SOA
-          </label>
+        {/* ===== SUCCESS MESSAGE ===== */}
+        {successMessage && (
+          <div className="rounded-lg bg-green-50 border border-green-200 p-4">
+            <p className="text-sm text-green-700 font-medium">
+              {successMessage}
+            </p>
+          </div>
+        )}
 
-          <select
-            className="input w-full"
-            value={selectedSOA?.id || ""}
-            onChange={e =>
-              setSelectedSOA(
-                soaList.find(s => s.id === Number(e.target.value)) || null
-              )
-            }
-          >
-            <option value="">-- Select Approved Assignment --</option>
-            {soaList.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.assignment_date} | Assignment #{s.assignment_id}
-              </option>
-            ))}
-          </select>
+        {/* ===== SOA SELECTOR ===== */}
+        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-900 mb-2">
+              Select Assignment / SOA <span className="text-red-600">*</span>
+            </label>
 
-          {initialLoad && (
-            <div className="text-sm text-slate-500">Loading SOA records…</div>
-          )}
+            {initialLoad ? (
+              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                <p className="text-sm text-slate-600">Loading SOA records…</p>
+              </div>
+            ) : soaList.length === 0 ? (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-700">
+                  📭 No SOA records available for adjustment
+                </p>
+              </div>
+            ) : (
+              <select
+                className="input w-full text-sm"
+                value={selectedSOA?.id || ""}
+                onChange={(e) =>
+                  setSelectedSOA(
+                    soaList.find((s) => s.id === Number(e.target.value)) ||
+                      null
+                  )
+                }
+              >
+                <option value="">-- Select an Assignment --</option>
+                {soaList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    📅 {new Date(s.assignment_date).toLocaleDateString()} |
+                    Assignment #{s.assignment_id} | {s.full_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
 
-          {!initialLoad && soaList.length === 0 && (
-            <div className="text-sm text-slate-500">
-              No SOA records available
-            </div>
-          )}
-
+          {/* Display Selected SOA Details */}
           {selectedSOA && (
-            <div className="text-sm text-slate-700">
-              Current Net Position:&nbsp;
-              <b>{selectedSOA.final_net_cash_position.toFixed(2)}</b>
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-blue-600 font-medium">
+                    Assignment ID
+                  </p>
+                  <p className="text-sm font-semibold text-blue-900">
+                    #{selectedSOA.assignment_id}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-blue-600 font-medium">
+                    Current Net Position
+                  </p>
+                  <p className="text-sm font-semibold text-blue-900">
+                    ₹
+                    {selectedSOA.final_net_cash_position.toLocaleString(
+                      "en-IN",
+                      { minimumFractionDigits: 2 }
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-blue-600 font-medium">Custodian</p>
+                  <p className="text-sm font-semibold text-blue-900">
+                    {selectedSOA.full_name || "Unknown"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-blue-600 font-medium">
+                    Assignment Date
+                  </p>
+                  <p className="text-sm font-semibold text-blue-900">
+                    {new Date(selectedSOA.assignment_date).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>
 
-        {/* ADJUSTMENT FORM */}
+        {/* ===== ADJUSTMENT FORM ===== */}
         {selectedSOA && (
-          <div className="bg-white border rounded-xl p-4 space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Adjustment Details
+            </h2>
 
+            {/* Amount Input */}
             <div>
-              <label className="text-sm font-medium">
-                Adjustment Amount (+ / -)
+              <label className="block text-sm font-semibold text-slate-900 mb-2">
+                Adjustment Amount <span className="text-red-600">*</span>
               </label>
-              <input
-                type="number"
-                className="input w-full"
-                placeholder="+500 or -250"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-              />
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 font-semibold">
+                  ₹
+                </span>
+                <input
+                  type="number"
+                  className={`input w-full pl-7 ${
+                    amount &&
+                    !isValidAmount &&
+                    "border-red-500 focus:ring-red-500 focus:border-red-500"
+                  }`}
+                  placeholder="Enter amount (+500 or -250)"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  step="0.01"
+                />
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Positive for credit, negative for debit
+              </p>
+              {amount && !isValidAmount && (
+                <p className="text-xs text-red-600 mt-1">
+                  ⚠️ Please enter a valid non-zero amount
+                </p>
+              )}
             </div>
 
+            {/* Reason Input */}
             <div>
-              <label className="text-sm font-medium">
-                Reason (mandatory)
+              <label className="block text-sm font-semibold text-slate-900 mb-2">
+                Reason for Adjustment
+                <span className="text-red-600 ml-1">*</span>
               </label>
               <textarea
-                className="input w-full"
+                className={`input w-full resize-none ${
+                  reason &&
+                  !isValidReason &&
+                  "border-red-500 focus:ring-red-500 focus:border-red-500"
+                }`}
                 rows={3}
+                placeholder="e.g., Cash count discrepancy, bank reconciliation adjustment, receipt correction..."
                 value={reason}
-                onChange={e => setReason(e.target.value)}
+                onChange={(e) => setReason(e.target.value)}
               />
+              <div className="flex justify-between items-center mt-1">
+                <p className="text-xs text-slate-500">
+                  Describe the reason for this adjustment
+                </p>
+                <p
+                  className={`text-xs font-medium ${
+                    reason.length > 100 ? "text-amber-600" : "text-slate-500"
+                  }`}
+                >
+                  {reason.length} characters
+                </p>
+              </div>
+              {reason && !isValidReason && (
+                <p className="text-xs text-red-600 mt-1">
+                  ⚠️ Please provide a valid reason
+                </p>
+              )}
             </div>
 
+            {/* Reference Input */}
             <div>
-              <label className="text-sm font-medium">
-                Reference (optional)
+              <label className="block text-sm font-semibold text-slate-900 mb-2">
+                Reference (Optional)
               </label>
               <input
+                type="text"
                 className="input w-full"
+                placeholder="e.g., Invoice #12345, Check #5678, Reference ID..."
                 value={reference}
-                onChange={e => setReference(e.target.value)}
+                onChange={(e) => setReference(e.target.value)}
               />
+              <p className="text-xs text-slate-500 mt-1">
+                Add supporting documentation reference if applicable
+              </p>
             </div>
 
-            {/* PREVIEW */}
-            <div className="bg-slate-50 border rounded-lg p-3 text-sm space-y-1">
-              <div>
-                Current Net:&nbsp;
-                <b>{selectedSOA.final_net_cash_position.toFixed(2)}</b>
-              </div>
-              <div>
-                Adjustment:&nbsp;
-                <b className={parsedAmount >= 0 ? "text-green-600" : "text-red-600"}>
-                  {parsedAmount.toFixed(2)}
-                </b>
-              </div>
-              <div>
-                Resulting Net:&nbsp;
-                <b>{previewNetPosition?.toFixed(2)}</b>
-              </div>
+            {/* Preview & Submit Buttons */}
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowPreview(!showPreview)}
+                className="flex-1 btn-secondary"
+                disabled={!selectedSOA || !isValidAmount}
+              >
+                {showPreview ? "Hide Preview" : "Show Preview"}
+              </button>
+              <button
+                onClick={resetForm}
+                className="flex-1 btn-secondary opacity-75 hover:opacity-100"
+              >
+                Reset Form
+              </button>
+              <button
+                onClick={submitAdjustment}
+                disabled={!canSubmit}
+                className={`flex-1 ${
+                  canSubmit
+                    ? "btn-primary"
+                    : "bg-slate-300 text-slate-500 cursor-not-allowed rounded-lg px-4 py-2"
+                }`}
+              >
+                {loading ? "Processing…" : "Post Adjustment"}
+              </button>
             </div>
 
-            <button
-              onClick={submitAdjustment}
-              disabled={loading}
-              className="btn-primary"
-            >
-              {loading ? "Posting Adjustment…" : "Post Adjustment"}
-            </button>
+            {/* ===== PREVIEW SECTION ===== */}
+            {showPreview && (
+              <div className="mt-6 p-4 bg-slate-50 border-2 border-slate-200 rounded-lg space-y-3">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                  👁️ Adjustment Preview
+                </h3>
+
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Current Net Position:</span>
+                    <span className="font-semibold text-slate-900">
+                      ₹
+                      {selectedSOA.final_net_cash_position.toLocaleString(
+                        "en-IN",
+                        { minimumFractionDigits: 2 }
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Adjustment Amount:</span>
+                    <span
+                      className={`font-semibold ${
+                        parsedAmount >= 0
+                          ? "text-green-700"
+                          : "text-red-700"
+                      }`}
+                    >
+                      {parsedAmount >= 0 ? "+" : ""}
+                      ₹{parsedAmount.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+
+                  <div className="border-t border-slate-300 pt-2 flex justify-between">
+                    <span className="font-semibold text-slate-900">
+                      Resulting Net Position:
+                    </span>
+                    <span className="text-lg font-bold text-indigo-700">
+                      ₹
+                      {previewNetPosition?.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
+                  💡 <strong>Reason:</strong> {reason || "(Not provided)"}
+                </div>
+
+                {reference && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
+                    📎 <strong>Reference:</strong> {reference}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ===== HELP SECTION ===== */}
+        {!selectedSOA && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <p className="text-sm font-medium text-amber-900 mb-2">
+              📝 How to use this tool:
+            </p>
+            <ul className="text-xs text-amber-800 space-y-1 list-disc list-inside">
+              <li>Select an SOA record from the dropdown above</li>
+              <li>Enter the adjustment amount (positive for credit, negative for debit)</li>
+              <li>Provide a detailed reason for the adjustment</li>
+              <li>Optionally add a reference number</li>
+              <li>Review the preview and submit the adjustment</li>
+            </ul>
           </div>
         )}
       </div>
