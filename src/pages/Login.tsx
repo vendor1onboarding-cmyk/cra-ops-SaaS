@@ -11,12 +11,14 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // -------------------------------------------
-  // FIX: Auto redirect after login & profile load
-  // -------------------------------------------
   useEffect(() => {
-    if (profile) {
-      navigate("/", { replace: true });   // Redirect user to dashboard
+    if (!profile) return;
+
+    // Role-based redirect: admin/supervisor -> /admin, custodian -> /
+    if (profile.role === "admin" || profile.role === "supervisor") {
+      navigate("/admin", { replace: true });
+    } else {
+      navigate("/", { replace: true });
     }
   }, [profile, navigate]);
 
