@@ -18,83 +18,186 @@ type Profile = {
 type AuthContextType = {
   profile: Profile | null;
   loading: boolean;
+  error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  retryLoadProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Retry logic with exponential backoff
+const retryWithBackoff = async (
+  fn: () => Promise<any>,
+  maxRetries: number = 3,
+  delay: number = 1000
+) => {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      console.warn(`Retry ${i + 1}/${maxRetries} after ${delay}ms`, error);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay *= 2; // Exponential backoff
+    }
+  }
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
 
   const loadProfile = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session?.user) {
-      setProfile(null);
-      setLoading(false);
+    // Prevent multiple simultaneous loads
+    if (isLoadingProfile) {
+      console.warn("Profile load already in progress, skipping");
       return;
     }
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", session.user.id)
-      .single();
+    setIsLoadingProfile(true);
+    setError(null);
 
-    if (error) {
-      console.error("Error loading profile:", error.message);
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw new Error(`Session error: ${sessionError.message}`);
+      }
+
+      if (!session?.user) {
+        console.log("No active session");
+        setProfile(null);
+        setLoading(false);
+        setIsLoadingProfile(false);
+        return;
+      }
+
+      console.log("Loading profile for user:", session.user.id);
+
+      // Retry profile fetch with exponential backoff for production resilience
+      const profileData = await retryWithBackoff(
+        async () => {
+          const { data, error } = await supabase
+            .from("profiles")
+            .select("id, full_name, role")
+            .eq("id", session.user.id)
+            .single();
+
+          if (error) {
+            console.error("Profile query error:", error);
+            throw new Error(`Failed to load profile: ${error.message}`);
+          }
+          return data;
+        },
+        3,
+        500
+      );
+
+      if (!profileData?.role) {
+        throw new Error("Profile missing role information");
+      }
+
+      const loadedProfile = {
+        id: profileData.id,
+        full_name: profileData.full_name,
+        role: profileData.role as Role,
+      };
+      
+      console.log("Profile loaded successfully:", loadedProfile.role);
+      setProfile(loadedProfile);
+      setError(null);
+    } catch (err: any) {
+      const errorMsg = err.message || "Failed to load profile";
+      console.error("Error in loadProfile:", errorMsg);
+      setError(errorMsg);
       setProfile(null);
-    } else {
-      setProfile({
-        id: data.id,
-        full_name: data.full_name,
-        role: data.role,
-      });
+      // Don't set loading to false on error - let the user retry
+    } finally {
+      setLoading(false);
+      setIsLoadingProfile(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
+    console.log("AuthProvider initializing");
     setLoading(true);
     loadProfile();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, _session) => {
-      loadProfile();
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("Auth state changed:", event);
+      if (event === "SIGNED_OUT") {
+        setProfile(null);
+        setLoading(false);
+        setError(null);
+      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        loadProfile();
+      }
     });
 
     return () => {
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
+    setError(null);
+    setLoading(true);
+    
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      
+      if (error) throw error;
 
-    if (data.user) {
-      await supabase
-        .from("profiles")
-        .upsert({ id: data.user.id, full_name: data.user.email });
+      if (data.user) {
+        // Ensure profile exists with upsert
+        const { error: upsertError } = await supabase
+          .from("profiles")
+          .upsert(
+            { id: data.user.id, full_name: data.user.email, role: "custodian" },
+            { onConflict: "id" }
+          );
+        
+        if (upsertError) {
+          console.error("Error upserting profile:", upsertError);
+        }
+      }
+      
+      await loadProfile();
+    } catch (err: any) {
+      const errorMsg = err.message || "Sign in failed";
+      setError(errorMsg);
+      setProfile(null);
+      throw err;
+    } finally {
+      setLoading(false);
     }
-    await loadProfile();
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setProfile(null);
+    try {
+      await supabase.auth.signOut();
+      setProfile(null);
+      setError(null);
+    } catch (err) {
+      console.error("Sign out error:", err);
+    }
+  };
+
+  const retryLoadProfile = async () => {
+    setError(null);
+    await loadProfile();
   };
 
   return (
-    <AuthContext.Provider value={{ profile, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ profile, loading, error, signIn, signOut, retryLoadProfile }}>
       {children}
     </AuthContext.Provider>
   );

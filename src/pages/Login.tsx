@@ -16,12 +16,7 @@ export default function Login() {
   // -------------------------------------------
   useEffect(() => {
     if (profile) {
-      // Redirect based on role
-      if (profile.role === "admin" || profile.role === "supervisor") {
-        navigate("/admin", { replace: true });
-      } else {
-        navigate("/", { replace: true });
-      }
+      navigate("/", { replace: true });   // Redirect user to dashboard
     }
   }, [profile, navigate]);
 
