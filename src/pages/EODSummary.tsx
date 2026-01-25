@@ -24,7 +24,8 @@ export default function EODSummary() {
   const [taskSummary, setTaskSummary] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
-  
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const modalSigPadRef = useRef<any>(null);
 
   // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
@@ -116,13 +117,6 @@ export default function EODSummary() {
   // SUBMIT EOD (NEW)
   // --------------------------------------------------
 
-  {assignment?.status === "rejected" && assignment.rejection_reason && (
-  <div className="bg-red-50 border border-red-200 p-3 rounded text-sm text-red-700">
-    <strong>Rejected:</strong> {assignment.rejection_reason}
-  </div>
-)}
-
-
   async function submitEOD() {
     if (!assignment) return;
 
@@ -200,6 +194,7 @@ export default function EODSummary() {
           onSubmit={submitEOD}
           submitting={submitting}
           submitMsg={submitMsg}
+          onSignatureComplete={(updatedAssignment) => setAssignment(updatedAssignment)}
         />
       )}
 
@@ -225,10 +220,13 @@ function CustodianEOD({
   onSubmit,
   submitting,
   submitMsg,
+  onSignatureComplete,
 }: any) {
   const sigPadRef = useRef<any>(null);
+  const modalSigPadRef = useRef<any>(null);
   const [signing, setSigning] = useState(false);
   const [sigError, setSigError] = useState<string | null>(null);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
 
   async function submitSignature() {
     if (!assignment?.id) return;
@@ -271,6 +269,19 @@ function CustodianEOD({
 
       if (error) throw error;
 
+      // Update local state to reflect signed EOD
+      const updatedAssignment = {
+        ...assignment,
+        eod_signed: true,
+        eod_signed_at: new Date().toISOString(),
+        eod_signature_url: data.publicUrl,
+      };
+      
+      // Call the callback to update parent component
+      if (onSignatureComplete) {
+        onSignatureComplete(updatedAssignment);
+      }
+
       alert("EOD signed and locked successfully.");
       sigPadRef.current.clear();
     } catch (err) {
@@ -294,28 +305,39 @@ function CustodianEOD({
 
       {assignment && (
         <>
-          <div className="p-4 bg-white rounded shadow text-sm">
+          <div className={`p-4 rounded shadow text-sm ${assignment.eod_signed ? 'bg-green-50 border border-green-200' : 'bg-white'}`}>
             <div className="font-semibold">Assignment ID: {assignment.id}</div>
             <div>Status: {assignment.status}</div>
+            {assignment.eod_signed && (
+              <div className="text-green-700 font-semibold text-xs mt-1">✓ Locked & Signed</div>
+            )}
           </div>
 
-          <h3 className="font-semibold">Route Sites</h3>
-          {routeSites.map((rs: any, idx: number) => (
-            <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
-              {idx + 1}. {formatSite(rs.site)}
+          {assignment?.status === "rejected" && assignment.rejection_reason && (
+            <div className="bg-red-50 border border-red-200 p-3 rounded text-sm text-red-700">
+              <strong>Rejected:</strong> {assignment.rejection_reason}
             </div>
-          ))}
+          )}
+
+          <h3 className="font-semibold">Route Sites</h3>
+          <div className={assignment.eod_signed ? 'opacity-75 pointer-events-none' : ''}>
+            {routeSites.map((rs: any, idx: number) => (
+              <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
+                {idx + 1}. {formatSite(rs.site)}
+              </div>
+            ))}
+          </div>
 
           <h3 className="font-semibold">Tasks Summary</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`grid grid-cols-2 gap-3 ${assignment.eod_signed ? 'opacity-75 pointer-events-none' : ''}`}>
             <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
             <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
             <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
             <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
           </div>
 
-          {/* Submit EOD */}
-          {assignment.status === "open" && (
+          {/* Submit EOD - Only show if not signed */}
+          {assignment.status === "open" && !assignment.eod_signed && (
             <div className="pt-4">
               <button
                 onClick={onSubmit}
@@ -333,7 +355,27 @@ function CustodianEOD({
         </>
       )}
 
-      {/* ✍️ DIGITAL SIGNATURE */}
+      {/* ✍️ DIGITAL SIGNATURE - READ ONLY (SIGNED) */}
+      {assignment?.status === "submitted" && assignment.eod_signed && (
+        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded shadow">
+          <h3 className="font-semibold mb-2 text-green-800">✍️ Signed EOD</h3>
+          <p className="text-xs text-slate-600 mb-4">
+            Signed on: {new Date(assignment.eod_signed_at).toLocaleString()}
+          </p>
+          {assignment.eod_signature_url && (
+            <div className="border rounded bg-white p-2">
+              <img
+                src={assignment.eod_signature_url}
+                alt="EOD Signature"
+                className="w-full h-auto max-h-60 object-contain"
+              />
+              <p className="text-xs text-slate-500 text-center mt-2">Signature (Read-only)</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ✍️ DIGITAL SIGNATURE - INPUT MODE */}
       {assignment?.status === "submitted" && !assignment.eod_signed && (
         <div className="mt-6 p-4 bg-white rounded shadow">
           <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
@@ -342,15 +384,28 @@ function CustodianEOD({
             Please sign to confirm today’s cash operations are accurate.
           </p>
 
-          <div className="border rounded bg-slate-50">
+          {/* Preview / Tap to expand */}
+          <div
+            className="border rounded bg-slate-50 cursor-pointer"
+            onClick={() => setShowSignatureModal(true)}
+          >
             <SignatureCanvas
               ref={sigPadRef}
               penColor="black"
-              canvasProps={{ width: 500, height: 180, className: "w-full" }}
+              canvasProps={{
+                width: 500,
+                height: 180,
+                className: "w-full pointer-events-none",
+              }}
             />
+            <p className="text-center text-xs text-slate-500 py-1">
+              Tap to sign (full screen)
+            </p>
           </div>
 
-          {sigError && <p className="text-xs text-red-600 mt-2">{sigError}</p>}
+          {sigError && (
+            <p className="text-xs text-red-600 mt-2">{sigError}</p>
+          )}
 
           <div className="flex gap-3 mt-3">
             <button
@@ -368,60 +423,64 @@ function CustodianEOD({
               {signing ? "Saving..." : "Sign & Lock EOD"}
             </button>
           </div>
+
+          {/* ================= FULL SCREEN SIGNATURE MODAL ================= */}
+          {showSignatureModal && (
+            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center">
+              <div className="bg-white w-full h-full sm:w-[90%] sm:h-[90%] rounded-lg p-4 flex flex-col">
+
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="font-semibold text-lg">✍️ Sign Here</h3>
+                  <button
+                    className="text-sm text-red-600"
+                    onClick={() => setShowSignatureModal(false)}
+                  >
+                    Close ✖
+                  </button>
+                </div>
+
+                <div className="flex-1 border rounded bg-slate-50">
+                  <SignatureCanvas
+                    ref={modalSigPadRef}
+                    penColor="black"
+                    canvasProps={{
+                      className: "w-full h-full",
+                    }}
+                  />
+                </div>
+
+                {sigError && <p className="text-xs text-red-600 mt-2">{sigError}</p>}
+
+                <div className="flex gap-3 mt-3">
+                  <button
+                    className="btn-secondary"
+                    onClick={() => modalSigPadRef.current?.clear()}
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      // Copy signature from modal → main canvas
+                      const data = modalSigPadRef.current?.toDataURL();
+                      if (data) {
+                        sigPadRef.current?.fromDataURL(data);
+                      }
+                      setShowSignatureModal(false);
+                    }}
+                  >
+                    {signing ? "Saving..." : "Sign & Lock EOD"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
-
-
-  async function submitSignature() {
-    if (!assignment?.id) return;
-
-    if (!sigPadRef.current || sigPadRef.current.isEmpty()) {
-      setSigError("Please sign before submitting.");
-      return;
-    }
-
-    try {
-      setSigning(true);
-      setSigError(null);
-
-      const dataUrl = sigPadRef.current.toDataURL("image/png");
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-
-      const path = `assignment_${assignment.id}_${Date.now()}.png`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("eod-signatures")
-        .upload(path, blob, { contentType: "image/png" });
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage
-        .from("eod-signatures")
-        .getPublicUrl(path);
-
-      const { error } = await supabase
-        .from("assignments")
-        .update({
-          eod_signed: true,
-          eod_signed_at: new Date().toISOString(),
-          eod_signature_url: data.publicUrl,
-        })
-        .eq("id", assignment.id);
-
-      if (error) throw error;
-
-      alert("EOD signed successfully.");
-      sigPadRef.current.clear();
-    } catch (e) {
-      setSigError("Failed to save signature.");
-    } finally {
-      setSigning(false);
-    }
-  }
 
 // --------------------------------------------------
 // Admin UI
