@@ -11,65 +11,82 @@ export default function AdminDashboard() {
   const [eods, setEods] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || profile.role !== "admin" && profile.role !== "supervisor") {
+      setLoading(false);
+      return;
+    }
 
     async function loadAdminData() {
       setLoading(true);
 
-      const today = new Date().toISOString().slice(0, 10);
+      try {
+        const today = new Date().toISOString().slice(0, 10);
 
-      const [
-        assignmentsRes,
-        submittedRes,
-        approvedRes,
-        rejectedRes,
-      ] = await Promise.all([
-        supabase
-          .from("assignments")
-          .select("id")
-          .eq("assignment_date", today),
+        // Fetch all assignment counts in parallel
+        const [
+          assignmentsRes,
+          submittedRes,
+          approvedRes,
+          rejectedRes,
+          eodListRes,
+        ] = await Promise.all([
+          supabase
+            .from("assignments")
+            .select("id", { count: "exact", head: true })
+            .eq("assignment_date", today),
 
-        supabase
-          .from("assignments")
-          .select("id")
-          .eq("assignment_date", today)
-          .eq("status", "submitted"),
+          supabase
+            .from("assignments")
+            .select("id", { count: "exact", head: true })
+            .eq("assignment_date", today)
+            .eq("status", "submitted"),
 
-        supabase
-          .from("assignments")
-          .select("id")
-          .eq("assignment_date", today)
-          .eq("status", "approved"),
+          supabase
+            .from("assignments")
+            .select("id", { count: "exact", head: true })
+            .eq("assignment_date", today)
+            .eq("status", "approved"),
 
-        supabase
-          .from("assignments")
-          .select("id")
-          .eq("assignment_date", today)
-          .eq("status", "rejected"),
-      ]);
+          supabase
+            .from("assignments")
+            .select("id", { count: "exact", head: true })
+            .eq("assignment_date", today)
+            .eq("status", "rejected"),
 
-      const { data: eodList } = await supabase
-        .from("assignments")
-        .select(
-          `
-          id,
-          assignment_date,
-          status,
-          custodian:profiles!assignments_custodian_id_fkey(full_name)
-        `
-        )
-        .in("status", ["submitted"])
-        .order("assignment_date", { ascending: false });
+          supabase
+            .from("assignments")
+            .select(
+              `
+              id,
+              assignment_date,
+              status,
+              custodian:profiles!assignments_custodian_id_fkey(full_name)
+            `
+            )
+            .in("status", ["submitted"])
+            .order("assignment_date", { ascending: false }),
+        ]);
 
-      setStats({
-        total: assignmentsRes.data?.length || 0,
-        submitted: submittedRes.data?.length || 0,
-        approved: approvedRes.data?.length || 0,
-        rejected: rejectedRes.data?.length || 0,
-      });
+        setStats({
+          total: assignmentsRes.count || 0,
+          submitted: submittedRes.count || 0,
+          approved: approvedRes.count || 0,
+          rejected: rejectedRes.count || 0,
+        });
 
-      setEods(eodList || []);
-      setLoading(false);
+        setEods(eodListRes.data || []);
+      } catch (error) {
+        console.error("Error loading admin data:", error);
+        setStats({
+          total: 0,
+          submitted: 0,
+          approved: 0,
+          rejected: 0,
+        });
+        setEods([]);
+      } finally {
+        setLoading(false);
+      }
     }
 
     loadAdminData();

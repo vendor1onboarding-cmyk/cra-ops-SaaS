@@ -1,0 +1,519 @@
+
+
+As we have already created multiple tables and triggers to achive SOA for both Admin and Custodian. I would need you to take your time and go over each and every table 
+and then plan for the final SOA page desing. It should be industrial standards, existing functionality should not breaks, it should be robust , also the new page should be more professional. 
+Follow global css. Below are 20 tables/views created so far for this project. Leverage these tables and come up with the strong design for SOA. This is very important feature so be careful and take your own time to complete it. 
+I would need final copy paste version of the tsx file and step by step instructions. 
+
+1)  assignments 
+
+create table public.assignments (
+  id bigserial not null,
+  assignment_date date not null,
+  custodian_id uuid not null,
+  title text null,
+  status text null default 'open'::text,
+  created_at timestamp with time zone null default now(),
+  approved_at timestamp with time zone null,
+  approved_by uuid null,
+  rejected_at timestamp with time zone null,
+  rejected_by uuid null,
+  rejection_reason text null,
+  eod_signed boolean null default false,
+  eod_signed_at timestamp with time zone null,
+  eod_signature_url text null,
+  constraint assignments_pkey primary key (id),
+  constraint assignments_custodian_id_fkey foreign KEY (custodian_id) references auth.users (id),
+  constraint assignments_status_check check (
+    (
+      status = any (
+        array[
+          'open'::text,
+          'submitted'::text,
+          'approved'::text,
+          'rejected'::text
+        ]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_assignments_date on public.assignments using btree (assignment_date) TABLESPACE pg_default;
+
+create index IF not exists idx_assignments_custodian on public.assignments using btree (custodian_id) TABLESPACE pg_default;
+
+create trigger trg_post_soa_on_assignment_approval
+after
+update OF status on assignments for EACH row
+execute FUNCTION post_soa_on_approval ();
+
+2) atm_cash_adjustments
+
+create table public.atm_cash_adjustments (
+  id bigserial not null,
+  assignment_id bigint not null,
+  site_id bigint not null,
+  adjustment_type text not null default 'withdrawal'::text,
+  denom_100 integer null default 0,
+  denom_200 integer null default 0,
+  denom_500 integer null default 0,
+  denom_2000 integer null default 0,
+  reason text not null,
+  created_at timestamp with time zone null default now(),
+  created_by uuid null,
+  geo_lat numeric(9, 6) null,
+  geo_lng numeric(9, 6) null,
+  distance_meters numeric null,
+  photo_url text null,
+  constraint atm_cash_adjustments_pkey primary key (id),
+  constraint atm_cash_adjustments_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE,
+  constraint atm_cash_adjustments_created_by_fkey foreign KEY (created_by) references auth.users (id),
+  constraint atm_cash_adjustments_site_id_fkey foreign KEY (site_id) references sites (id)
+) TABLESPACE pg_default;
+
+create trigger after_atm_cash_adjustments_insert
+after INSERT on atm_cash_adjustments for EACH row
+execute FUNCTION trg_atm_cash_adjustments_soa ();
+
+3) atm_excess_cash
+
+create table public.atm_excess_cash (
+  id bigserial not null,
+  assignment_id bigint not null,
+  site_id bigint not null,
+  detected_date date not null default CURRENT_DATE,
+  denom_100 integer null default 0,
+  denom_200 integer null default 0,
+  denom_500 integer null default 0,
+  denom_2000 integer null default 0,
+  total_excess_amount numeric GENERATED ALWAYS as (
+    (
+      (
+        ((denom_100 * 100) + (denom_200 * 200)) + (denom_500 * 500)
+      ) + (denom_2000 * 2000)
+    )
+  ) STORED null,
+  atm_receipt_url text not null,
+  reported_to_vendor boolean null default false,
+  vendor_ticket_no text null,
+  bank_notified boolean null default false,
+  bank_reference_no text null,
+  remarks text null,
+  created_at timestamp with time zone null default now(),
+  constraint atm_excess_cash_pkey primary key (id),
+  constraint atm_excess_assignment_fk foreign KEY (assignment_id) references assignments (id),
+  constraint atm_excess_site_fk foreign KEY (site_id) references sites (id)
+) TABLESPACE pg_default;
+
+create trigger after_atm_excess_cash_insert
+after INSERT on atm_excess_cash for EACH row
+execute FUNCTION trg_atm_excess_cash_soa ();
+
+4) atm_replenishments
+
+create table public.atm_replenishments (
+  id bigserial not null,
+  assignment_id bigint null,
+  site_id bigint null,
+  time_in timestamp with time zone null,
+  time_out timestamp with time zone null,
+  denom_2000 integer null default 0,
+  denom_500 integer null default 0,
+  denom_200 integer null default 0,
+  denom_100 integer null default 0,
+  denom_50 integer null default 0,
+  denom_20 integer null default 0,
+  denom_10 integer null default 0,
+  closing_balance numeric null,
+  remarks text null,
+  receipt_url text null,
+  created_at timestamp with time zone null default now(),
+  load_lat numeric(9, 6) null,
+  load_lng numeric(9, 6) null,
+  distance_meters numeric null,
+  geo_status text null default 'unknown'::text,
+  photo_required boolean null default false,
+  photo_url text null,
+  constraint atm_replenishments_pkey primary key (id),
+  constraint atm_replenishments_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE,
+  constraint atm_replenishments_site_id_fkey foreign KEY (site_id) references sites (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_atm_repl_assignment on public.atm_replenishments using btree (assignment_id) TABLESPACE pg_default;
+
+create index IF not exists idx_atm_repl_site on public.atm_replenishments using btree (site_id) TABLESPACE pg_default;
+
+create trigger after_atm_replenishments_insert
+after INSERT on atm_replenishments for EACH row
+execute FUNCTION trg_atm_replenishments_soa ();
+
+5) audit_logs
+
+create table public.audit_logs (
+  id bigserial not null,
+  entity text null,
+  entity_id bigint null,
+  action text null,
+  actor uuid null,
+  created_at timestamp with time zone null default now(),
+  constraint audit_logs_pkey primary key (id)
+) TABLESPACE pg_default;
+
+6) banks
+
+create table public.banks (
+  id bigserial not null,
+  name text not null,
+  branch text not null,
+  short_code text null,
+  is_active boolean not null default true,
+  created_at timestamp with time zone not null default now(),
+  constraint banks_pkey primary key (id)
+) TABLESPACE pg_default;
+
+7) cash_pickups 
+
+create table public.cash_pickups (
+  id bigserial not null,
+  assignment_id bigint null,
+  bank_name text null,
+  branch text null,
+  pickup_time timestamp with time zone null default now(),
+  denom_2000 integer null default 0,
+  denom_500 integer null default 0,
+  denom_200 integer null default 0,
+  denom_100 integer null default 0,
+  denom_50 integer null default 0,
+  denom_20 integer null default 0,
+  denom_10 integer null default 0,
+  expected_amount numeric null,
+  total_amount numeric null,
+  variance numeric null,
+  slip_url text null,
+  created_at timestamp with time zone null default now(),
+  constraint cash_pickups_pkey primary key (id),
+  constraint uniq_cash_pickup_assignment_bank unique (assignment_id, bank_name),
+  constraint cash_pickups_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_cash_pickups_assignment on public.cash_pickups using btree (assignment_id) TABLESPACE pg_default;
+
+8) denomination_plans
+
+create table public.denomination_plans (
+  id bigserial not null,
+  assignment_id bigint null,
+  site_id bigint null,
+  has_source_report boolean null default true,
+  remarks text null,
+  denom_2000 integer null default 0,
+  denom_500 integer null default 0,
+  denom_200 integer null default 0,
+  denom_100 integer null default 0,
+  denom_50 integer null default 0,
+  denom_20 integer null default 0,
+  denom_10 integer null default 0,
+  created_at timestamp with time zone null default now(),
+  constraint denomination_plans_pkey primary key (id),
+  constraint uniq_denom_plan_assignment_site unique (assignment_id, site_id),
+  constraint denomination_plans_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE,
+  constraint denomination_plans_site_id_fkey foreign KEY (site_id) references sites (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_denomination_plans_assignment on public.denomination_plans using btree (assignment_id) TABLESPACE pg_default;
+
+create index IF not exists idx_denomination_plans_site on public.denomination_plans using btree (site_id) TABLESPACE pg_default;
+
+9)profiles
+
+create table public.profiles (
+  id uuid not null,
+  full_name text null,
+  role text null default 'custodian'::text,
+  created_at timestamp with time zone null default now(),
+  constraint profiles_pkey primary key (id),
+  constraint profiles_id_fkey foreign KEY (id) references auth.users (id),
+  constraint profiles_role_check check (
+    (
+      role = any (
+        array[
+          'admin'::text,
+          'supervisor'::text,
+          'custodian'::text
+        ]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+
+10) route_sites
+
+create table public.route_sites (
+  id bigserial not null,
+  assignment_id bigint not null,
+  site_id bigint not null,
+  sequence_no integer null,
+  created_at timestamp with time zone not null default now(),
+  constraint route_sites_pkey primary key (id),
+  constraint route_sites_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE,
+  constraint route_sites_site_id_fkey foreign KEY (site_id) references sites (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_route_sites_assignment on public.route_sites using btree (assignment_id) TABLESPACE pg_default;
+
+create index IF not exists idx_route_sites_site on public.route_sites using btree (site_id) TABLESPACE pg_default;
+
+11)  sites
+
+create table public.sites (
+  id bigserial not null,
+  site_code text not null,
+  atm_id text null,
+  bank_name text null,
+  address text null,
+  city text null,
+  created_at timestamp with time zone null default now(),
+  latitude numeric(9, 6) null,
+  longitude numeric(9, 6) null,
+  constraint sites_pkey primary key (id),
+  constraint sites_site_code_key unique (site_code)
+) TABLESPACE pg_default;
+
+12) soa_adjustments
+
+create table public.soa_adjustments (
+  id bigserial not null,
+  soa_id bigint not null,
+  assignment_id bigint not null,
+  custodian_id uuid not null,
+  adjustment_type text not null,
+  adjustment_amount numeric(14, 2) not null,
+  reason text not null,
+  reference text null,
+  created_at timestamp with time zone not null default now(),
+  created_by uuid not null,
+  constraint soa_adjustments_pkey primary key (id),
+  constraint soa_adjustments_assignment_fk foreign KEY (assignment_id) references assignments (id) on delete RESTRICT,
+  constraint soa_adjustments_custodian_fk foreign KEY (custodian_id) references auth.users (id) on delete RESTRICT,
+  constraint soa_adjustments_soa_fk foreign KEY (soa_id) references soa_postings (id) on delete RESTRICT
+) TABLESPACE pg_default;
+
+create index IF not exists idx_soa_adjustments_soa on public.soa_adjustments using btree (soa_id) TABLESPACE pg_default;
+
+13)  soa_ledger
+
+create table public.soa_ledger (
+  id bigserial not null,
+  assignment_id bigint not null,
+  custodian_id uuid not null,
+  entry_date date not null,
+  entry_time timestamp with time zone not null default now(),
+  source_table text not null,
+  source_id bigint not null,
+  event_type text not null,
+  site_id bigint null,
+  amount numeric(14, 2) not null,
+  direction text not null,
+  running_balance numeric(14, 2) null,
+  remarks text null,
+  created_at timestamp with time zone null default now(),
+  constraint soa_ledger_pkey primary key (id),
+  constraint soa_ledger_source_table_source_id_key unique (source_table, source_id),
+  constraint soa_ledger_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE,
+  constraint soa_ledger_custodian_id_fkey foreign KEY (custodian_id) references auth.users (id),
+  constraint soa_ledger_site_id_fkey foreign KEY (site_id) references sites (id),
+  constraint soa_ledger_direction_check check (
+    (
+      direction = any (array['DEBIT'::text, 'CREDIT'::text])
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_soa_assignment on public.soa_ledger using btree (assignment_id) TABLESPACE pg_default;
+
+create index IF not exists idx_soa_custodian on public.soa_ledger using btree (custodian_id) TABLESPACE pg_default;
+
+create index IF not exists idx_soa_entry_date on public.soa_ledger using btree (entry_date) TABLESPACE pg_default;
+
+14) soa_postings
+
+create table public.soa_postings (
+  id bigserial not null,
+  assignment_id bigint not null,
+  custodian_id uuid not null,
+  assignment_date date not null,
+  cash_picked numeric(14, 2) not null default 0,
+  cash_loaded numeric(14, 2) not null default 0,
+  cash_adjusted numeric(14, 2) not null default 0,
+  excess_reported numeric(14, 2) not null default 0,
+  travel_km numeric(10, 2) not null default 0,
+  travel_allowance numeric(14, 2) not null default 0,
+  net_cash_position numeric(14, 2) not null,
+  eod_signed boolean not null default false,
+  eod_signed_at timestamp with time zone null,
+  eod_signature_url text null,
+  posted_at timestamp with time zone not null default now(),
+  posted_by uuid not null,
+  source text not null default 'eod_approval'::text,
+  constraint soa_postings_pkey primary key (id),
+  constraint soa_postings_assignment_fk foreign KEY (assignment_id) references assignments (id) on delete RESTRICT,
+  constraint soa_postings_custodian_fk foreign KEY (custodian_id) references auth.users (id) on delete RESTRICT
+) TABLESPACE pg_default;
+
+create unique INDEX IF not exists uniq_soa_assignment on public.soa_postings using btree (assignment_id) TABLESPACE pg_default;
+
+create index IF not exists idx_soa_custodian_date on public.soa_postings using btree (custodian_id, assignment_date) TABLESPACE pg_default;
+
+create index IF not exists idx_soa_posted_at on public.soa_postings using btree (posted_at) TABLESPACE pg_default;
+
+15) system_settings
+
+create table public.system_settings (
+  key text not null,
+  value text not null,
+  updated_at timestamp with time zone null default now(),
+  constraint system_settings_pkey primary key (key)
+) TABLESPACE pg_default;
+
+16) technical_issues
+
+create table public.technical_issues (
+  id bigserial not null,
+  assignment_id bigint null,
+  site_id bigint null,
+  issue_type text null,
+  error_code text null,
+  description text null,
+  status text null default 'new'::text,
+  photo_url text null,
+  created_at timestamp with time zone null default now(),
+  resolved_at timestamp with time zone null,
+  constraint technical_issues_pkey primary key (id),
+  constraint technical_issues_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE,
+  constraint technical_issues_site_id_fkey foreign KEY (site_id) references sites (id),
+  constraint technical_issues_status_check check (
+    (
+      status = any (
+        array[
+          'new'::text,
+          'in_progress'::text,
+          'resolved'::text
+        ]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_tech_issues_assignment on public.technical_issues using btree (assignment_id) TABLESPACE pg_default;
+
+create index IF not exists idx_tech_issues_site on public.technical_issues using btree (site_id) TABLESPACE pg_default;
+
+
+17)  travel_logs
+
+create table public.travel_logs (
+  id bigserial not null,
+  assignment_id bigint not null,
+  site_id bigint null,
+  custodian_id uuid null,
+  start_time timestamp with time zone null,
+  end_time timestamp with time zone null,
+  odometer_start numeric(10, 2) null,
+  odometer_end numeric(10, 2) null,
+  km_covered numeric(10, 2) null,
+  gps_start_lat numeric(9, 6) null,
+  gps_start_lng numeric(9, 6) null,
+  gps_end_lat numeric(9, 6) null,
+  gps_end_lng numeric(9, 6) null,
+  status text null default 'in_progress'::text,
+  created_at timestamp with time zone not null default now(),
+  vehicle_type text null,
+  source text null,
+  allowance_amount numeric null,
+  updated_at timestamp with time zone null default now(),
+  rate_per_km numeric(10, 2) null,
+  constraint travel_logs_pkey primary key (id),
+  constraint travel_logs_assignment_id_fkey foreign KEY (assignment_id) references assignments (id) on delete CASCADE,
+  constraint travel_logs_custodian_id_fkey foreign KEY (custodian_id) references auth.users (id) on delete set null,
+  constraint travel_logs_site_id_fkey foreign KEY (site_id) references sites (id) on delete set null,
+  constraint travel_logs_source_check check (
+    (
+      source = any (array['gps'::text, 'odometer'::text])
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_travel_logs_assignment on public.travel_logs using btree (assignment_id) TABLESPACE pg_default;
+
+create index IF not exists idx_travel_logs_custodian on public.travel_logs using btree (custodian_id) TABLESPACE pg_default;
+
+create index IF not exists idx_travel_logs_start_time on public.travel_logs using btree (start_time) TABLESPACE pg_default;
+
+create trigger after_travel_logs_update
+after
+update on travel_logs for EACH row when (
+  old.end_time is null
+  and new.end_time is not null
+)
+execute FUNCTION trg_travel_logs_soa ();
+
+18) v_soa_effective
+
+create view public.v_soa_effective as
+select
+  s.id as soa_id,
+  s.assignment_id,
+  s.custodian_id,
+  s.assignment_date,
+  s.cash_picked,
+  s.cash_loaded,
+  s.cash_adjusted,
+  s.excess_reported,
+  s.travel_km,
+  s.travel_allowance,
+  COALESCE(sum(a.adjustment_amount), 0::numeric) as total_adjustments,
+  s.net_cash_position + COALESCE(sum(a.adjustment_amount), 0::numeric) as final_net_cash_position,
+  s.posted_at,
+  s.source
+from
+  soa_postings s
+  left join soa_adjustments a on a.soa_id = s.id
+group by
+  s.id;
+  
+  19) v_statement_of_accounts
+  
+  create view public.v_statement_of_accounts as
+select
+  l.assignment_id,
+  a.assignment_date,
+  l.entry_date,
+  l.entry_time,
+  p.full_name as custodian_name,
+  l.event_type,
+  l.source_table,
+  l.source_id,
+  s.site_code,
+  s.bank_name,
+  s.address,
+  l.amount,
+  l.direction,
+  l.running_balance,
+  l.remarks
+from
+  soa_ledger l
+  join assignments a on a.id = l.assignment_id
+  join profiles p on p.id = l.custodian_id
+  left join sites s on s.id = l.site_id
+order by
+  l.entry_date,
+  l.entry_time;
+  
+  20) vehicle_rates
+  
+  create table public.vehicle_rates (
+  vehicle_type text not null,
+  rate_per_km numeric not null,
+  active boolean null default true,
+  constraint vehicle_rates_pkey primary key (vehicle_type)
+) TABLESPACE pg_default;

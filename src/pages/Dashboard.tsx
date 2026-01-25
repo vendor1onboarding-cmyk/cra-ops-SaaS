@@ -30,6 +30,23 @@ export default function Dashboard() {
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
   const [showPending, setShowPending] = useState(false);
+
+  // Only custodians can access the dashboard
+  if (profile && profile.role !== "custodian") {
+    return (
+      <AppLayout>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="bg-yellow-50 border border-yellow-200 p-6 rounded-lg text-center">
+            <p className="text-yellow-800 font-semibold">Access Denied</p>
+            <p className="text-sm text-yellow-700 mt-2">
+              This page is only for custodians. Please navigate using the menu.
+            </p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
 const isSubmitted = assignment?.status === "submitted";
 const isRejected = assignment?.status === "rejected";
 const isApproved = assignment?.status === "approved";
