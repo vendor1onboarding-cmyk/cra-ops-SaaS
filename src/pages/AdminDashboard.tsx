@@ -50,22 +50,34 @@ export default function AdminDashboard() {
             .eq("status", "rejected"),
         ]);
 
-        // Fetch ALL pending EODs (status=submitted, any date)
-        const { data: eodList } = await supabase
+        // Fetch ALL pending EODs (status=submitted, any date) - NO JOIN
+        const { data: eodList, error: eodError } = await supabase
           .from("assignments")
-          .select(
-            `id, assignment_date, status, custodian:custodian_id(full_name)`
-          )
+          .select("id, assignment_date, status, custodian_id")
           .eq("status", "submitted")
           .order("assignment_date", { ascending: false });
 
+        let merged: any[] = [];
+        if (!eodError && eodList && eodList.length > 0) {
+          // Fetch custodian names for all unique custodian_ids
+          const custodianIds = [...new Set(eodList.map(a => a.custodian_id))];
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, full_name")
+            .in("id", custodianIds);
+          const nameMap = new Map((profiles || []).map(p => [p.id, p.full_name]));
+          merged = eodList.map(a => ({
+            ...a,
+            custodian: { full_name: nameMap.get(a.custodian_id) || "—" },
+          }));
+        }
         setStats({
           total: assignmentsRes.count || 0,
           submitted: submittedRes.count || 0,
           approved: approvedRes.count || 0,
           rejected: rejectedRes.count || 0,
         });
-        setEods(eodList || []);
+        setEods(merged);
       } catch (error) {
         console.error("Error loading admin data:", error);
         setStats({

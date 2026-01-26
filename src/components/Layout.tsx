@@ -21,6 +21,7 @@ const ICONS: Record<string, string> = {
    "Route Assignment": "🗺️",
   "EOD Approvals": "✅",
   "SOA Adjustments": "🧮",
+  "Advanced Analytics": "📈",
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -53,6 +54,7 @@ const navItems = isAdmin
       { to: "/admin/route-assignment", label: "Route Assignment" },
       { to: "/soa", label: "Statement of Accounts" },
       { to: "/admin/soa-adjustments", label: "SOA Adjustments" },
+      { to: "/analytics/advanced", label: "Advanced Analytics" },
     ]
   : [
     { to: "/", label: "Dashboard" },
