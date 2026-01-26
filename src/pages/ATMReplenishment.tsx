@@ -243,120 +243,182 @@ export default function ATMReplenishment() {
 
   return (
     <AppLayout>
-      <div className="max-w-xl mx-auto bg-white rounded shadow p-4 space-y-3">
-        <h2 className="text-lg font-semibold text-primary">ATM Load</h2>
+      <div className="max-w-2xl mx-auto space-y-5">
+        <div>
+          <h2 className="text-2xl font-bold text-primary mb-1">ATM Load</h2>
+          <p className="text-sm text-slate-600">
+            Record cash loading at ATM locations with GPS verification
+          </p>
+        </div>
 
+        {/* GPS Status Message */}
         {gpsMsg && (
           <div
-            className={`text-sm px-3 py-2 rounded ${
+            className={`text-sm px-4 py-3 rounded-lg border font-medium ${
               gpsStatus === "verified"
-                ? "bg-green-100 text-green-800"
-                : "bg-yellow-100 text-yellow-800"
+                ? "bg-green-50 text-green-800 border-green-200"
+                : gpsStatus === "no_gps"
+                ? "bg-red-50 text-red-800 border-red-200"
+                : "bg-yellow-50 text-yellow-800 border-yellow-200"
             }`}
           >
+            {gpsStatus === "verified" && "✓ "}
+            {gpsStatus === "no_gps" && "⚠️ "}
+            {gpsStatus === "mismatch" && "⚠️ "}
             {gpsMsg}
           </div>
         )}
 
-        <label className="text-sm font-medium">ATM Site</label>
-        <select
-          className="w-full border rounded px-2 py-1 text-sm"
-          value={siteId ?? ""}
-          onChange={(e) => {
-            const id = Number(e.target.value);
-            setSiteId(id);
-            setTimeIn(id ? toIST() : null);
-            setGpsStatus("unknown");
-            setGpsMsg(null);
-          }}
-        >
-          <option value="">Select ATM</option>
-          {sites.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.bank_name} – {s.address}
-            </option>
-          ))}
-        </select>
+        {/* ATM Selection */}
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              ATM Site <span className="text-red-500">*</span>
+            </label>
+            <select
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              value={siteId ?? ""}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                setSiteId(id);
+                setTimeIn(id ? toIST() : null);
+                setGpsStatus("unknown");
+                setGpsMsg(null);
+              }}
+            >
+              <option value="">-- Select an ATM --</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.bank_name} – {s.address}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <button
-  type="button"
-  onClick={acquireGPS}
-  disabled={!siteId || saving}
-  className="w-full bg-primary text-white py-2 rounded text-sm flex items-center justify-center gap-2"
->
-  📍 Acquire GPS Location
-</button>
-
-
-        {(gpsStatus === "mismatch" || gpsStatus === "no_gps") && (
-          <>
-            <label className="text-sm font-medium">ATM Photo (Required)</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setPhoto(e.target.files?.[0] || null)}
-            />
-          </>
-        )}
-
-        <div className="grid grid-cols-2 gap-2">
-          {denomBreakup.map((d) => (
-            <div key={d.key}>
-              <label className="text-sm">₹{d.value}</label>
-              <input
-                type="number"
-                min={0}
-                className="w-full border rounded px-2 py-1 text-sm"
-                value={d.count}
-                onChange={(e) =>
-                  setDenoms({ ...denoms, [d.key]: Number(e.target.value) })
-                }
-              />
-            </div>
-          ))}
+          <button
+            type="button"
+            onClick={acquireGPS}
+            disabled={!siteId || saving}
+            className="w-full bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+          >
+            📍 Acquire GPS Location
+          </button>
         </div>
 
-        {/* Denomination-wise value summary */}
-        <div className="bg-slate-50 rounded p-3 text-sm space-y-1">
-          {denomBreakup
-            .filter((d) => d.count > 0)
-            .map((d) => (
-              <div
-                key={d.key}
-                className="flex justify-between text-slate-700"
-              >
-                <span>
-                  ₹{d.value} × {d.count}
-                </span>
-                <span className="font-medium">
-                  ₹{d.amount.toLocaleString("en-IN")}
-                </span>
+        {/* Photo upload when GPS fails */}
+        {(gpsStatus === "mismatch" || gpsStatus === "no_gps") && (
+          <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                ATM Photo <span className="text-red-500">*</span>
+              </label>
+              <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setPhoto(e.target.files?.[0] || null)}
+                  className="hidden"
+                  id="photo-input"
+                />
+                <label htmlFor="photo-input" className="cursor-pointer block">
+                  <div className="text-3xl mb-2">📷</div>
+                  <p className="text-sm font-medium text-slate-700">
+                    {photo ? photo.name : "Click to upload ATM photo"}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    PNG, JPG up to 10MB
+                  </p>
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Denomination Fields */}
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800 mb-4">
+              Denomination Details
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {denomBreakup.map((d) => (
+              <div key={d.key} className="form-group">
+                <label className="text-sm font-medium text-slate-700">
+                  ₹{d.value}
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={d.count}
+                  onChange={(e) =>
+                    setDenoms({ ...denoms, [d.key]: Number(e.target.value) })
+                  }
+                  placeholder="0"
+                />
               </div>
             ))}
+          </div>
 
-          <div className="border-t pt-1 flex justify-between font-semibold">
-            <span>Total</span>
-            <span>₹{totalAmount.toLocaleString("en-IN")}</span>
+          {/* Summary */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
+            <div className="text-sm text-slate-700 space-y-1">
+              {denomBreakup
+                .filter((d) => d.count > 0)
+                .map((d) => (
+                  <div
+                    key={d.key}
+                    className="flex justify-between text-slate-600"
+                  >
+                    <span>₹{d.value} × {d.count}</span>
+                    <span className="font-medium">
+                      ₹{d.amount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                ))}
+            </div>
+
+            <div className="border-t border-blue-300 pt-2 flex justify-between font-bold text-primary">
+              <span>Total Amount</span>
+              <span>₹{totalAmount.toLocaleString("en-IN")}</span>
+            </div>
           </div>
         </div>
 
-        <label className="text-sm font-medium">Remarks</label>
-        <textarea
-          className="w-full border rounded px-2 py-1 text-sm"
-          rows={2}
-          value={remarks}
-          onChange={(e) => setRemarks(e.target.value)}
-        />
+        {/* Remarks */}
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Remarks
+            </label>
+            <textarea
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px]"
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="Add any notes about this ATM load..."
+            />
+          </div>
+        </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {/* Error Message */}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-lg text-sm">
+            ⚠️ {error}
+          </div>
+        )}
 
-        <button
-          onClick={saveLoad}
-          disabled={saving}
-          className="w-full bg-green-600 text-white py-2 rounded text-sm"
-        >
-          {saving ? "Saving…" : "Save ATM Load"}
-        </button>
+        {/* Save Button */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={saveLoad}
+            disabled={saving}
+            className="flex-1 bg-green-600 text-white py-2.5 rounded-lg font-semibold hover:bg-green-700 active:scale-95 disabled:opacity-50 transition-all"
+          >
+            {saving ? "Saving…" : "Save ATM Load"}
+          </button>
+        </div>
       </div>
     </AppLayout>
   );

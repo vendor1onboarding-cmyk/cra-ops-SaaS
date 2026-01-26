@@ -149,92 +149,116 @@ export default function TechnicalIssues() {
   // --------------------------------------------------
   return (
     <AppLayout>
-      <div className="max-w-xl mx-auto space-y-5">
-        <h2 className="text-lg font-semibold text-primary">
-          Technical Issue Reporting
-        </h2>
+      <div className="max-w-2xl mx-auto space-y-5">
+        <div>
+          <h2 className="text-2xl font-bold text-primary mb-1">
+            Technical Issue Reporting
+          </h2>
+          <p className="text-sm text-slate-600">
+            Report any technical issues encountered at ATM sites
+          </p>
+        </div>
 
         {!assignmentId && !loading && (
-          <div className="p-4 bg-yellow-100 rounded text-sm">
-            No assignment available for today or route not assigned yet.
+          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+            <span className="font-semibold">ℹ️ No assignment available</span> for today or route not assigned yet.
           </div>
         )}
 
         {assignmentId && (
           <>
-            <div>
-              <label className="text-sm block mb-1">Select Site</label>
-              <select
-                className="w-full border rounded px-3 py-2 text-sm"
-                value={selectedSite ?? ""}
-                onChange={(e) => setSelectedSite(Number(e.target.value))}
+            <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Select Site <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={selectedSite ?? ""}
+                  onChange={(e) => setSelectedSite(Number(e.target.value))}
+                >
+                  <option value="">-- Select Site --</option>
+                  {sites.map((s) => (
+                    <option key={s.site_id} value={s.site_id}>
+                      {s.display_label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Issue Type <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={issueType}
+                  onChange={(e) => setIssueType(e.target.value)}
+                >
+                  <option value="">-- Select Issue Type --</option>
+                  <option value="dispenser">💵 Cash Dispenser</option>
+                  <option value="power">⚡ Power / Electrical</option>
+                  <option value="network">📶 Network / Connectivity</option>
+                  <option value="hardware">🔧 Hardware Fault</option>
+                  <option value="other">❓ Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Error Code (optional)
+                </label>
+                <input
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={errorCode}
+                  onChange={(e) => setErrorCode(e.target.value)}
+                  placeholder="e.g. ERR-DS-02"
+                />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Description <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary min-h-[120px]"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Describe the issue observed at site..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Attach Photo (optional)
+                </label>
+                <FileUpload onSelect={setPhoto} />
+                {photo && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    ✓ Selected: {photo.name}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
               >
-                <option value="">-- Select Site --</option>
-                {sites.map((s) => (
-                  <option key={s.site_id} value={s.site_id}>
-                    {s.display_label}
-                  </option>
-                ))}
-              </select>
+                {loading ? "Submitting..." : "Report Issue"}
+              </button>
             </div>
-
-            <div>
-              <label className="text-sm block mb-1">Issue Type</label>
-              <select
-                className="w-full border rounded px-3 py-2 text-sm"
-                value={issueType}
-                onChange={(e) => setIssueType(e.target.value)}
-              >
-                <option value="">-- Select Issue Type --</option>
-                <option value="dispenser">Cash Dispenser</option>
-                <option value="power">Power / Electrical</option>
-                <option value="network">Network / Connectivity</option>
-                <option value="hardware">Hardware Fault</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-sm block mb-1">
-                Error Code (optional)
-              </label>
-              <input
-                className="w-full border rounded px-3 py-2 text-sm"
-                value={errorCode}
-                onChange={(e) => setErrorCode(e.target.value)}
-                placeholder="e.g. ERR-DS-02"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm block mb-1">Description</label>
-              <textarea
-                className="w-full border rounded px-3 py-2 text-sm"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe the issue observed at site"
-              />
-            </div>
-
-            <div>
-              <FileUpload onSelect={setPhoto} />
-              {photo && (
-                <p className="text-xs text-slate-500">
-                  Selected: {photo.name}
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={handleSave}
-              disabled={loading}
-              className="w-full bg-primary text-white py-2 rounded text-sm"
-            >
-              {loading ? "Submitting..." : "Report Issue"}
-            </button>
 
             {message && (
-              <p className="text-xs text-center text-slate-700">
+              <p className={`text-sm text-center p-3 rounded-lg ${
+                message.includes("success")
+                  ? "bg-green-50 text-green-800 border border-green-200"
+                  : "bg-red-50 text-red-800 border border-red-200"
+              }`}>
                 {message}
               </p>
             )}

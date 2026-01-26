@@ -197,88 +197,138 @@ export default function ATMCashAdjustment() {
   /* -------- UI -------- */
   return (
     <AppLayout>
-      <div className="max-w-xl mx-auto space-y-4">
-        <h2 className="text-xl font-semibold text-primary">
-          ATM Cash Adjustment
-        </h2>
+      <div className="max-w-2xl mx-auto space-y-5">
+        <div>
+          <h2 className="text-2xl font-bold text-primary mb-1">
+            ATM Cash Adjustment
+          </h2>
+          <p className="text-sm text-slate-600">
+            Record cash adjustments with GPS verification
+          </p>
+        </div>
 
         {geoMessage && (
-          <div className="p-2 bg-yellow-100 rounded text-sm">
+          <div className={`px-4 py-3 rounded-lg border font-medium text-sm ${
+            geoStatus === "verified"
+              ? "bg-green-50 text-green-800 border-green-200"
+              : geoStatus === "no_gps"
+              ? "bg-red-50 text-red-800 border-red-200"
+              : "bg-yellow-50 text-yellow-800 border-yellow-200"
+          }`}>
+            {geoStatus === "verified" && "✓ "}
+            {geoStatus === "no_gps" && "⚠️ "}
+            {geoStatus === "mismatch" && "⚠️ "}
             {geoMessage}
           </div>
         )}
 
-        <div>
-          <label className="text-sm">Select ATM</label>
-          <select
-            className="w-full border rounded px-3 py-2 text-sm"
-            value={siteId ?? ""}
-            onChange={(e) => setSiteId(Number(e.target.value))}
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Select ATM <span className="text-red-500">*</span>
+            </label>
+            <select
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              value={siteId ?? ""}
+              onChange={(e) => setSiteId(Number(e.target.value))}
+            >
+              <option value="">-- Select ATM --</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.bank_name} – {s.address}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={handleAcquireGPS}
+            disabled={!siteId}
+            className="w-full py-2.5 bg-primary text-white rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
           >
-            <option value="">-- Select ATM --</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.bank_name} – {s.address}
-              </option>
-            ))}
-          </select>
+            📍 Acquire GPS Location
+          </button>
         </div>
 
-        <button
-          onClick={handleAcquireGPS}
-          disabled={!siteId}
-          className="px-3 py-2 bg-primary text-white rounded text-sm"
-        >
-          Acquire GPS Location
-        </button>
-
         {geoStatus === "mismatch" && GEO_MODE === "SOFT" && (
-          <div>
-            <label className="text-sm">ATM Photo (Required)</label>
-            <input
-              type="file"
-              accept="image/*"
-              className="w-full text-sm"
-              onChange={(e) => setPhoto(e.target.files?.[0] || null)}
-            />
+          <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                ATM Photo <span className="text-red-500">*</span>
+              </label>
+              <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setPhoto(e.target.files?.[0] || null)}
+                  className="hidden"
+                  id="photo-input-adj"
+                />
+                <label htmlFor="photo-input-adj" className="cursor-pointer block">
+                  <div className="text-3xl mb-2">📷</div>
+                  <p className="text-sm font-medium text-slate-700">
+                    {photo ? photo.name : "Click to upload ATM photo"}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">PNG, JPG up to 10MB</p>
+                </label>
+              </div>
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
-          {Object.entries(denoms).map(([k, v]) => (
-            <div key={k}>
-              <label className="text-sm">₹{k.replace("denom_", "")}</label>
-              <input
-                type="number"
-                min={0}
-                className="w-full border rounded px-3 py-2 text-sm"
-                value={v}
-                onChange={(e) =>
-                  setDenoms({ ...denoms, [k]: Number(e.target.value) })
-                }
-              />
-            </div>
-          ))}
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Denomination Details</h3>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {Object.entries(denoms).map(([k, v]) => (
+              <div key={k} className="form-group">
+                <label className="text-sm font-medium text-slate-700">
+                  ₹{k.replace("denom_", "")}
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={v}
+                  onChange={(e) =>
+                    setDenoms({ ...denoms, [k]: Number(e.target.value) })
+                  }
+                  placeholder="0"
+                />
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div>
-          <label className="text-sm">Reason</label>
-          <textarea
-            className="w-full border rounded px-3 py-2 text-sm"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Reason <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px]"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Explain the reason for this adjustment..."
+            />
+          </div>
         </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-lg text-sm">
+            ⚠️ {error}
+          </div>
+        )}
 
-        <button
-          onClick={handleSave}
-          disabled={saving || (GEO_MODE !== "OFF" && geoStatus === "unknown")}
-          className="w-full py-2 bg-indigo-600 text-white rounded text-sm font-semibold"
-        >
-          {saving ? "Saving…" : "Save Cash Adjustment"}
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving || (GEO_MODE !== "OFF" && geoStatus === "unknown")}
+            className="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 active:scale-95 disabled:opacity-50 transition-all"
+          >
+            {saving ? "Saving…" : "Save Cash Adjustment"}
+          </button>
+        </div>
       </div>
     </AppLayout>
   );

@@ -8,6 +8,15 @@
 body {
   @apply bg-slate-100 text-slate-800;
   overflow-x: hidden; /* Prevent whole-page horizontal scroll */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 /* ---------------------------------
@@ -15,22 +24,58 @@ body {
 --------------------------------- */
 .card,
 .dashboard-card {
-  @apply bg-white rounded-md shadow p-3 md:p-4 w-full min-w-0;
+  @apply bg-white rounded-lg shadow-sm p-4 md:p-5 w-full min-w-0 border border-slate-100;
 }
 
 /* ---------------------------------
    KPI GRID FIX (Mobile Safe)
 --------------------------------- */
 .kpi-grid {
-  @apply grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 max-w-full;
+  @apply grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-4 max-w-full;
 }
 
 .kpi-card {
-  @apply bg-white rounded-md shadow p-3 md:p-4 min-w-0;
+  @apply bg-white rounded-lg shadow-sm p-4 min-w-0 border border-slate-100 hover:shadow-md transition-shadow;
 }
 
 .kpi-card p {
-  @apply truncate;
+  @apply truncate text-xs sm:text-sm;
+}
+
+/* ---------------------------------
+   FORM ELEMENTS
+--------------------------------- */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+textarea,
+select {
+  @apply w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all;
+}
+
+input[type="text"]::placeholder,
+input[type="email"]::placeholder,
+input[type="password"]::placeholder,
+textarea::placeholder {
+  @apply text-slate-400;
+}
+
+textarea {
+  @apply min-h-[100px] resize-y;
+}
+
+label {
+  @apply block text-sm font-medium text-slate-700 mb-2;
+}
+
+/* ---------------------------------
+   FORM GROUPS
+--------------------------------- */
+.form-group {
+  @apply space-y-2 mb-4;
 }
 
 /* ---------------------------------
@@ -40,10 +85,12 @@ body {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e8f0;
 }
 
 .table-wrapper::-webkit-scrollbar {
-  height: 6px;
+  height: 8px;
 }
 
 .table-wrapper::-webkit-scrollbar-thumb {
@@ -51,43 +98,86 @@ body {
   border-radius: 4px;
 }
 
+.table-wrapper::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
 table {
   width: 100%;
-  min-width: 720px; /* Allows horizontal scroll INSIDE container */
+  min-width: 700px;
   border-collapse: collapse;
 }
 
-th,
-td {
-  @apply px-2 py-2 text-xs md:text-sm whitespace-nowrap;
+thead {
+  @apply bg-slate-50 border-b-2 border-slate-200;
 }
 
-/* Smaller text on mobile for dense data */
+th {
+  @apply px-3 py-3 text-left text-xs md:text-sm font-semibold text-slate-700 whitespace-nowrap;
+}
+
+td {
+  @apply px-3 py-3 text-xs md:text-sm text-slate-600 border-b border-slate-100;
+}
+
+tbody tr {
+  @apply hover:bg-slate-50 transition-colors;
+}
+
+tbody tr:last-child td {
+  @apply border-b-0;
+}
+
+/* Mobile card-style tables */
 @media (max-width: 640px) {
   table {
-    min-width: 600px;
+    min-width: 100%;
+    display: block;
   }
 
-  th,
+  thead {
+    display: none;
+  }
+
+  tbody,
+  tr,
   td {
-    font-size: 11px;
-    padding: 6px;
+    display: block;
+    width: 100%;
+  }
+
+  tr {
+    @apply mb-4 border border-slate-200 rounded-lg overflow-hidden;
+  }
+
+  td {
+    @apply border-0 text-left py-2 pl-32 relative;
+  }
+
+  td::before {
+    content: attr(data-label);
+    @apply absolute left-0 top-0 w-24 px-3 py-2 bg-slate-100 font-semibold text-xs text-slate-700;
   }
 }
+
+/* ---------------------------------
 
 /* ---------------------------------
    DASHBOARD SECTION SPACING
 --------------------------------- */
 .dashboard-section {
-  @apply space-y-3;
+  @apply space-y-4 md:space-y-6 justify-center;
 }
 
-/* ---------------------------------
-   BUTTON CONSISTENCY
---------------------------------- */
-button {
-  @apply rounded-md text-sm font-medium;
+@media (max-width: 640px) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-success {
+    @apply w-full;
+  }
 }
+
 
 /* Print / Save PDF button alignment */
 .print-actions {
@@ -175,54 +265,19 @@ button {
     color: #475569;
   }
 }
+
 /* ===== FORM DENSITY NORMALIZATION ===== */
+/* Use Tailwind spacing utilities for consistency. Remove custom paddings that conflict. */
 
-/* Reduce excessive vertical spacing */
-.form-section {
-  margin-bottom: 0.75rem;
-}
+/* .form-section, .form-grid, .card, .form-field, .form-body, .form-footer, etc. are handled by Tailwind classes above. */
 
-.form-grid {
-  gap: 0.75rem;
-}
+/* Remove duplicate label and button rules. Use Tailwind utilities in components. */
 
-/* Inputs */
-input,
-select,
-textarea {
-  padding-top: 0.45rem;
-  padding-bottom: 0.45rem;
-}
-
-/* Labels */
-label {
-  margin-bottom: 0.25rem;
-  font-size: 0.875rem;
-}
-
-/* Cards */
-.card {
-  padding: 0.75rem;
-}
-
-/* Tables */
-table th,
-table td {
-  padding: 0.4rem 0.5rem;
-}
-
-/* Buttons */
-button {
-  padding-top: 0.45rem;
-  padding-bottom: 0.45rem;
-}
-
-/* Mobile tightening */
+/* Mobile tightening for vertical spacing */
 @media (max-width: 640px) {
   .space-y-3 > * + * {
     margin-top: 0.75rem !important;
   }
-
   .space-y-4 > * + * {
     margin-top: 0.5rem !important;
   }
