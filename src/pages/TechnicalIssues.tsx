@@ -89,6 +89,7 @@ export default function TechnicalIssues() {
   // Save Technical Issue
   // --------------------------------------------------
   async function handleSave() {
+    if (loading) return;
     if (!assignmentId || !selectedSite || !issueType) {
       setMessage("Assignment, Site, and Issue Type are required");
       return;

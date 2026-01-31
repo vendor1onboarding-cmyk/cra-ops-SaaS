@@ -60,10 +60,7 @@ export default function CashPickup() {
     form.denom_2000 * 2000 +
     form.denom_500 * 500 +
     form.denom_200 * 200 +
-    form.denom_100 * 100 +
-    form.denom_50 * 50 +
-    form.denom_20 * 20 +
-    form.denom_10 * 10;
+    form.denom_100 * 100;
 
   const variance = totalAmount - expectedAmount;
 
@@ -71,6 +68,7 @@ export default function CashPickup() {
   // Save (UPSERT – one pickup per bank per day)
   // --------------------------------------------------
   async function handleSave() {
+    if (loading) return;
     if (!assignmentId || !bankName) {
       setMessage("Assignment or Bank name missing");
       return;
@@ -184,9 +182,6 @@ export default function CashPickup() {
                   ["denom_500", 500],
                   ["denom_200", 200],
                   ["denom_100", 100],
-                  ["denom_50", 50],
-                  ["denom_20", 20],
-                  ["denom_10", 10],
                 ].map(([key, label]) => (
                   <div key={key} className="form-group">
                     <label className="text-sm font-medium text-slate-700">

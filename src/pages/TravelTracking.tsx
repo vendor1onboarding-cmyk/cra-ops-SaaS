@@ -161,6 +161,7 @@ useEffect(() => {
   /* ---------------- Start / End ---------------- */
 
   async function startTravel() {
+    if (loading) return;
     if (!assignmentId || activeTravel) return;
 
     setLoading(true);
@@ -198,6 +199,7 @@ useEffect(() => {
   }
 
   async function endTravel() {
+    if (loading) return;
     if (!activeTravel) return;
 
     setLoading(true);
@@ -521,7 +523,7 @@ function stopPlayback() {
       : "bg-blue-600 hover:bg-blue-700 text-white"
   } px-4 py-2 rounded font-semibold`}
 >
-  🚦 Start Travel
+  {loading && !activeTravel ? "Starting..." : "🚦 Start Travel"}
 </button>
 
 
@@ -541,7 +543,7 @@ function stopPlayback() {
       : "bg-green-600 hover:bg-green-700 text-white"
   } px-4 py-2 rounded font-semibold`}
 >
-  🏁 End Travel
+  {loading && activeTravel ? "Ending..." : "🏁 End Travel"}
 </button>
 
         </div>

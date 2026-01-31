@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
-import { getISTDateString, getISTMonthStart } from "../utils/time";
+import { getISTDateString, getISTMonthStart, formatISTDate } from "../utils/time";
 
 const DENOMS = [100, 200, 500, 2000];
 
@@ -20,6 +21,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   const [assignment, setAssignment] = useState<any>(null);
+  const [lastAssignment, setLastAssignment] = useState<any>(null);
+  const [lastAssignmentSitesCount, setLastAssignmentSitesCount] = useState<number>(0);
+  const [lastAssignmentLoadsCount, setLastAssignmentLoadsCount] = useState<number>(0);
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [loads, setLoads] = useState<any[]>([]);
   const [pickups, setPickups] = useState<any[]>([]);
@@ -105,6 +109,38 @@ loadTravelKPI();
 	  .maybeSingle();
 
     if (!assign) {
+      setAssignment(null);
+
+      // Fetch last assignment (fallback view)
+      const { data: last } = await supabase
+        .from("assignments")
+        .select("id, assignment_date, status")
+        .eq("custodian_id", profile.id)
+        .order("assignment_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (last) {
+        setLastAssignment(last);
+        const [{ count: sitesCount }, { count: loadsCount }] = await Promise.all([
+          supabase
+            .from("route_sites")
+            .select("id", { count: "exact", head: true })
+            .eq("assignment_id", last.id),
+          supabase
+            .from("atm_replenishments")
+            .select("id", { count: "exact", head: true })
+            .eq("assignment_id", last.id),
+        ]);
+
+        setLastAssignmentSitesCount(sitesCount || 0);
+        setLastAssignmentLoadsCount(loadsCount || 0);
+      } else {
+        setLastAssignment(null);
+        setLastAssignmentSitesCount(0);
+        setLastAssignmentLoadsCount(0);
+      }
+
       setLoading(false);
       return;
     }
@@ -292,6 +328,99 @@ const completionPct =
     ✅ EOD approved. Day is locked.
   </div>
 )}
+
+      {!loading && !assignment && (
+        <div className="space-y-4 pb-10 px-2 max-w-full">
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  No assignment for today
+                </h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  Your dashboard will update automatically once an admin assigns today’s route.
+                </p>
+              </div>
+              <div className="hidden sm:flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 text-xs px-2 py-1">
+                  ⏳ Waiting for assignment
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs text-slate-500">Today KM</div>
+                <div className="text-lg font-semibold text-slate-800">
+                  {todayKm.toFixed(2)} km
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs text-slate-500">This Month KM</div>
+                <div className="text-lg font-semibold text-slate-800">
+                  {monthlyKm.toFixed(2)} km
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs text-slate-500">Status</div>
+                <div className="text-sm font-semibold text-slate-800">
+                  Active day will appear once assigned
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {lastAssignment && (
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">
+                    Last assignment summary
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1">
+                    {formatISTDate(lastAssignment.assignment_date, "short")} • Status: {lastAssignment.status}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Link to="/soa" className="btn-secondary">
+                    View SOA
+                  </Link>
+                  <Link to="/travel-log" className="btn-primary">
+                    Travel Log
+                  </Link>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">ATMs Assigned</div>
+                  <div className="text-lg font-semibold text-slate-800">
+                    {lastAssignmentSitesCount}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">ATMs Loaded</div>
+                  <div className="text-lg font-semibold text-slate-800">
+                    {lastAssignmentLoadsCount}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <div className="text-xs text-slate-500">Completion</div>
+                  <div className="text-lg font-semibold text-slate-800">
+                    {lastAssignmentSitesCount > 0
+                      ? Math.round((lastAssignmentLoadsCount / lastAssignmentSitesCount) * 100)
+                      : 0}%
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 text-xs text-slate-500">
+                Note: Showing your most recent assignment until today’s assignment is issued.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {!loading && assignment && (
         <div className="space-y-4 pb-24 px-2 max-w-full overflow-x-hidden">

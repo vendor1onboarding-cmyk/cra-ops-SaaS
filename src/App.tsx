@@ -145,7 +145,23 @@ export default function App() {
           }
         />
 
-        <Route path="/analytics" element={<AdvancedAnalytics />} />
+        <Route
+          path="/analytics"
+          element={
+            <RequireAdmin>
+              <AdvancedAnalytics />
+            </RequireAdmin>
+          }
+        />
+
+        <Route
+          path="/analytics/advanced"
+          element={
+            <RequireAdmin>
+              <AdvancedAnalytics />
+            </RequireAdmin>
+          }
+        />
 
         {/* ----------------- ADMIN ROUTES ----------------- */}
         <Route

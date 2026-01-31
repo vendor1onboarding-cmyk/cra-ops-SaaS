@@ -150,6 +150,7 @@ export default function ATMCashAdjustment() {
 
   /* -------- Save -------- */
   async function handleSave() {
+    if (saving) return;
     setError(null);
 
     const adjustmentAmount = sumDenoms(denoms);

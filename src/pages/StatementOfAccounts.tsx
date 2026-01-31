@@ -475,7 +475,7 @@ export default function StatementOfAccounts() {
 
         {/* ===== PRINT FOOTER – SIGNATURES ===== */}
         <div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
-          <div className="grid grid-cols-2 gap-12">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-12">
             <div>
               <p className="font-semibold">Custodian Signature</p>
               <div className="mt-6 border-b w-48"></div>

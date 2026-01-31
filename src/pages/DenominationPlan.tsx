@@ -139,6 +139,7 @@ export default function DenominationPlan() {
   // Save plan
   // --------------------------------------------------
   async function handleSave() {
+    if (loading) return;
     if (!assignmentId || !selectedSite) return;
 
     setLoading(true);
@@ -168,10 +169,7 @@ export default function DenominationPlan() {
     form.denom_2000 * 2000 +
     form.denom_500 * 500 +
     form.denom_200 * 200 +
-    form.denom_100 * 100 +
-    form.denom_50 * 50 +
-    form.denom_20 * 20 +
-    form.denom_10 * 10;
+    form.denom_100 * 100;
 
   // --------------------------------------------------
   // UI
@@ -232,9 +230,6 @@ export default function DenominationPlan() {
                       ["denom_500", 500],
                       ["denom_200", 200],
                       ["denom_100", 100],
-                      ["denom_50", 50],
-                      ["denom_20", 20],
-                      ["denom_10", 10],
                     ].map(([key, label]) => (
                       <div key={key} className="form-group">
                         <label className="text-sm font-medium text-slate-700">

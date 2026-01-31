@@ -159,6 +159,7 @@ export default function ATMReplenishment() {
   /* ---------------- Save ---------------- */
 
   async function saveLoad() {
+    if (saving) return;
     setError(null);
     setSaving(true);
 

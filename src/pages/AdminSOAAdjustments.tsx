@@ -272,7 +272,7 @@ export default function AdminSOAAdjustments() {
           {/* Display Selected SOA Details */}
           {selectedSOA && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
-              <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <p className="text-xs text-blue-600 font-medium">
                     Assignment ID
@@ -405,7 +405,7 @@ export default function AdminSOAAdjustments() {
             </div>
 
             {/* Preview & Submit Buttons */}
-            <div className="flex gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-2">
               <button
                 onClick={() => setShowPreview(!showPreview)}
                 className="flex-1 btn-secondary"

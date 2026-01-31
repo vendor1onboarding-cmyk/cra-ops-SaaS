@@ -53,7 +53,7 @@ input[type="date"],
 input[type="time"],
 textarea,
 select {
-  @apply w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all;
+  @apply w-full px-2 py-1.5 sm:px-3 sm:py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all;
 }
 
 input[type="text"]::placeholder,
@@ -68,7 +68,7 @@ textarea {
 }
 
 label {
-  @apply block text-sm font-medium text-slate-700 mb-2;
+  @apply block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2;
 }
 
 /* ---------------------------------
@@ -147,16 +147,20 @@ tbody tr:last-child td {
   }
 
   tr {
-    @apply mb-4 border border-slate-200 rounded-lg overflow-hidden;
+    @apply mb-4 border border-slate-200 rounded-lg overflow-hidden shadow-sm;
   }
 
   td {
-    @apply border-0 text-left py-2 pl-32 relative;
+    @apply border-0 text-left py-2 px-3 relative text-xs;
+    background: white;
   }
 
-  td::before {
-    content: attr(data-label);
-    @apply absolute left-0 top-0 w-24 px-3 py-2 bg-slate-100 font-semibold text-xs text-slate-700;
+  td:first-child {
+    @apply pt-3 font-semibold text-slate-900 bg-slate-50;
+  }
+
+  td:last-child {
+    @apply pb-3;
   }
 }
 
@@ -322,11 +326,11 @@ tbody tr:last-child td {
 
 /* Compact buttons */
 .btn-primary {
-  @apply bg-primary text-white text-sm px-4 py-1.5 rounded-md hover:bg-primary-light;
+  @apply bg-primary text-white text-sm px-3 py-2 sm:px-4 sm:py-1.5 rounded-md hover:bg-primary-light;
 }
 
 .btn-secondary {
-  @apply bg-slate-100 text-slate-700 text-sm px-4 py-1.5 rounded-md hover:bg-slate-200;
+  @apply bg-slate-100 text-slate-700 text-sm px-3 py-2 sm:px-4 sm:py-1.5 rounded-md hover:bg-slate-200;
 }
 
 /* Mobile tightening */

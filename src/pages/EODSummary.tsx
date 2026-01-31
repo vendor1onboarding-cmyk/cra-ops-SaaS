@@ -123,6 +123,7 @@ export default function EODSummary() {
   // --------------------------------------------------
 
   async function submitEOD() {
+    if (submitting) return;
     if (!assignment) return;
 
     setSubmitting(true);
@@ -234,6 +235,7 @@ function CustodianEOD({
   const [showSignatureModal, setShowSignatureModal] = useState(false);
 
   async function submitSignature() {
+    if (signing) return;
     if (!assignment?.id) return;
 
     if (!sigPadRef.current || sigPadRef.current.isEmpty()) {
@@ -398,9 +400,10 @@ function CustodianEOD({
               ref={sigPadRef}
               penColor="black"
               canvasProps={{
-                width: 500,
-                height: 180,
+                width: 800,
+                height: 280,
                 className: "w-full pointer-events-none",
+                style: { display: "block" },
               }}
             />
             <p className="text-center text-xs text-slate-500 py-1">
@@ -449,7 +452,10 @@ function CustodianEOD({
                     ref={modalSigPadRef}
                     penColor="black"
                     canvasProps={{
-                      className: "w-full h-full",
+                      width: 1200,
+                      height: 600,
+                      className: "w-full h-full block",
+                      style: { display: "block" },
                     }}
                   />
                 </div>

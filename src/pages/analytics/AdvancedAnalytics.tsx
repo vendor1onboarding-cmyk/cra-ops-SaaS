@@ -12,7 +12,7 @@ interface AnalyticsMetrics {
   totalExcessReported: number;
   avgNetCashPosition: number;
   topCustodians: Array<{ id: string; name: string; assignments: number }>;
-  busiestRoutes: Array<{ route: string; count: number }>;
+  busiestSites: Array<{ label: string; count: number }>;
   dailyTrends: Array<{ date: string; assignments: number; cashPicked: number; cashLoaded: number }>;
 }
 
@@ -21,49 +21,71 @@ export default function AdvancedAnalytics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const formatCurrency = (value: number) =>
+    `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+
   useEffect(() => {
     async function fetchAnalytics() {
       setLoading(true);
       setError(null);
       try {
-        // Fetch assignments (route_id is a UUID, no route name available)
-        const { data: assignments, error: assignmentsError } = await supabase
-          .from("assignments")
-          .select("id, assignment_date, custodian_id, route_id")
-          .order("assignment_date", { ascending: false });
+        // Core SOA view (single source of truth for picked/loaded/adjusted/excess/net)
+        const [
+          { data: soaRows, error: soaError },
+          { data: assignments, error: assignmentsError },
+          { data: adjustments, error: adjustmentsError },
+          { data: routeSites, error: routeSitesError },
+        ] =
+          await Promise.all([
+            supabase
+              .from("v_soa_effective")
+              .select(
+                `soa_id,
+                 assignment_date,
+                 cash_picked,
+                 cash_loaded,
+                 cash_adjusted,
+                 excess_reported,
+                 final_net_cash_position,
+                 custodian_id`
+              )
+              .order("assignment_date", { ascending: false }),
+            // Fetch assignments for route analytics
+            supabase
+              .from("assignments")
+              .select("id, assignment_date, custodian_id")
+              .order("assignment_date", { ascending: false }),
+            // Fetch adjustments for total adjustment volume
+            supabase
+              .from("soa_adjustments")
+              .select("adjustment_amount, adjustment_type, assignment_id"),
+            // Fetch route sites for busiest site analytics
+            supabase
+              .from("route_sites")
+              .select(
+                `site_id,
+                 assignment_id,
+                 site:site_id(
+                   site_code,
+                   bank_name,
+                   address,
+                   atm_id
+                 )`
+              ),
+          ]);
+
+        if (soaError) throw soaError;
         if (assignmentsError) throw assignmentsError;
-        if (!assignments) throw new Error("No assignments data returned");
-
-        // Fetch cash picked
-        const { data: cashPickups, error: cashPickupsError } = await supabase
-          .from("cash_pickups")
-          .select("cash_picked, assignment_id");
-        if (cashPickupsError) throw cashPickupsError;
-        if (!cashPickups) throw new Error("No cash pickups data returned");
-
-        // Fetch cash loaded
-        const { data: cashLoaded, error: cashLoadedError } = await supabase
-          .from("cash_loaded")
-          .select("cash_loaded, assignment_id");
-        if (cashLoadedError) throw cashLoadedError;
-        if (!cashLoaded) throw new Error("No cash loaded data returned");
-
-        // Fetch adjustments
-        const { data: adjustments, error: adjustmentsError } = await supabase
-          .from("soa_adjustments")
-          .select("adjustment_amount, adjustment_type, assignment_id");
         if (adjustmentsError) throw adjustmentsError;
-        if (!adjustments) throw new Error("No adjustments data returned");
+        if (routeSitesError) throw routeSitesError;
 
-        // Fetch excess cash
-        const { data: excessCash, error: excessCashError } = await supabase
-          .from("excess_cash")
-          .select("excess_reported, assignment_id");
-        if (excessCashError) throw excessCashError;
-        if (!excessCash) throw new Error("No excess cash data returned");
+        const soaData = soaRows || [];
+        const assignmentData = assignments || [];
+        const adjustmentData = adjustments || [];
+        const routeSitesData = routeSites || [];
 
         // Fetch custodian names (optional, fallback to id if missing)
-        const custodianIds = [...new Set(assignments.map((a: any) => a.custodian_id))];
+        const custodianIds = [...new Set(soaData.map((a: any) => a.custodian_id))];
         let nameMap = new Map();
         if (custodianIds.length > 0) {
           const { data: profiles, error: profilesError } = await supabase
@@ -76,25 +98,19 @@ export default function AdvancedAnalytics() {
         }
 
         // Aggregate metrics
-        const totalAssignments = assignments.length;
-        const totalCashPicked = cashPickups.reduce((sum: number, c: any) => sum + (c.cash_picked || 0), 0);
-        const totalCashLoaded = cashLoaded.reduce((sum: number, c: any) => sum + (c.cash_loaded || 0), 0);
-        const totalAdjustments = adjustments.reduce((sum: number, a: any) => sum + (a.adjustment_amount || 0), 0);
-        const totalExcessReported = excessCash.reduce((sum: number, e: any) => sum + (e.excess_reported || 0), 0);
+        const totalAssignments = soaData.length;
+        const totalCashPicked = soaData.reduce((sum: number, r: any) => sum + (r.cash_picked || 0), 0);
+        const totalCashLoaded = soaData.reduce((sum: number, r: any) => sum + (r.cash_loaded || 0), 0);
+        const totalAdjustments = adjustmentData.reduce((sum: number, a: any) => sum + (a.adjustment_amount || 0), 0);
+        const totalExcessReported = soaData.reduce((sum: number, r: any) => sum + (r.excess_reported || 0), 0);
 
         // Calculate net cash position per assignment
-        const netPositions: number[] = assignments.map((a: any) => {
-          const picked = cashPickups.find((c: any) => c.assignment_id === a.id)?.cash_picked || 0;
-          const loaded = cashLoaded.find((c: any) => c.assignment_id === a.id)?.cash_loaded || 0;
-          const adjustment = adjustments.filter((adj: any) => adj.assignment_id === a.id).reduce((sum: number, adj: any) => sum + (adj.adjustment_amount || 0), 0);
-          const excess = excessCash.find((e: any) => e.assignment_id === a.id)?.excess_reported || 0;
-          return picked - loaded + adjustment - excess;
-        });
+        const netPositions: number[] = soaData.map((r: any) => r.final_net_cash_position || 0);
         const avgNetCashPosition = netPositions.length > 0 ? netPositions.reduce((a, b) => a + b, 0) / netPositions.length : 0;
 
         // Top custodians by assignment count
         const custodianCounts: Record<string, number> = {};
-        assignments.forEach((a: any) => {
+        soaData.forEach((a: any) => {
           custodianCounts[a.custodian_id] = (custodianCounts[a.custodian_id] || 0) + 1;
         });
         const topCustodians = Object.entries(custodianCounts)
@@ -102,27 +118,49 @@ export default function AdvancedAnalytics() {
           .slice(0, 5)
           .map(([id, assignments]) => ({ id, name: nameMap.get(id) || id, assignments }));
 
-        // Busiest routes by assignment count (route_id is UUID, no name available)
-        const routeCounts: Record<string, number> = {};
-        assignments.forEach((a: any) => {
-          if (a.route_id) routeCounts[a.route_id] = (routeCounts[a.route_id] || 0) + 1;
+        // Busiest sites by occurrence in route assignments
+        const siteCounts: Record<string, { label: string; count: number }> = {};
+        routeSitesData.forEach((r: any) => {
+          const site = r.site || {};
+          const bank = site.bank_name || "Bank";
+          const address = site.address || site.site_code || "Location";
+          const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
+          const label = `${bank} – ${address}${atm}`;
+
+          if (!siteCounts[r.site_id]) {
+            siteCounts[r.site_id] = { label, count: 0 };
+          }
+          siteCounts[r.site_id].count += 1;
         });
-        const busiestRoutes = Object.entries(routeCounts)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([route, count]) => ({ route, count }));
+        const busiestSites = Object.values(siteCounts)
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
 
         // Daily trends (last 30 days)
         const today = new Date();
-        const dailyTrends: Array<{ date: string; assignments: number; cashPicked: number; cashLoaded: number }> = [];
-        for (let i = 0; i < 30; i++) {
+        const dailyMap = new Map<string, { assignments: number; cashPicked: number; cashLoaded: number }>();
+        for (let i = 29; i >= 0; i--) {
           const date = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
           const dateStr = date.toISOString().split("T")[0];
-          const dayAssignments = assignments.filter((a: any) => a.assignment_date === dateStr);
-          const dayCashPicked = dayAssignments.map((a: any) => cashPickups.find((c: any) => c.assignment_id === a.id)?.cash_picked || 0).reduce((a, b) => a + b, 0);
-          const dayCashLoaded = dayAssignments.map((a: any) => cashLoaded.find((c: any) => c.assignment_id === a.id)?.cash_loaded || 0).reduce((a, b) => a + b, 0);
-          dailyTrends.push({ date: dateStr, assignments: dayAssignments.length, cashPicked: dayCashPicked, cashLoaded: dayCashLoaded });
+          dailyMap.set(dateStr, { assignments: 0, cashPicked: 0, cashLoaded: 0 });
         }
+
+        soaData.forEach((row: any) => {
+          if (!row.assignment_date) return;
+          const dateStr = row.assignment_date;
+          const day = dailyMap.get(dateStr);
+          if (!day) return;
+          day.assignments += 1;
+          day.cashPicked += row.cash_picked || 0;
+          day.cashLoaded += row.cash_loaded || 0;
+        });
+
+        const dailyTrends = Array.from(dailyMap.entries()).map(([date, data]) => ({
+          date,
+          assignments: data.assignments,
+          cashPicked: data.cashPicked,
+          cashLoaded: data.cashLoaded,
+        }));
 
         setMetrics({
           totalAssignments,
@@ -132,7 +170,7 @@ export default function AdvancedAnalytics() {
           totalExcessReported,
           avgNetCashPosition,
           topCustodians,
-          busiestRoutes,
+          busiestSites,
           dailyTrends,
         });
       } catch (err: any) {
@@ -155,56 +193,61 @@ export default function AdvancedAnalytics() {
           <div className="space-y-8">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <MetricCard label="Total Assignments" value={metrics.totalAssignments} icon="📋" />
-              <MetricCard label="Total Cash Picked" value={metrics.totalCashPicked} icon="💵" />
-              <MetricCard label="Total Cash Loaded" value={metrics.totalCashLoaded} icon="🚚" />
-              <MetricCard label="Total Adjustments" value={metrics.totalAdjustments} icon="📝" />
-              <MetricCard label="Total Excess Reported" value={metrics.totalExcessReported} icon="⚠️" />
-              <MetricCard label="Avg Net Cash Position" value={metrics.avgNetCashPosition.toFixed(2)} icon="📊" />
+              <MetricCard label="Total Cash Picked" value={formatCurrency(metrics.totalCashPicked)} icon="💵" />
+              <MetricCard label="Total Cash Loaded" value={formatCurrency(metrics.totalCashLoaded)} icon="🚚" />
+              <MetricCard label="Total Adjustments" value={formatCurrency(metrics.totalAdjustments)} icon="📝" />
+              <MetricCard label="Total Excess Reported" value={formatCurrency(metrics.totalExcessReported)} icon="⚠️" />
+              <MetricCard label="Avg Net Cash Position" value={formatCurrency(metrics.avgNetCashPosition)} icon="📊" />
             </div>
             <section>
               <h2 className="text-xl font-semibold mb-3">Top Custodians</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[400px] text-sm">
-                  <thead className="bg-slate-100">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Name</th>
-                      <th className="px-4 py-2 text-left">Assignments</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {metrics.topCustodians.map(c => (
-                      <tr key={c.id}>
-                        <td className="px-4 py-2">{c.name}</td>
-                        <td className="px-4 py-2">{c.assignments}</td>
+              {metrics.topCustodians.length === 0 ? (
+                <div className="text-sm text-slate-500">No custodian data available.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[400px] text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-4 py-2 text-left">Name</th>
+                        <th className="px-4 py-2 text-left">Assignments</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {metrics.topCustodians.map((c) => (
+                        <tr key={c.id}>
+                          <td className="px-4 py-2">{c.name}</td>
+                          <td className="px-4 py-2">{c.assignments}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
             <section>
-              <h2 className="text-xl font-semibold mb-3">Busiest Routes</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[400px] text-sm">
-                  <thead className="bg-slate-100">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Route ID (UUID)</th>
-                      <th className="px-4 py-2 text-left">Assignments</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {metrics.busiestRoutes.map(r => (
-                      <tr key={r.route}>
-                        <td className="px-4 py-2">{r.route}</td>
-                        <td className="px-4 py-2">{r.count}</td>
+              <h2 className="text-xl font-semibold mb-3">Busiest Sites</h2>
+              {metrics.busiestSites.length === 0 ? (
+                <div className="text-sm text-slate-500">No site data available.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[400px] text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-4 py-2 text-left">Site</th>
+                        <th className="px-4 py-2 text-left">Assignments</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="text-xs text-slate-500 mt-2">
-                  <strong>Note:</strong> Route names are not available in the current schema. Only <code>route_id</code> (UUID) is shown. To display route names, add a <code>routes</code> table and join on <code>route_id</code>.
+                    </thead>
+                    <tbody>
+                      {metrics.busiestSites.map((r, idx) => (
+                        <tr key={`${r.label}-${idx}`}>
+                          <td className="px-4 py-2">{r.label}</td>
+                          <td className="px-4 py-2">{r.count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
+              )}
             </section>
             <section>
               <h2 className="text-xl font-semibold mb-3">Daily Trends (Last 30 Days)</h2>
@@ -219,12 +262,12 @@ export default function AdvancedAnalytics() {
                     </tr>
                   </thead>
                   <tbody>
-                    {metrics.dailyTrends.map(trend => (
+                    {metrics.dailyTrends.map((trend) => (
                       <tr key={trend.date}>
                         <td className="px-4 py-2">{formatISTDate(trend.date, "short")}</td>
                         <td className="px-4 py-2">{trend.assignments}</td>
-                        <td className="px-4 py-2">{trend.cashPicked}</td>
-                        <td className="px-4 py-2">{trend.cashLoaded}</td>
+                        <td className="px-4 py-2">{formatCurrency(trend.cashPicked)}</td>
+                        <td className="px-4 py-2">{formatCurrency(trend.cashLoaded)}</td>
                       </tr>
                     ))}
                   </tbody>
