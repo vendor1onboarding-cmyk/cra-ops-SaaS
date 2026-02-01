@@ -3,6 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
+import { travelLogService } from "../utils/travelLogService";
 
 const GPS_RADIUS_METERS = 100;
 
@@ -68,6 +69,11 @@ export default function ATMReplenishment() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Travel log integration (optional, non-blocking)
+  const [captureTravelLog, setCaptureTravelLog] = useState(true);
+  const [loadCount, setLoadCount] = useState(0);
+  const [hasManualTravel, setHasManualTravel] = useState(false);
+
   /* ---------------- Load assignment & sites ---------------- */
 
   useEffect(() => {
@@ -92,6 +98,10 @@ export default function ATMReplenishment() {
         .eq("assignment_id", a.id);
 
       setSites((data || []).map((r: any) => r.site));
+
+      // Check for manual travel log (coexistence check)
+      const hasActive = await travelLogService.hasActiveTravel(profile.id);
+      setHasManualTravel(hasActive);
     })();
   }, [profile]);
 
@@ -222,6 +232,36 @@ export default function ATMReplenishment() {
       setError("Failed to save ATM Load");
       setSaving(false);
       return;
+    }
+
+    // TRAVEL LOG INTEGRATION (SAFE, NON-BLOCKING)
+    // This runs AFTER ATM load is saved, so it never blocks the primary flow
+    if (captureTravelLog && !hasManualTravel) {
+      try {
+        const isFirstLoad = loadCount === 0;
+        
+        if (isFirstLoad) {
+          // First site: start travel log
+          await travelLogService.startTravel({
+            assignmentId: assignmentId,
+            custodianId: profile!.id,
+            vehicleType: "bike", // default, can be made configurable
+          });
+        } else {
+          // Subsequent sites: end previous, start new
+          await travelLogService.endAndStartTravel(profile!.id, {
+            assignmentId: assignmentId,
+            custodianId: profile!.id,
+            vehicleType: "bike",
+          });
+        }
+
+        // Increment load count
+        setLoadCount((prev) => prev + 1);
+      } catch (err) {
+        // Silent failure - travel log errors never affect ATM load
+        console.warn("[ATMLoad] Travel log trigger failed (non-critical):", err);
+      }
     }
 
     // Reset
@@ -400,6 +440,40 @@ export default function ATMReplenishment() {
               onChange={(e) => setRemarks(e.target.value)}
               placeholder="Add any notes about this ATM load..."
             />
+          </div>
+        </div>
+
+        {/* Travel Log Capture Option */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-5">
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="capture-travel-log"
+              checked={captureTravelLog}
+              onChange={(e) => setCaptureTravelLog(e.target.checked)}
+              disabled={hasManualTravel}
+              className="mt-0.5 h-4 w-4 text-primary border-slate-300 rounded focus:ring-2 focus:ring-primary disabled:opacity-50"
+            />
+            <div className="flex-1">
+              <label
+                htmlFor="capture-travel-log"
+                className="text-sm font-semibold text-slate-800 cursor-pointer"
+              >
+                Capture Travel Log from ATM Load
+              </label>
+              <p className="text-xs text-slate-600 mt-1">
+                {hasManualTravel ? (
+                  <span className="text-amber-700">
+                    ⚠️ Manual travel log detected. This option is disabled to prevent conflicts.
+                  </span>
+                ) : (
+                  <>
+                    Automatically track travel between ATM sites. First site starts travel,
+                    subsequent sites create segments. Uncheck to use Travel Log menu instead.
+                  </>
+                )}
+              </p>
+            </div>
           </div>
         </div>
 
