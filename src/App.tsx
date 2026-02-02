@@ -3,6 +3,7 @@ import { useAuth } from "./context/AuthContext";
 import AdminRouteAssignmentPage from "./pages/AdminRouteAssignment";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSOAAdjustments from "./pages/AdminSOAAdjustments";
+import AdminOperations from "./pages/AdminOperations";
 import AdvancedAnalytics from "./pages/analytics/AdvancedAnalytics";
 
 import Login from "./pages/Login";
@@ -197,6 +198,14 @@ export default function App() {
           element={
             <RequireAdmin>
               <AdminSOAAdjustments />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="/admin/operations"
+          element={
+            <RequireAdmin>
+              <AdminOperations />
             </RequireAdmin>
           }
         />

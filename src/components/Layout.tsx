@@ -13,15 +13,16 @@ const ICONS: Record<string, string> = {
   "Cash Pickup": "🏦",
   "ATM Load": "🏧",
   "Statement of Accounts": "📑",
-  "Travel Log": "🚗", // ✅ NEW
+  "Travel Log": "🚗",
   "ATM Excess Cash": "🧾💵",
   "ATM Cash Adjustment": "🔄💵",
   "Tech Issues": "⚠️",
   EOD: "🧾",
-   "Route Assignment": "🗺️",
+  "Route Assignment": "🗺️",
   "EOD Approvals": "✅",
   "SOA Adjustments": "🧮",
   "Advanced Analytics": "📈",
+  "Admin Operations": "⚙️",
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -54,6 +55,7 @@ const navItems = isAdmin
       { to: "/admin/route-assignment", label: "Route Assignment" },
       { to: "/soa", label: "Statement of Accounts" },
       { to: "/admin/soa-adjustments", label: "SOA Adjustments" },
+      { to: "/admin/operations", label: "Admin Operations" },
       { to: "/analytics/advanced", label: "Advanced Analytics" },
     ]
   : [
