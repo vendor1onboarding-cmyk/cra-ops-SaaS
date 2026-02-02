@@ -3,7 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
-import { travelLogService } from "../utils/travelLogService";
+import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 const GPS_RADIUS_METERS = 100;
 
@@ -72,7 +72,6 @@ export default function ATMReplenishment() {
   // Travel log integration (optional, non-blocking)
   const [captureTravelLog, setCaptureTravelLog] = useState(true);
   const [loadCount, setLoadCount] = useState(0);
-  const [hasManualTravel, setHasManualTravel] = useState(false);
 
   /* ---------------- Load assignment & sites ---------------- */
 
@@ -98,10 +97,6 @@ export default function ATMReplenishment() {
         .eq("assignment_id", a.id);
 
       setSites((data || []).map((r: any) => r.site));
-
-      // Check for manual travel log (coexistence check)
-      const hasActive = await travelLogService.hasActiveTravel(profile.id);
-      setHasManualTravel(hasActive);
     })();
   }, [profile]);
 
@@ -236,28 +231,47 @@ export default function ATMReplenishment() {
 
     // TRAVEL LOG INTEGRATION (SAFE, NON-BLOCKING)
     // This runs AFTER ATM load is saved, so it never blocks the primary flow
-    if (captureTravelLog && !hasManualTravel) {
+    if (captureTravelLog) {
       try {
-        const isFirstLoad = loadCount === 0;
+        // Check current travel context and active travel
+        const currentContext = travelLogService.getTravelContext();
+        const hasActiveTravel = await travelLogService.hasActiveTravel(profile!.id);
         
-        if (isFirstLoad) {
-          // First site: start travel log
-          await travelLogService.startTravel({
-            assignmentId: assignmentId,
-            custodianId: profile!.id,
-            vehicleType: "bike", // default, can be made configurable
-          });
+        // Determine if we can proceed with ATM travel:
+        // - If no active travel → YES (start new ATM travel)
+        // - If active travel with ATM context → YES (chain to next site)
+        // - If active travel without ATM context → NO (manual travel is active)
+        const isATMTravel = currentContext === TravelContext.ATM;
+        const canProceed = !hasActiveTravel || isATMTravel;
+        
+        if (!canProceed) {
+          console.log("[ATMLoad] Manual travel detected, skipping ATM travel triggers");
         } else {
-          // Subsequent sites: end previous, start new
-          await travelLogService.endAndStartTravel(profile!.id, {
-            assignmentId: assignmentId,
-            custodianId: profile!.id,
-            vehicleType: "bike",
-          });
-        }
+          const isFirstLoad = loadCount === 0 && !hasActiveTravel;
+          
+          if (isFirstLoad) {
+            // First site with no active travel: start ATM travel
+            await travelLogService.startTravel({
+              assignmentId: assignmentId,
+              custodianId: profile!.id,
+              vehicleType: "bike", // default, can be made configurable
+              context: TravelContext.ATM,
+            });
+            console.log("[ATMLoad] Started ATM-initiated travel");
+          } else if (hasActiveTravel && isATMTravel) {
+            // Subsequent sites with active ATM travel: chain
+            await travelLogService.endAndStartTravel(profile!.id, {
+              assignmentId: assignmentId,
+              custodianId: profile!.id,
+              vehicleType: "bike",
+              context: TravelContext.ATM,
+            });
+            console.log("[ATMLoad] Chained ATM travel to next site");
+          }
 
-        // Increment load count
-        setLoadCount((prev) => prev + 1);
+          // Increment load count only when we successfully trigger travel
+          setLoadCount((prev) => prev + 1);
+        }
       } catch (err) {
         // Silent failure - travel log errors never affect ATM load
         console.warn("[ATMLoad] Travel log trigger failed (non-critical):", err);
@@ -451,8 +465,7 @@ export default function ATMReplenishment() {
               id="capture-travel-log"
               checked={captureTravelLog}
               onChange={(e) => setCaptureTravelLog(e.target.checked)}
-              disabled={hasManualTravel}
-              className="mt-0.5 h-4 w-4 text-primary border-slate-300 rounded focus:ring-2 focus:ring-primary disabled:opacity-50"
+              className="mt-0.5 h-4 w-4 text-primary border-slate-300 rounded focus:ring-2 focus:ring-primary"
             />
             <div className="flex-1">
               <label
@@ -462,15 +475,12 @@ export default function ATMReplenishment() {
                 Capture Travel Log from ATM Load
               </label>
               <p className="text-xs text-slate-600 mt-1">
-                {hasManualTravel ? (
-                  <span className="text-amber-700">
-                    ⚠️ Manual travel log detected. This option is disabled to prevent conflicts.
+                Automatically track travel between ATM sites. First site starts travel,
+                subsequent sites create segments. Uncheck to use Travel Log menu instead.
+                {captureTravelLog && (
+                  <span className="block mt-1 text-blue-700">
+                    ℹ️ ATM-initiated travel will chain across sites. Manual Travel Log remains independent.
                   </span>
-                ) : (
-                  <>
-                    Automatically track travel between ATM sites. First site starts travel,
-                    subsequent sites create segments. Uncheck to use Travel Log menu instead.
-                  </>
                 )}
               </p>
             </div>

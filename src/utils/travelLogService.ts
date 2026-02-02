@@ -8,6 +8,14 @@ import { supabase } from "../api/supabaseClient";
  * to primary business operations (e.g., ATM loads).
  */
 
+// Travel context: who initiated the travel session
+export enum TravelContext {
+  ATM = "ATM_TRAVEL",
+  MANUAL = "MANUAL_TRAVEL",
+}
+
+const CONTEXT_STORAGE_KEY = "sruthi_travel_context";
+
 interface GPSCoordinates {
   lat: number;
   lng: number;
@@ -20,9 +28,37 @@ interface TravelLogServiceOptions {
   ratePerKm?: number;
   odometerStart?: string;
   odometerEnd?: string;
+  context?: TravelContext; // Who initiated this travel
 }
 
 class TravelLogService {
+  /**
+   * Get the current travel context (ATM vs MANUAL)
+   */
+  getTravelContext(): TravelContext | null {
+    try {
+      const stored = localStorage.getItem(CONTEXT_STORAGE_KEY);
+      return stored as TravelContext | null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Set the travel context
+   */
+  private setTravelContext(context: TravelContext | null): void {
+    try {
+      if (context) {
+        localStorage.setItem(CONTEXT_STORAGE_KEY, context);
+      } else {
+        localStorage.removeItem(CONTEXT_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.warn("[TravelLog] Failed to set context:", error);
+    }
+  }
+
   /**
    * Check if there's an active travel session for the given custodian
    * Returns true if active, false otherwise (or on error)
@@ -92,6 +128,7 @@ class TravelLogService {
         vehicleType = "bike",
         ratePerKm,
         odometerStart,
+        context = TravelContext.MANUAL, // Default to manual if not specified
       } = options;
 
       // Check for existing active travel
@@ -100,6 +137,9 @@ class TravelLogService {
         console.warn("[TravelLog] Active travel already exists, skipping start");
         return null;
       }
+
+      // Set context for this travel session
+      this.setTravelContext(context);
 
       // Get GPS (best-effort)
       const gps = await this.getGPS();
@@ -218,6 +258,9 @@ class TravelLogService {
         return false;
       }
 
+      // Clear context when travel ends
+      this.setTravelContext(null);
+
       console.log("[TravelLog] Travel ended successfully:", activeTravel.id);
       return true;
     } catch (error) {
@@ -256,14 +299,20 @@ class TravelLogService {
     newTravelOptions: TravelLogServiceOptions
   ): Promise<number | null> {
     try {
-      // End current travel
+      // Preserve current context before ending
+      const currentContext = this.getTravelContext();
+      
+      // End current travel (this will clear context)
       await this.endTravel(custodianId);
 
       // Small delay to ensure transaction completes
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Start new travel
-      return await this.startTravel(newTravelOptions);
+      // Start new travel with preserved context
+      return await this.startTravel({
+        ...newTravelOptions,
+        context: newTravelOptions.context || currentContext || TravelContext.MANUAL,
+      });
     } catch (error) {
       console.warn("[TravelLog] End and start travel failed:", error);
       return null;

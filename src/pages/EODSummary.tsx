@@ -230,9 +230,63 @@ function CustodianEOD({
 }: any) {
   const sigPadRef = useRef<any>(null);
   const modalSigPadRef = useRef<any>(null);
+  const previewCanvasWrapRef = useRef<HTMLDivElement | null>(null);
+  const modalCanvasWrapRef = useRef<HTMLDivElement | null>(null);
   const [signing, setSigning] = useState(false);
   const [sigError, setSigError] = useState<string | null>(null);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
+
+  const resizeSignatureCanvas = (
+    ref: React.MutableRefObject<any>,
+    wrapRef: React.MutableRefObject<HTMLDivElement | null>
+  ) => {
+    const pad = ref.current;
+    const wrapper = wrapRef.current;
+    if (!pad || !wrapper) return;
+
+    const canvas = pad.getCanvas?.() || pad.canvas;
+    if (!canvas) return;
+
+    const ratio = window.devicePixelRatio || 1;
+    const width = wrapper.clientWidth;
+    const height = wrapper.clientHeight;
+    if (!width || !height) return;
+
+    const dataUrl = pad.toDataURL?.();
+
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+
+    pad.clear?.();
+    if (dataUrl) {
+      pad.fromDataURL?.(dataUrl);
+    }
+  };
+
+  useEffect(() => {
+    const handleResize = () => {
+      resizeSignatureCanvas(sigPadRef, previewCanvasWrapRef);
+      if (showSignatureModal) {
+        resizeSignatureCanvas(modalSigPadRef, modalCanvasWrapRef);
+      }
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [showSignatureModal]);
+
+  useEffect(() => {
+    if (!showSignatureModal) return;
+    requestAnimationFrame(() =>
+      resizeSignatureCanvas(modalSigPadRef, modalCanvasWrapRef)
+    );
+  }, [showSignatureModal]);
 
   async function submitSignature() {
     if (signing) return;
@@ -396,16 +450,18 @@ function CustodianEOD({
             className="border rounded bg-slate-50 cursor-pointer"
             onClick={() => setShowSignatureModal(true)}
           >
-            <SignatureCanvas
-              ref={sigPadRef}
-              penColor="black"
-              canvasProps={{
-                width: 800,
-                height: 280,
-                className: "w-full pointer-events-none",
-                style: { display: "block" },
-              }}
-            />
+            <div ref={previewCanvasWrapRef} className="h-36 sm:h-44">
+              <SignatureCanvas
+                ref={sigPadRef}
+                penColor="black"
+                canvasProps={{
+                  width: 1,
+                  height: 1,
+                  className: "w-full h-full pointer-events-none",
+                  style: { display: "block", touchAction: "none" },
+                }}
+              />
+            </div>
             <p className="text-center text-xs text-slate-500 py-1">
               Tap to sign (full screen)
             </p>
@@ -447,15 +503,18 @@ function CustodianEOD({
                   </button>
                 </div>
 
-                <div className="flex-1 border rounded bg-slate-50">
+                <div
+                  ref={modalCanvasWrapRef}
+                  className="flex-1 border rounded bg-slate-50"
+                >
                   <SignatureCanvas
                     ref={modalSigPadRef}
                     penColor="black"
                     canvasProps={{
-                      width: 1200,
-                      height: 600,
+                      width: 1,
+                      height: 1,
                       className: "w-full h-full block",
-                      style: { display: "block" },
+                      style: { display: "block", touchAction: "none" },
                     }}
                   />
                 </div>
