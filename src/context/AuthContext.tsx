@@ -13,6 +13,8 @@ type Profile = {
   id: string;
   full_name: string | null;
   role: Role;
+  email: string;
+  first_login?: boolean;
 };
 
 type AuthContextType = {
@@ -40,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, role")
+        .select("id, full_name, role, email, first_login")
         .eq("id", session.user.id)
         .single();
 

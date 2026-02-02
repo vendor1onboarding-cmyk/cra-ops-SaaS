@@ -2,10 +2,12 @@ import { useState } from "react";
 import { AppLayout } from "../components/Layout";
 import ATMSiteOnboarding from "./admin/ATMSiteOnboarding";
 import ATMSiteUpdate from "./admin/ATMSiteUpdate";
+import UserOnboarding from "./admin/UserOnboarding";
 
 type AdminAction = 
   | "atm-site-onboarding"
   | "atm-site-update"
+  | "user-management"
   | null;
 
 interface ActionOption {
@@ -27,6 +29,12 @@ const ADMIN_ACTIONS: ActionOption[] = [
     label: "Update ATM Site",
     description: "Modify existing ATM site details with full validation",
     icon: "✏️",
+  },
+  {
+    id: "user-management",
+    label: "User Management",
+    description: "Create new users and manage user accounts",
+    icon: "👤",
   },
   // Future actions can be added here:
   // { id: "custodian-mapping", label: "Custodian Mapping", ... },
@@ -92,9 +100,10 @@ export default function AdminOperations() {
         {/* Dynamic Action Content */}
         {selectedAction === "atm-site-onboarding" && <ATMSiteOnboarding />}
         {selectedAction === "atm-site-update" && <ATMSiteUpdate />}
+        {selectedAction === "user-management" && <UserOnboarding />}
 
         {/* Placeholder for future actions */}
-        {selectedAction && selectedAction !== "atm-site-onboarding" && selectedAction !== "atm-site-update" && (
+        {selectedAction && selectedAction !== "atm-site-onboarding" && selectedAction !== "atm-site-update" && selectedAction !== "user-management" && (
           <section className="bg-white border border-slate-200 rounded-lg p-5">
             <div className="text-center text-slate-500 text-sm">
               This feature is coming soon.

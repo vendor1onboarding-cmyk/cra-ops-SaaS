@@ -23,12 +23,14 @@ const ICONS: Record<string, string> = {
   "SOA Adjustments": "🧮",
   "Advanced Analytics": "📈",
   "Admin Operations": "⚙️",
+  "Change Password": "🔐",
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const { profile, signOut } = useAuth();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   /* ---------------- OFFLINE STATE ---------------- */
   const [offline, setOffline] = useState(!navigator.onLine);
@@ -131,19 +133,54 @@ const navItems = isAdmin
           </div>
         </div>
 
-        <div className="flex items-center gap-3 text-xs md:text-sm">
+        <div className="flex items-center gap-3 text-xs md:text-sm relative">
           {profile && (
-            <span className="hidden sm:block text-right">
-              <span className="font-semibold">
-                {profile.full_name || "User"}
-              </span>
-              <span className="block capitalize opacity-80">
-                {profile.role}
-              </span>
-            </span>
+            <>
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="hidden sm:flex items-center gap-2 text-right hover:bg-white/10 px-3 py-2 rounded-lg transition-colors"
+              >
+                <span>
+                  <span className="font-semibold block">
+                    {profile.full_name || "User"}
+                  </span>
+                  <span className="capitalize opacity-80 text-[11px]">
+                    {profile.role}
+                  </span>
+                </span>
+                <span>{userMenuOpen ? "▲" : "▼"}</span>
+              </button>
+              
+              {/* User Menu Dropdown */}
+              {userMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-2 z-50">
+                  <Link
+                    to="/password-change"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-2 hover:bg-slate-100 text-slate-700 transition-colors"
+                  >
+                    <span>{ICONS["Change Password"]}</span>
+                    <span className="text-sm">Change Password</span>
+                  </Link>
+                  <hr className="my-2" />
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      signOut();
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-2 hover:bg-red-50 text-red-600 transition-colors"
+                  >
+                    <span>🚪</span>
+                    <span className="text-sm">Logout</span>
+                  </button>
+                </div>
+              )}
+            </>
           )}
+          
+          {/* Mobile Logout Button */}
           <button
-            className="border border-white/60 px-3 py-1 rounded-md text-[11px] hover:bg-white/10"
+            className="sm:hidden border border-white/60 px-3 py-1 rounded-md text-[11px] hover:bg-white/10"
             onClick={() => signOut()}
           >
             Logout
@@ -190,6 +227,22 @@ const navItems = isAdmin
             </div>
 
             <NavLinks onClick={() => setMobileMenuOpen(false)} />
+            
+            {/* User Options in Mobile Menu */}
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              <ul className="space-y-1 text-sm">
+                <li>
+                  <Link
+                    to="/password-change"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-slate-100 text-slate-700"
+                  >
+                    <span className="text-lg">{ICONS["Change Password"]}</span>
+                    <span className="flex-1">Change Password</span>
+                  </Link>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       )}

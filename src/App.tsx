@@ -17,6 +17,8 @@ import TechnicalIssuesPage from "./pages/TechnicalIssues";
 import EODSummaryPage from "./pages/EODSummary";
 import TravelTrackingPage from "./pages/TravelTracking";
 import StatementOfAccounts from "./pages/StatementOfAccounts";
+import PasswordChange from "./pages/PasswordChange";
+import FirstLoginPasswordReset from "./pages/FirstLoginPasswordReset";
 
 import AdminApprovalsPage from "./pages/AdminApprovals";
 import AdminEODDetailPage from "./pages/AdminEODDetail";
@@ -35,6 +37,11 @@ function PrivateRoute({ children }: { children: JSX.Element }) {
   }
 
   if (!profile) return <Navigate to="/login" replace />;
+  
+  // Redirect to password reset if first login (unless already on that page)
+  if (profile.first_login && window.location.pathname !== "/first-login-reset") {
+    return <Navigate to="/first-login-reset" replace />;
+  }
 
   return children;
 }
@@ -145,6 +152,18 @@ export default function App() {
             </PrivateRoute>
           }
         />
+
+        <Route
+          path="/password-change"
+          element={
+            <PrivateRoute>
+              <PasswordChange />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Special route: First login password reset (no PrivateRoute to avoid redirect loop) */}
+        <Route path="/first-login-reset" element={<FirstLoginPasswordReset />} />
 
         <Route
           path="/analytics"
