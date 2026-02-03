@@ -4,12 +4,24 @@ import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 import { getISTDateString } from "../utils/time";
 
+interface BankAccount {
+  id: string;
+  bank_name: string;
+  account_number: string;
+  ifsc_code: string;
+  branch_code: string | null;
+  branch_name: string | null;
+  branch_phone: string | null;
+  branch_email: string | null;
+  branch_address: string | null;
+}
+
 export default function CashPickup() {
   const { profile } = useAuth();
 
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
-  const [bankName, setBankName] = useState("");
-  const [branch, setBranch] = useState("");
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [selectedBankId, setSelectedBankId] = useState<string>("");
   const [expectedAmount, setExpectedAmount] = useState<number>(0);
 
   const [form, setForm] = useState({
@@ -24,6 +36,8 @@ export default function CashPickup() {
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [banksLoading, setBanksLoading] = useState(false);
+  const [banksError, setBanksError] = useState<string | null>(null);
 
   const today = getISTDateString();
 
@@ -54,6 +68,43 @@ export default function CashPickup() {
   }, [profile]);
 
   // --------------------------------------------------
+  // Load bank accounts
+  // --------------------------------------------------
+  useEffect(() => {
+    loadBankAccounts();
+  }, []);
+
+  async function loadBankAccounts() {
+    setBanksLoading(true);
+    setBanksError(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("bank_accounts")
+        .select("*")
+        .eq("is_active", true)
+        .order("bank_name", { ascending: true });
+
+      if (error) {
+        console.error("Error loading banks:", error);
+        setBanksError("Could not load bank list. Please refresh.");
+        setBankAccounts([]);
+      } else {
+        setBankAccounts(data || []);
+      }
+    } catch (err) {
+      console.error("Error:", err);
+      setBanksError("Error loading bank accounts");
+      setBankAccounts([]);
+    } finally {
+      setBanksLoading(false);
+    }
+  }
+
+  // Get selected bank details
+  const selectedBank = bankAccounts.find((b) => b.id === selectedBankId);
+
+  // --------------------------------------------------
   // Calculate totals
   // --------------------------------------------------
   const totalAmount =
@@ -69,13 +120,15 @@ export default function CashPickup() {
   // --------------------------------------------------
   async function handleSave() {
     if (loading) return;
-    if (!assignmentId || !bankName) {
-      setMessage("Assignment or Bank name missing");
+    if (!assignmentId || !selectedBankId) {
+      setMessage("Assignment or Bank selection missing");
       return;
     }
 
     setLoading(true);
     setMessage(null);
+
+    const bankName = selectedBank?.bank_name || "";
 
     const { error } = await supabase
       .from("cash_pickups")
@@ -83,7 +136,7 @@ export default function CashPickup() {
         {
           assignment_id: assignmentId,
           bank_name: bankName,
-          branch,
+          branch: selectedBank?.branch_name || selectedBank?.branch_code || "",
           pickup_time: new Date().toISOString(),
           expected_amount: expectedAmount,
           total_amount: totalAmount,
@@ -99,7 +152,7 @@ export default function CashPickup() {
       console.error(error);
       setMessage("Failed to save cash pickup");
     } else {
-      setMessage("Cash pickup saved successfully");
+      setMessage("✅ Cash pickup saved successfully");
     }
 
     setLoading(false);
@@ -129,29 +182,103 @@ export default function CashPickup() {
         {assignmentId && (
           <>
             <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+              {banksError && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  <span className="font-semibold">⚠️ {banksError}</span>
+                </div>
+              )}
+
+              {/* Bank Selection */}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Bank Name <span className="text-red-500">*</span>
+                  Bank Account <span className="text-red-500">*</span>
                 </label>
-                <input
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  placeholder="e.g. HDFC Bank"
-                />
+                {banksLoading ? (
+                  <div className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm text-slate-500">
+                    Loading banks...
+                  </div>
+                ) : bankAccounts.length === 0 ? (
+                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                    <p className="font-semibold mb-2">ℹ️ No bank accounts available</p>
+                    <p className="text-xs">Contact admin to onboard bank accounts</p>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedBankId}
+                    onChange={(e) => setSelectedBankId(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">-- Select a bank account --</option>
+                    {bankAccounts.map((bank) => (
+                      <option key={bank.id} value={bank.id}>
+                        {bank.bank_name} ({bank.account_number})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Branch
-                </label>
-                <input
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  placeholder="e.g. Velachery"
-                />
-              </div>
+              {/* Auto-filled Bank Details */}
+              {selectedBank && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    Account Details
+                  </h3>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-xs font-semibold text-slate-600">
+                        Account Number
+                      </span>
+                      <div className="font-mono text-slate-800">
+                        {selectedBank.account_number}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-xs font-semibold text-slate-600">
+                        IFSC Code
+                      </span>
+                      <div className="font-mono text-slate-800">
+                        {selectedBank.ifsc_code}
+                      </div>
+                    </div>
+
+                    {selectedBank.branch_name && (
+                      <div>
+                        <span className="text-xs font-semibold text-slate-600">
+                          Branch
+                        </span>
+                        <div className="text-slate-800">
+                          {selectedBank.branch_name}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedBank.branch_phone && (
+                      <div>
+                        <span className="text-xs font-semibold text-slate-600">
+                          Branch Phone
+                        </span>
+                        <div className="text-slate-800">
+                          {selectedBank.branch_phone}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedBank.branch_address && (
+                    <div>
+                      <span className="text-xs font-semibold text-slate-600">
+                        Address
+                      </span>
+                      <div className="text-sm text-slate-800 mt-1">
+                        {selectedBank.branch_address}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -231,7 +358,7 @@ export default function CashPickup() {
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 onClick={handleSave}
-                disabled={loading}
+                disabled={loading || !selectedBankId}
                 className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
               >
                 {loading ? "Saving..." : "Save Cash Pickup"}

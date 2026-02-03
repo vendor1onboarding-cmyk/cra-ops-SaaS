@@ -5,6 +5,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminSOAAdjustments from "./pages/AdminSOAAdjustments";
 import AdminOperations from "./pages/AdminOperations";
 import AdvancedAnalytics from "./pages/analytics/AdvancedAnalytics";
+import BankAccountOnboarding from "./pages/admin/BankAccountOnboarding";
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -225,6 +226,15 @@ export default function App() {
           element={
             <RequireAdmin>
               <AdminOperations />
+            </RequireAdmin>
+          }
+        />
+
+        <Route
+          path="/admin/bank-accounts"
+          element={
+            <RequireAdmin>
+              <BankAccountOnboarding />
             </RequireAdmin>
           }
         />

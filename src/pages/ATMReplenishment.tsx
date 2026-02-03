@@ -58,6 +58,9 @@ export default function ATMReplenishment() {
     denom_2000: 0,
   });
 
+  const [denomSource, setDenomSource] = useState<"manual" | "plan" | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+
   const [gpsStatus, setGpsStatus] =
     useState<"unknown" | "verified" | "mismatch" | "no_gps">("unknown");
   const [gpsMsg, setGpsMsg] = useState<string | null>(null);
@@ -99,6 +102,62 @@ export default function ATMReplenishment() {
       setSites((data || []).map((r: any) => r.site));
     })();
   }, [profile]);
+
+  /* ---------------- Auto-populate denominations from plan ---------------- */
+
+  useEffect(() => {
+    if (!assignmentId || !siteId) {
+      setDenomSource(null);
+      return;
+    }
+
+    async function loadDenominationPlan() {
+      setPlanLoading(true);
+      
+      try {
+        const { data, error } = await supabase
+          .from("denomination_plans")
+          .select("*")
+          .eq("assignment_id", assignmentId)
+          .eq("site_id", siteId)
+          .maybeSingle();
+
+        if (error) {
+          console.warn("[ATMLoad] Failed to fetch denomination plan:", error);
+          setDenomSource(null);
+          setPlanLoading(false);
+          return;
+        }
+
+        if (data) {
+          // Valid plan found - auto-populate denominations
+          setDenoms({
+            denom_100: data.denom_100 || 0,
+            denom_200: data.denom_200 || 0,
+            denom_500: data.denom_500 || 0,
+            denom_2000: data.denom_2000 || 0,
+          });
+          setDenomSource("plan");
+        } else {
+          // No plan found - keep manual entry
+          setDenoms({
+            denom_100: 0,
+            denom_200: 0,
+            denom_500: 0,
+            denom_2000: 0,
+          });
+          setDenomSource(null);
+        }
+      } catch (err) {
+        console.warn("[ATMLoad] Error loading denomination plan:", err);
+        setDenomSource(null);
+      }
+
+      setPlanLoading(false);
+    }
+
+    loadDenominationPlan();
+  }, [assignmentId, siteId]);
 
   /* ---------------- GPS ---------------- */
 
@@ -283,6 +342,7 @@ export default function ATMReplenishment() {
     setTimeIn(null);
     setRemarks("");
     setDenoms({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
+    setDenomSource(null);
     setGpsStatus("unknown");
     setGpsMsg(null);
     setDistance(null);
@@ -394,8 +454,19 @@ export default function ATMReplenishment() {
           <div>
             <h3 className="text-lg font-semibold text-slate-800 mb-4">
               Denomination Details
-            </h3>
-          </div>
+            </h3>            {denomSource === "plan" && (
+              <p className="text-xs text-blue-600 font-medium flex items-center gap-1.5 mt-1">
+                <span>📋</span>
+                <span>
+                  Denominations auto-populated from your plan. You can edit any value below.
+                </span>
+              </p>
+            )}
+            {planLoading && (
+              <p className="text-xs text-slate-500 italic mt-1">
+                Checking for denomination plan...
+              </p>
+            )}          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {denomBreakup.map((d) => (
@@ -406,12 +477,21 @@ export default function ATMReplenishment() {
                 <input
                   type="number"
                   min={0}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary transition-all ${
+                    denomSource === "plan"
+                      ? "border-blue-300 bg-blue-50"
+                      : "border-slate-300"
+                  }`}
                   value={d.count}
-                  onChange={(e) =>
-                    setDenoms({ ...denoms, [d.key]: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                    setDenoms({ ...denoms, [d.key]: Number(e.target.value) });
+                    // User is overriding - mark as manual
+                    if (denomSource === "plan") {
+                      setDenomSource("manual");
+                    }
+                  }}
                   placeholder="0"
+                  disabled={planLoading}
                 />
               </div>
             ))}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppLayout } from "../components/Layout";
 import ATMSiteOnboarding from "./admin/ATMSiteOnboarding";
 import ATMSiteUpdate from "./admin/ATMSiteUpdate";
@@ -8,6 +9,7 @@ type AdminAction =
   | "atm-site-onboarding"
   | "atm-site-update"
   | "user-management"
+  | "bank-account-onboarding"
   | null;
 
 interface ActionOption {
@@ -15,6 +17,7 @@ interface ActionOption {
   label: string;
   description: string;
   icon: string;
+  navigateTo?: string;
 }
 
 const ADMIN_ACTIONS: ActionOption[] = [
@@ -36,14 +39,30 @@ const ADMIN_ACTIONS: ActionOption[] = [
     description: "Create new users and manage user accounts",
     icon: "👤",
   },
+  {
+    id: "bank-account-onboarding",
+    label: "Bank Account Management",
+    description: "Onboard and manage bank accounts for cash pickup operations",
+    icon: "🏦",
+    navigateTo: "/admin/bank-accounts",
+  },
   // Future actions can be added here:
   // { id: "custodian-mapping", label: "Custodian Mapping", ... },
 ];
 
 export default function AdminOperations() {
+  const navigate = useNavigate();
   const [selectedAction, setSelectedAction] = useState<AdminAction>(null);
 
   const selectedActionData = ADMIN_ACTIONS.find((a) => a.id === selectedAction);
+
+  const handleSelect = (action: AdminAction) => {
+    setSelectedAction(action);
+    const actionData = ADMIN_ACTIONS.find((a) => a.id === action);
+    if (actionData?.navigateTo) {
+      navigate(actionData.navigateTo);
+    }
+  };
 
   return (
     <AppLayout>
@@ -66,7 +85,7 @@ export default function AdminOperations() {
             </label>
             <select
               value={selectedAction || ""}
-              onChange={(e) => setSelectedAction(e.target.value as AdminAction || null)}
+              onChange={(e) => handleSelect(e.target.value as AdminAction || null)}
               className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             >
               <option value="">-- Choose an administrative action --</option>

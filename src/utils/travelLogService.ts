@@ -1,4 +1,5 @@
 import { supabase } from "../api/supabaseClient";
+import { calculateDistanceWithFallback } from "./roadDistance";
 
 /**
  * TravelLogService - Safe, isolated service for travel log operations
@@ -6,6 +7,8 @@ import { supabase } from "../api/supabaseClient";
  * CRITICAL: This service is designed to NEVER block the calling flow.
  * All methods use try/catch with silent failure to prevent disruption
  * to primary business operations (e.g., ATM loads).
+ * 
+ * ENHANCED: Now uses road-based distance calculation (OSRM) with fallback to air distance.
  */
 
 // Travel context: who initiated the travel session
@@ -213,12 +216,16 @@ class TravelLogService {
         return false;
       }
 
-      // Calculate distance using Haversine formula
-      const km = this.calculateDistance(
+      // Calculate distance using road-based routing (OSRM) with fallback to air distance
+      const { distance: km, method, accuracy } = await calculateDistanceWithFallback(
         activeTravel.gps_start_lat,
         activeTravel.gps_start_lng,
         gpsEnd.lat,
         gpsEnd.lng
+      );
+
+      console.log(
+        `[TravelLog] Distance calculated: ${km.toFixed(2)} km (method: ${method}, accuracy: ${accuracy})`
       );
 
       // Fallback to odometer if distance is too small
@@ -229,6 +236,7 @@ class TravelLogService {
         options?.odometerEnd
       ) {
         finalKm = Number(options.odometerEnd) - Number(activeTravel.odometer_start);
+        console.log(`[TravelLog] Using odometer distance: ${finalKm.toFixed(2)} km`);
       }
 
       // Minimum distance check
@@ -271,6 +279,8 @@ class TravelLogService {
 
   /**
    * Calculate distance in kilometers using Haversine formula
+   * @deprecated Use roadDistance.ts calculateDistanceWithFallback instead
+   * Kept for backward compatibility and reference
    */
   private calculateDistance(
     lat1: number,

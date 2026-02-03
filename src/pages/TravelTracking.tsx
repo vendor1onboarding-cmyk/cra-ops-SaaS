@@ -12,6 +12,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatIST } from "../utils/time";
+import { calculateDistanceWithFallback } from "../utils/roadDistance";
 import "leaflet-polylinedecorator";
 
 
@@ -31,6 +32,11 @@ function isToday(utc: string) {
   );
 }
 
+/**
+ * Haversine formula for straight-line distance
+ * @deprecated Use roadDistance.ts calculateDistanceWithFallback instead
+ * Kept for backward compatibility and reference
+ */
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -207,20 +213,27 @@ useEffect(() => {
 
     try {
       const gpsEnd = await getGPS();
-      let km = haversineKm(
+      
+      // Use road-based distance calculation with fallback to air distance
+      const { distance: km, method } = await calculateDistanceWithFallback(
         activeTravel.gps_start_lat,
         activeTravel.gps_start_lng,
         gpsEnd.lat,
         gpsEnd.lng
       );
 
+      console.log(`[TravelTracking] Distance: ${km.toFixed(2)} km (method: ${method})`);
+
+      // Fallback to odometer if distance is too small
+      let finalKm = km;
       if (km < 0.05 && odoStart && odoEnd) {
-        km = Number(odoEnd) - Number(odoStart);
+        finalKm = Number(odoEnd) - Number(odoStart);
+        console.log(`[TravelTracking] Using odometer: ${finalKm.toFixed(2)} km`);
       }
 
-      if (km < 0.05) throw new Error("Distance too small");
+      if (finalKm < 0.05) throw new Error("Distance too small");
 
-      const allowance = km * ratePerKm;
+      const allowance = finalKm * ratePerKm;
       const nowUTC = new Date().toISOString();
 
       await supabase
@@ -230,7 +243,7 @@ useEffect(() => {
           gps_end_lat: gpsEnd.lat,
           gps_end_lng: gpsEnd.lng,
           odometer_end: odoEnd || null,
-          km_covered: km,
+          km_covered: finalKm,
           allowance_amount: allowance,
           status: "completed",
         })
@@ -238,7 +251,7 @@ useEffect(() => {
 
       setActiveTravel(null);
       setOdoEnd("");
-      setInfo(`Travel completed (${km.toFixed(2)} km).`);
+      setInfo(`Travel completed (${finalKm.toFixed(2)} km, ${method} distance).`);
     } catch (e: any) {
       setError(e.message);
     } finally {
