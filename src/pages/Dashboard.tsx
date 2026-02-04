@@ -248,7 +248,6 @@ loadTravelKPI();
     setLoadedBySite(
       Object.values(map).map((x: any) => ({
         ...x,
-        variance: x.loadedValue - x.plannedValue,
         site: routeSites.find(r => r.site_id === x.site_id)?.site,
       }))
     );
@@ -257,9 +256,9 @@ loadTravelKPI();
   const loadedSiteIds = new Set(loads.map(l => l.site_id));
   const pendingSites = routeSites.filter(r => !loadedSiteIds.has(r.site_id));
   
-  // ATM completion calculation
+  // ATM completion calculation - based ONLY on actual loads, not plans
 const totalATMs = routeSites.length;
-const loadedATMs = loadedBySite.length;
+const loadedATMs = loadedSiteIds.size;
 const completionPct =
   totalATMs > 0 ? Math.round((loadedATMs / totalATMs) * 100) : 0;
 
@@ -600,13 +599,6 @@ const completionPct =
             <div>
               Loaded: <span className="font-medium">₹{row.loadedValue}</span>
             </div>
-            <div
-              className={`font-semibold ${
-                row.variance !== 0 ? "text-red-600" : "text-green-700"
-              }`}
-            >
-              Variance: ₹{row.variance}
-            </div>
           </div>
         </div>
       ))}
@@ -619,7 +611,7 @@ const completionPct =
           {loadedBySite.length > 0 && (
             <div className="bg-white rounded shadow p-4 hidden sm:block">
               <h3 className="font-semibold mb-3">
-                Loaded ATMs – Denomination & Variance
+                Loaded ATMs – Denomination Details
               </h3>
 
               <div className="overflow-x-auto">
@@ -634,7 +626,6 @@ const completionPct =
                       ))}
                       <th className="border p-2 text-right">Planned ₹</th>
                       <th className="border p-2 text-right">Loaded ₹</th>
-                      <th className="border p-2 text-right">Variance ₹</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -651,9 +642,6 @@ const completionPct =
                         ))}
                         <td className="border p-2 text-right">₹{row.plannedValue}</td>
                         <td className="border p-2 text-right">₹{row.loadedValue}</td>
-                        <td className={`border p-2 text-right font-semibold ${row.variance !== 0 ? "text-red-600" : ""}`}>
-                          ₹{row.variance}
-                        </td>
                       </tr>
                     ))}
                   </tbody>

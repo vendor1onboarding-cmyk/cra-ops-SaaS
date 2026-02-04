@@ -276,16 +276,50 @@ export default function AdminEODDetail() {
               <button
                 className="btn-primary"
                 onClick={async () => {
-                  await supabase
-                    .from("assignments")
-                    .update({
-                      status: "approved",
-                      approved_at: new Date().toISOString(),
-                      approved_by: profile?.id,
-                    })
-                    .eq("id", assignment.id);
+                  console.log("=== APPROVAL STARTED ===");
+                  console.log("Assignment ID:", assignment.id);
+                  console.log("Approved by:", profile?.id);
+                  
+                  try {
+                    // Use RPC function to bypass triggers
+                    console.log("Calling approve_eod_assignment RPC function...");
+                    const { data, error } = await supabase.rpc(
+                      'approve_eod_assignment',
+                      { 
+                        p_assignment_id: assignment.id,
+                        p_approved_by: profile?.id 
+                      }
+                    );
 
-                  navigate("/admin/approvals");
+                    console.log("RPC Response:", { data, error });
+
+                    if (error) {
+                      console.error("RPC error:", error);
+                      alert(
+                        `Failed to approve EOD: ${error.message}\n\n` +
+                        `Please ensure you have run FIX_EOD_APPROVAL_TRIGGER.sql in Supabase SQL Editor.\n\n` +
+                        `Technical details: ${error.code || 'N/A'}`
+                      );
+                      return;
+                    }
+
+                    // Check if the function returned an error in the result
+                    if (data && !data.success) {
+                      console.error("Function returned error:", data);
+                      alert(`Failed to approve EOD: ${data.message || 'Unknown error'}`);
+                      return;
+                    }
+
+                    // Success
+                    console.log("Approval successful, navigating back...");
+                    navigate("/admin/approvals");
+                  } catch (err: any) {
+                    console.error("Approval error:", err);
+                    alert(
+                      `Failed to approve EOD: ${err.message || "Unknown error"}\n\n` +
+                      `Please ensure you have run FIX_EOD_APPROVAL_TRIGGER.sql in Supabase SQL Editor.`
+                    );
+                  }
                 }}
               >
                 ✅ Approve EOD
@@ -314,7 +348,7 @@ export default function AdminEODDetail() {
                   return;
                 }
 
-                await supabase
+                const { error } = await supabase
                   .from("assignments")
                   .update({
                     status: "rejected",
@@ -323,6 +357,12 @@ export default function AdminEODDetail() {
                     rejection_reason: rejectReason,
                   })
                   .eq("id", assignment.id);
+
+                if (error) {
+                  console.error("Rejection error:", error);
+                  alert(`Failed to reject EOD: ${error.message}`);
+                  return;
+                }
 
                 navigate("/admin/approvals");
               }}

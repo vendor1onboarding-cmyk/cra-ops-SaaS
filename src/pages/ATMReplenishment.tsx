@@ -59,6 +59,16 @@ export default function ATMReplenishment() {
   });
 
   const [denomSource, setDenomSource] = useState<"manual" | "plan" | null>(null);
+  const [plannedDenoms, setPlannedDenoms] = useState<
+    | {
+        denom_100: number;
+        denom_200: number;
+        denom_500: number;
+        denom_2000: number;
+      }
+    | null
+  >(null);
+  const [hasPlan, setHasPlan] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
 
   const [gpsStatus, setGpsStatus] =
@@ -67,6 +77,23 @@ export default function ATMReplenishment() {
   const [distance, setDistance] = useState<number | null>(null);
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
+
+  // Available cash tracking
+  const [availableCash, setAvailableCash] = useState<{
+    denom_100: number;
+    denom_200: number;
+    denom_500: number;
+    denom_2000: number;
+  }>({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
+  const [availableTotalAmount, setAvailableTotalAmount] = useState(0);
+  const [cashLoadingError, setCashLoadingError] = useState<string | null>(null);
+  const [cashLoading, setCashLoading] = useState(false);
+
+  // Validation state
+  const [validationErrors, setValidationErrors] = useState<{
+    [key: string]: string;
+  }>({});
+  const [totalCashError, setTotalCashError] = useState<string | null>(null);
 
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -103,17 +130,19 @@ export default function ATMReplenishment() {
     })();
   }, [profile]);
 
-  /* ---------------- Auto-populate denominations from plan ---------------- */
+  /* ---------------- Load denomination plan (read-only preview) ---------------- */
 
   useEffect(() => {
     if (!assignmentId || !siteId) {
       setDenomSource(null);
+      setPlannedDenoms(null);
+      setHasPlan(false);
       return;
     }
 
     async function loadDenominationPlan() {
       setPlanLoading(true);
-      
+
       try {
         const { data, error } = await supabase
           .from("denomination_plans")
@@ -124,33 +153,28 @@ export default function ATMReplenishment() {
 
         if (error) {
           console.warn("[ATMLoad] Failed to fetch denomination plan:", error);
-          setDenomSource(null);
+          setPlannedDenoms(null);
+          setHasPlan(false);
           setPlanLoading(false);
           return;
         }
 
         if (data) {
-          // Valid plan found - auto-populate denominations
-          setDenoms({
+          setPlannedDenoms({
             denom_100: data.denom_100 || 0,
             denom_200: data.denom_200 || 0,
             denom_500: data.denom_500 || 0,
             denom_2000: data.denom_2000 || 0,
           });
-          setDenomSource("plan");
+          setHasPlan(true);
         } else {
-          // No plan found - keep manual entry
-          setDenoms({
-            denom_100: 0,
-            denom_200: 0,
-            denom_500: 0,
-            denom_2000: 0,
-          });
-          setDenomSource(null);
+          setPlannedDenoms(null);
+          setHasPlan(false);
         }
       } catch (err) {
         console.warn("[ATMLoad] Error loading denomination plan:", err);
-        setDenomSource(null);
+        setPlannedDenoms(null);
+        setHasPlan(false);
       }
 
       setPlanLoading(false);
@@ -158,6 +182,13 @@ export default function ATMReplenishment() {
 
     loadDenominationPlan();
   }, [assignmentId, siteId]);
+
+  /* Load available cash when assignment changes */
+  useEffect(() => {
+    if (assignmentId) {
+      loadAvailableCash();
+    }
+  }, [assignmentId]);
 
   /* ---------------- GPS ---------------- */
 
@@ -204,6 +235,132 @@ export default function ATMReplenishment() {
   }
 }
 
+  /* ====== CASH AVAILABILITY VALIDATION ====== */
+
+  async function loadAvailableCash() {
+    if (!assignmentId) return;
+
+    setCashLoading(true);
+    setCashLoadingError(null);
+
+    try {
+      // Get today's cash pickups for this custodian
+      const { data: pickups, error: pickupError } = await supabase
+        .from("cash_pickups")
+        .select("denom_2000, denom_500, denom_200, denom_100")
+        .eq("assignment_id", assignmentId);
+
+      if (pickupError) {
+        console.warn("[ATMLoad] Failed to fetch pickups:", pickupError);
+        setCashLoadingError("Failed to load cash availability");
+        setCashLoading(false);
+        return;
+      }
+
+      // Sum up all pickups for today
+      const totalPickups = {
+        denom_100: 0,
+        denom_200: 0,
+        denom_500: 0,
+        denom_2000: 0,
+      };
+
+      (pickups || []).forEach((p: any) => {
+        totalPickups.denom_100 += p.denom_100 || 0;
+        totalPickups.denom_200 += p.denom_200 || 0;
+        totalPickups.denom_500 += p.denom_500 || 0;
+        totalPickups.denom_2000 += p.denom_2000 || 0;
+      });
+
+      // Get all previous ATM loads for this assignment (sum them up)
+      const { data: loads, error: loadError } = await supabase
+        .from("atm_replenishments")
+        .select("denom_2000, denom_500, denom_200, denom_100")
+        .eq("assignment_id", assignmentId);
+
+      if (loadError) {
+        console.warn("[ATMLoad] Failed to fetch previous loads:", loadError);
+        setCashLoadingError("Failed to load cash availability");
+        setCashLoading(false);
+        return;
+      }
+
+      // Sum up all previous loads
+      const totalLoads = {
+        denom_100: 0,
+        denom_200: 0,
+        denom_500: 0,
+        denom_2000: 0,
+      };
+
+      (loads || []).forEach((l: any) => {
+        totalLoads.denom_100 += l.denom_100 || 0;
+        totalLoads.denom_200 += l.denom_200 || 0;
+        totalLoads.denom_500 += l.denom_500 || 0;
+        totalLoads.denom_2000 += l.denom_2000 || 0;
+      });
+
+      // Calculate available = pickups - loads
+      const available = {
+        denom_100: Math.max(0, totalPickups.denom_100 - totalLoads.denom_100),
+        denom_200: Math.max(0, totalPickups.denom_200 - totalLoads.denom_200),
+        denom_500: Math.max(0, totalPickups.denom_500 - totalLoads.denom_500),
+        denom_2000: Math.max(0, totalPickups.denom_2000 - totalLoads.denom_2000),
+      };
+
+      const totalAvailable =
+        available.denom_100 * 100 +
+        available.denom_200 * 200 +
+        available.denom_500 * 500 +
+        available.denom_2000 * 2000;
+
+      setAvailableCash(available);
+      setAvailableTotalAmount(totalAvailable);
+    } catch (err) {
+      console.error("[ATMLoad] Error loading available cash:", err);
+      setCashLoadingError("Failed to load cash availability");
+    } finally {
+      setCashLoading(false);
+    }
+  }
+
+  // Validate current denomination inputs against available cash
+  function validateCashAvailability(): boolean {
+    const errors: { [key: string]: string } = {};
+    let totalError: string | null = null;
+
+    // Check each denomination
+    Object.entries(DENOM_VALUES).forEach(([key, denomValue]) => {
+      const entered = denoms[key as keyof typeof denoms];
+      const available = availableCash[key as keyof typeof availableCash];
+
+      if (entered > available) {
+        errors[key] = `Available: ${available}, Attempted: ${entered}`;
+      }
+    });
+
+    // Check total amount
+    const loadTotal = Object.entries(DENOM_VALUES).reduce(
+      (sum, [key, value]) => sum + denoms[key as keyof typeof denoms] * value,
+      0
+    );
+
+    if (loadTotal > availableTotalAmount && totalNotes > 0) {
+      totalError = `Total load (₹${loadTotal.toLocaleString(
+        "en-IN"
+      )}) exceeds available cash (₹${availableTotalAmount.toLocaleString(
+        "en-IN"
+      )})`;
+    }
+
+    setValidationErrors(errors);
+    setTotalCashError(totalError);
+
+    return Object.keys(errors).length === 0 && !totalError;
+  }
+
+  /* ====== END CASH VALIDATION ====== */
+
 
   /* ---------------- Amount Calculation ---------------- */
 
@@ -220,11 +377,40 @@ export default function ATMReplenishment() {
   const totalNotes = denomBreakup.reduce((a, d) => a + d.count, 0);
   const totalAmount = denomBreakup.reduce((a, d) => a + d.amount, 0);
 
+  const plannedBreakup = plannedDenoms
+    ? Object.entries(DENOM_VALUES).map(([k, value]) => {
+        const count = (plannedDenoms as any)[k] as number;
+        return {
+          key: k,
+          value,
+          count,
+          amount: count * value,
+        };
+      })
+    : [];
+
+  const plannedTotalNotes = plannedBreakup.reduce((a, d) => a + d.count, 0);
+  const plannedTotalAmount = plannedBreakup.reduce((a, d) => a + d.amount, 0);
+
+  /* Validate on denomination change (after totalNotes is defined) */
+  useEffect(() => {
+    validateCashAvailability();
+  }, [denoms, availableCash, totalNotes]);
+
   /* ---------------- Save ---------------- */
 
   async function saveLoad() {
     if (saving) return;
     setError(null);
+
+    // Validate cash availability before proceeding
+    if (!validateCashAvailability()) {
+      setError(
+        "Cannot load more cash than available. Please adjust denominations."
+      );
+      return;
+    }
+
     setSaving(true);
 
     if (!siteId || !assignmentId) {
@@ -454,19 +640,227 @@ export default function ATMReplenishment() {
           <div>
             <h3 className="text-lg font-semibold text-slate-800 mb-4">
               Denomination Details
-            </h3>            {denomSource === "plan" && (
-              <p className="text-xs text-blue-600 font-medium flex items-center gap-1.5 mt-1">
-                <span>📋</span>
-                <span>
-                  Denominations auto-populated from your plan. You can edit any value below.
-                </span>
-              </p>
-            )}
+            </h3>
             {planLoading && (
               <p className="text-xs text-slate-500 italic mt-1">
                 Checking for denomination plan...
               </p>
-            )}          </div>
+            )}
+          </div>
+
+          {/* ===== AVAILABLE CASH PANEL (Enterprise Control) ===== */}
+          {cashLoading ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+              <p className="text-sm text-amber-800">
+                Loading available cash...
+              </p>
+            </div>
+          ) : cashLoadingError ? (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-sm text-red-800 font-medium">
+                {cashLoadingError}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-indigo-700 font-semibold">
+                    ✓ Available Cash (Enterprise Control)
+                  </p>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Maximum cash you can load today based on pickups and
+                    previous loads.
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-indigo-900 bg-indigo-100 px-2 py-1 rounded\">
+                  ₹{availableTotalAmount.toLocaleString("en-IN")}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {Object.entries(DENOM_VALUES).map(([key, value]) => {
+                  const available =
+                    availableCash[key as keyof typeof availableCash];
+                  return (
+                    <div
+                      key={key}
+                      className="rounded-md border border-indigo-200 bg-white px-3 py-2"
+                    >
+                      <div className="text-xs text-slate-500">₹{value}</div>
+                      <div className="text-sm font-semibold text-indigo-900">
+                        {available}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        ₹{(available * value).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ===== VALIDATION ERROR BANNER ===== */}
+          {(totalCashError || Object.keys(validationErrors).length > 0) && (
+            <div className="bg-red-50 border-l-4 border-red-500 rounded-lg p-4 space-y-2">
+              <p className="text-sm font-semibold text-red-900 flex items-center gap-2">
+                ⚠️ Cash Availability Violation
+              </p>
+              {totalCashError && (
+                <p className="text-sm text-red-800">{totalCashError}</p>
+              )}
+              {Object.entries(validationErrors).length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-red-800">
+                    Denomination-wise shortfall:
+                  </p>
+                  {Object.entries(validationErrors).map(([key, msg]) => {
+                    const denomValue =
+                      DENOM_VALUES[key as keyof typeof DENOM_VALUES];
+                    return (
+                      <p key={key} className="text-xs text-red-800">
+                        • ₹{denomValue}: {msg}
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Planned vs Live comparison */}
+          {hasPlan && plannedDenoms ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+                      Planned Denominations (Read-Only)
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Review the plan and apply if needed.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
+                    onClick={() => {
+                      if (!plannedDenoms) return;
+                      setDenoms({ ...plannedDenoms });
+                      setDenomSource("plan");
+                    }}
+                  >
+                    Apply Planned
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {plannedBreakup.map((d) => (
+                    <div
+                      key={d.key}
+                      className="rounded-md border border-slate-200 bg-white px-3 py-2"
+                    >
+                      <div className="text-xs text-slate-500">₹{d.value}</div>
+                      <div className="text-sm font-semibold text-slate-800">
+                        {d.count}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        ₹{d.amount.toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200 pt-2">
+                  <span>Total Planned Notes: {plannedTotalNotes}</span>
+                  <span className="font-semibold text-slate-800">
+                    Planned Total: ₹{plannedTotalAmount.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-green-200 bg-green-50/40 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-green-700 font-semibold">
+                      Cash-in-Hand (Live)
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Updates instantly as you edit the load.
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-600">
+                    Total Notes: {totalNotes}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {denomBreakup.map((d) => (
+                    <div
+                      key={d.key}
+                      className="rounded-md border border-slate-200 bg-white px-3 py-2"
+                    >
+                      <div className="text-xs text-slate-500">₹{d.value}</div>
+                      <div className="text-sm font-semibold text-slate-800">
+                        {d.count}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        ₹{d.amount.toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200 pt-2">
+                  <span>Live Total</span>
+                  <span className="font-semibold text-slate-800">
+                    ₹{totalAmount.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+                    Cash-in-Hand (Live)
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Updates instantly as you edit the ATM load denominations.
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-slate-600">
+                  Total Notes: {totalNotes}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {denomBreakup.map((d) => (
+                  <div
+                    key={d.key}
+                    className="rounded-md border border-slate-200 bg-white px-3 py-2"
+                  >
+                    <div className="text-xs text-slate-500">₹{d.value}</div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {d.count}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      ₹{d.amount.toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200 pt-2">
+                <span>Live Total</span>
+                <span className="font-semibold text-slate-800">
+                  ₹{totalAmount.toLocaleString("en-IN")}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {denomBreakup.map((d) => (
@@ -578,10 +972,28 @@ export default function ATMReplenishment() {
         <div className="flex flex-col sm:flex-row gap-3">
           <button
             onClick={saveLoad}
-            disabled={saving}
-            className="flex-1 bg-green-600 text-white py-2.5 rounded-lg font-semibold hover:bg-green-700 active:scale-95 disabled:opacity-50 transition-all"
+            disabled={
+              saving ||
+              Object.keys(validationErrors).length > 0 ||
+              totalCashError !== null ||
+              totalNotes === 0
+            }
+            className="flex-1 bg-green-600 text-white py-2.5 rounded-lg font-semibold hover:bg-green-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            title={
+              Object.keys(validationErrors).length > 0 ||
+              totalCashError !== null
+                ? "Resolve cash availability issues before saving"
+                : totalNotes === 0
+                ? "Enter at least one denomination"
+                : ""
+            }
           >
-            {saving ? "Saving…" : "Save ATM Load"}
+            {saving
+              ? "Saving…"
+              : Object.keys(validationErrors).length > 0 ||
+                  totalCashError !== null
+              ? "❌ Cannot Save - Resolve Errors"
+              : "Save ATM Load"}
           </button>
         </div>
       </div>
