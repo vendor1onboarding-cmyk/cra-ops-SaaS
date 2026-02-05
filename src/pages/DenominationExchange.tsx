@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { DenominationFields } from "../components/DenominationFields";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
 
@@ -61,9 +62,12 @@ export default function DenominationExchange() {
   const [toDenoms, setToDenoms] = useState<Denoms>(EMPTY_DENOMS);
 
   const [saving, setSaving] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
 
   useEffect(() => {
     if (!profile) return;
@@ -164,6 +168,7 @@ export default function DenominationExchange() {
 
   const canSubmit =
     !saving &&
+    !submitLocked &&
     assignmentId &&
     soaId &&
     fromBankId &&
@@ -181,11 +186,14 @@ export default function DenominationExchange() {
     setWarning(null);
     setSuccess(null);
 
+    const fromLabel = selectedFromBank?.bank_name || "bank";
+    const toLabel = selectedToBank?.bank_name || "bank";
+
     try {
       const { error: insertError } = await supabase
         .from("soa_adjustments")
         .insert({
-          soa_id: soaId,
+          soa_id: assignmentId,
           assignment_id: assignmentId,
           custodian_id: profile.id,
           adjustment_type: "EXCHANGE",
@@ -213,18 +221,27 @@ export default function DenominationExchange() {
         return;
       }
 
+      setSubmitLocked(true);
       setSuccess("Exchange recorded successfully.");
-      setFromBankId("");
-      setToBankId("");
-      setReason("Denomination exchange");
-      setReference("");
-      setFromDenoms(EMPTY_DENOMS);
-      setToDenoms(EMPTY_DENOMS);
+      setConfirmMessage(
+        `Exchange recorded successfully from ${fromLabel} to ${toLabel}.`
+      );
+      setShowConfirm(true);
     } catch (err) {
       setError("Unexpected error while saving exchange.");
     } finally {
       setSaving(false);
     }
+  }
+
+  function resetForm() {
+    setFromBankId("");
+    setToBankId("");
+    setReason("Denomination exchange");
+    setReference("");
+    setFromDenoms(EMPTY_DENOMS);
+    setToDenoms(EMPTY_DENOMS);
+    setSubmitLocked(false);
   }
 
   return (
@@ -424,6 +441,17 @@ export default function DenominationExchange() {
           </button>
         </div>
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="Exchange Saved"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetForm();
+        }}
+      />
     </AppLayout>
   );
 }

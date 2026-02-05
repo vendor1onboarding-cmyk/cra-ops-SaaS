@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../api/supabaseClient";
+import ConfirmationModal from "../../components/ConfirmationModal";
 
 type Site = {
   id: number;
@@ -17,7 +18,10 @@ export default function ATMSiteUpdate() {
   const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
   // Form fields
@@ -160,7 +164,22 @@ export default function ATMSiteUpdate() {
 
   /* ---------------- Submit update ---------------- */
 
+  function resetForm() {
+    setSelectedSiteId(null);
+    setFormData({
+      site_code: "",
+      atm_id: "",
+      bank_name: "",
+      address: "",
+      city: "",
+      latitude: "",
+      longitude: "",
+    });
+    setSubmitLocked(false);
+  }
+
   async function handleSubmit() {
+    if (saving || submitLocked) return;
     setMessage(null);
 
     // UI validation
@@ -211,19 +230,10 @@ export default function ATMSiteUpdate() {
     // Success: Reload sites and clear selection
     setMessage({ type: "success", text: "ATM site updated successfully!" });
     setSaving(false);
+    setSubmitLocked(true);
+    setConfirmMessage("ATM site updated successfully.");
+    setShowConfirm(true);
     await loadSites();
-    
-    // Reset form
-    setSelectedSiteId(null);
-    setFormData({
-      site_code: "",
-      atm_id: "",
-      bank_name: "",
-      address: "",
-      city: "",
-      latitude: "",
-      longitude: "",
-    });
   }
 
   /* ---------------- Filter sites based on search ---------------- */
@@ -442,7 +452,7 @@ export default function ATMSiteUpdate() {
           <div className="flex gap-3">
             <button
               onClick={handleSubmit}
-              disabled={saving}
+              disabled={saving || submitLocked}
               className="flex-1 bg-primary text-white py-3 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {saving ? "Updating..." : "Update Site"}
@@ -450,18 +460,9 @@ export default function ATMSiteUpdate() {
 
             <button
               onClick={() => {
-                setSelectedSiteId(null);
-                setFormData({
-                  site_code: "",
-                  atm_id: "",
-                  bank_name: "",
-                  address: "",
-                  city: "",
-                  latitude: "",
-                  longitude: "",
-                });
                 setErrors({});
                 setMessage(null);
+                resetForm();
               }}
               disabled={saving}
               className="px-6 bg-slate-200 text-slate-700 py-3 rounded-lg font-semibold hover:bg-slate-300 active:scale-95 disabled:opacity-50 transition-all"
@@ -484,6 +485,17 @@ export default function ATMSiteUpdate() {
           <p className="text-sm font-medium">{message.text}</p>
         </div>
       )}
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="ATM Site Updated"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetForm();
+        }}
+      />
     </div>
   );
 }

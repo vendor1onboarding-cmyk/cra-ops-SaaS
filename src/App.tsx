@@ -13,7 +13,6 @@ import DenominationPlanPage from "./pages/DenominationPlan";
 import CashPickupPage from "./pages/CashPickup";
 import ATMReplenishmentPage from "./pages/ATMReplenishment";
 import ATMExcessCashPage from "./pages/ATMExcessCash";
-import ATMCashAdjustmentPage from "./pages/ATMCashAdjustment";
 import DenominationExchange from "./pages/DenominationExchange";
 import InterSiteTransfer from "./pages/InterSiteTransfer";
 import TechnicalIssuesPage from "./pages/TechnicalIssues";
@@ -107,15 +106,6 @@ export default function App() {
           element={
             <PrivateRoute>
               <ATMExcessCashPage />
-            </PrivateRoute>
-          }
-        />
-
-        <Route
-          path="/atm-adjustment"
-          element={
-            <PrivateRoute>
-              <ATMCashAdjustmentPage />
             </PrivateRoute>
           }
         />

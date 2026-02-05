@@ -27,7 +27,6 @@ export default function Dashboard() {
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [loads, setLoads] = useState<any[]>([]);
   const [pickups, setPickups] = useState<any[]>([]);
-  const [adjustments, setAdjustments] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
 
   const [cashUtil, setCashUtil] = useState<any>(null);
@@ -35,6 +34,8 @@ export default function Dashboard() {
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
   const [showPending, setShowPending] = useState(false);
+  const [exchangeCount, setExchangeCount] = useState(0);
+  const [transferCount, setTransferCount] = useState(0);
 const isSubmitted = assignment?.status === "submitted";
 const isRejected = assignment?.status === "rejected";
 const isApproved = assignment?.status === "approved";
@@ -110,6 +111,8 @@ loadTravelKPI();
 
     if (!assign) {
       setAssignment(null);
+      setExchangeCount(0);
+      setTransferCount(0);
 
       // Fetch last assignment (fallback view)
       const { data: last } = await supabase
@@ -147,66 +150,70 @@ loadTravelKPI();
 
     setAssignment(assign);
 
-    const [rs, ls, cps, adj, dp] = await Promise.all([
+    const [rs, ls, cps, dp, ops] = await Promise.all([
       supabase
         .from("route_sites")
         .select("*, site:site_id(bank_name,address,site_code)")
         .eq("assignment_id", assign.id),
       supabase.from("atm_replenishments").select("*").eq("assignment_id", assign.id),
       supabase.from("cash_pickups").select("*").eq("assignment_id", assign.id),
-      supabase.from("atm_cash_adjustments").select("*").eq("assignment_id", assign.id),
       supabase.from("denomination_plans").select("*").eq("assignment_id", assign.id),
+      supabase
+        .from("soa_adjustments")
+        .select("id, adjustment_type")
+        .eq("assignment_id", assign.id)
+        .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"]),
     ]);
 	
 
     setRouteSites(rs.data || []);
     setLoads(ls.data || []);
     setPickups(cps.data || []);
-    setAdjustments(adj.data || []);
     setPlans(dp.data || []);
 
-    computeCash(cps.data || [], ls.data || [], adj.data || []);
-    computeDenoms(cps.data || [], ls.data || [], adj.data || []);
+    const operational = ops.data || [];
+    setExchangeCount(
+      operational.filter((o: any) => o.adjustment_type === "EXCHANGE").length
+    );
+    setTransferCount(
+      operational.filter((o: any) => o.adjustment_type === "INTER_SITE_TRANSFER")
+        .length
+    );
+
+    computeCash(cps.data || [], ls.data || []);
+    computeDenoms(cps.data || [], ls.data || []);
     computeLoadedBySite(rs.data || [], ls.data || [], dp.data || []);
 
     setLoading(false);
   }
 
-  function computeCash(pickups: any[], loads: any[], adjustments: any[]) {
+  function computeCash(pickups: any[], loads: any[]) {
     const picked = pickups.reduce((s, p) => s + (p.total_amount || 0), 0);
     const loaded = loads.reduce(
       (s, l) =>
         s + DENOMS.reduce((ds, d) => ds + (l[`denom_${d}`] || 0) * d, 0),
       0
     );
-    const adjusted = adjustments.reduce(
-      (s, a) =>
-        s + DENOMS.reduce((ds, d) => ds + (a[`denom_${d}`] || 0) * d, 0),
-      0
-    );
 
     setCashUtil({
       picked,
-      adjusted,
       loaded,
-      inHand: picked - loaded + adjusted,
+      inHand: picked - loaded,
     });
   }
 
-  function computeDenoms(pickups: any[], loads: any[], adjustments: any[]) {
+  function computeDenoms(pickups: any[], loads: any[]) {
     const picked: any = {};
-    const adjusted: any = {};
     const loaded: any = {};
     const inHand: any = {};
 
     DENOMS.forEach(d => {
       picked[d] = pickups.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0);
-      adjusted[d] = adjustments.reduce((s, a) => s + (a[`denom_${d}`] || 0), 0);
       loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
-      inHand[d] = picked[d] - loaded[d] + adjusted[d];
+      inHand[d] = picked[d] - loaded[d];
     });
 
-    setDenomSummary({ picked, adjusted, loaded, inHand });
+    setDenomSummary({ picked, loaded, inHand });
   }
 
   function computeLoadedBySite(routeSites: any[], loads: any[], plans: any[]) {
@@ -444,13 +451,14 @@ const completionPct =
             {kpiOpen && cashUtil && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
                 <Stat label="Picked" value={`₹${cashUtil.picked}`} />
-                <Stat label="Adjusted" value={`₹${cashUtil.adjusted}`} />
                 <Stat label="Loaded" value={`₹${cashUtil.loaded}`} />
                 <Stat
                   label="In Hand"
                   value={`₹${cashUtil.inHand}`}
                   highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
                 />
+                <Stat label="Exchanges" value={exchangeCount} />
+                <Stat label="Transfers" value={transferCount} />
 				
 {profile?.role === "custodian" && (
   <>
@@ -514,7 +522,6 @@ const completionPct =
                     <tr>
                       <th className="border p-2">Denom</th>
                       <th className="border p-2 text-right">Picked</th>
-                      <th className="border p-2 text-right">Adjusted</th>
                       <th className="border p-2 text-right">Loaded</th>
                       <th className="border p-2 text-right">In Hand</th>
                     </tr>
@@ -525,9 +532,6 @@ const completionPct =
                         <td className="border p-2 font-medium">₹{d}</td>
                         <td className="border p-2 text-right">
                           {denomSummary.picked[d]} / ₹{denomValue(denomSummary.picked[d], d)}
-                        </td>
-                        <td className="border p-2 text-right">
-                          {denomSummary.adjusted[d]} / ₹{denomValue(denomSummary.adjusted[d], d)}
                         </td>
                         <td className="border p-2 text-right">
                           {denomSummary.loaded[d]} / ₹{denomValue(denomSummary.loaded[d], d)}
@@ -547,7 +551,6 @@ const completionPct =
                   <div key={d} className="border rounded p-3 text-sm">
                     <div className="font-semibold mb-1">₹{d}</div>
                     <div>Picked: {denomSummary.picked[d]} (₹{denomValue(denomSummary.picked[d], d)})</div>
-                    <div>Adjusted: {denomSummary.adjusted[d]} (₹{denomValue(denomSummary.adjusted[d], d)})</div>
                     <div>Loaded: {denomSummary.loaded[d]} (₹{denomValue(denomSummary.loaded[d], d)})</div>
                     <div className="font-semibold">
                       In Hand: {denomSummary.inHand[d]} (₹{denomValue(denomSummary.inHand[d], d)})

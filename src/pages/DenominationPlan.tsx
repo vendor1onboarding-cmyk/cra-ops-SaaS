@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";
 
 type SiteOption = {
@@ -37,7 +38,10 @@ export default function DenominationPlan() {
   });
 
   const [loading, setLoading] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
 
   const today = getISTDateString();
 
@@ -138,8 +142,24 @@ export default function DenominationPlan() {
   // --------------------------------------------------
   // Save plan
   // --------------------------------------------------
+  function resetForm() {
+    setSelectedSite(null);
+    setForm({
+      denom_2000: 0,
+      denom_500: 0,
+      denom_200: 0,
+      denom_100: 0,
+      denom_50: 0,
+      denom_20: 0,
+      denom_10: 0,
+      remarks: "",
+      has_source_report: true,
+    });
+    setSubmitLocked(false);
+  }
+
   async function handleSave() {
-    if (loading) return;
+    if (loading || submitLocked) return;
     if (!assignmentId || !selectedSite) return;
 
     setLoading(true);
@@ -156,11 +176,17 @@ export default function DenominationPlan() {
         { onConflict: "assignment_id,site_id" }
       );
 
-    setMessage(
-      error
-        ? "Failed to save denomination plan"
-        : "Denomination plan saved successfully"
-    );
+    if (error) {
+      setMessage("Failed to save denomination plan");
+    } else {
+      const siteLabel = sites.find((s) => s.site_id === selectedSite)
+        ?.display_label;
+      setSubmitLocked(true);
+      setConfirmMessage(
+        `Denomination plan saved successfully for ${siteLabel || "site"}.`
+      );
+      setShowConfirm(true);
+    }
 
     setLoading(false);
   }
@@ -268,7 +294,7 @@ export default function DenominationPlan() {
                 <div className="flex flex-col sm:flex-row gap-3">
                   <button
                     onClick={handleSave}
-                    disabled={loading}
+                    disabled={loading || submitLocked}
                     className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
                   >
                     {loading ? "Saving..." : "Save Plan"}
@@ -289,6 +315,17 @@ export default function DenominationPlan() {
           </>
         )}
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="Denomination Plan Saved"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetForm();
+        }}
+      />
     </AppLayout>
   );
 }

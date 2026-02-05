@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";
 
 interface BankAccount {
@@ -35,7 +36,10 @@ export default function CashPickup() {
   });
 
   const [loading, setLoading] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
   const [banksLoading, setBanksLoading] = useState(false);
   const [banksError, setBanksError] = useState<string | null>(null);
 
@@ -118,8 +122,23 @@ export default function CashPickup() {
   // --------------------------------------------------
   // Save (UPSERT – one pickup per bank per day)
   // --------------------------------------------------
+  function resetForm() {
+    setSelectedBankId("");
+    setExpectedAmount(0);
+    setForm({
+      denom_2000: 0,
+      denom_500: 0,
+      denom_200: 0,
+      denom_100: 0,
+      denom_50: 0,
+      denom_20: 0,
+      denom_10: 0,
+    });
+    setSubmitLocked(false);
+  }
+
   async function handleSave() {
-    if (loading) return;
+    if (loading || submitLocked) return;
     if (!assignmentId || !selectedBankId) {
       setMessage("Assignment or Bank selection missing");
       return;
@@ -152,7 +171,11 @@ export default function CashPickup() {
       console.error(error);
       setMessage("Failed to save cash pickup");
     } else {
-      setMessage("✅ Cash pickup saved successfully");
+      setSubmitLocked(true);
+      setConfirmMessage(
+        `Cash pickup saved successfully for ${selectedBank?.bank_name || "bank"}.`
+      );
+      setShowConfirm(true);
     }
 
     setLoading(false);
@@ -358,7 +381,7 @@ export default function CashPickup() {
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 onClick={handleSave}
-                disabled={loading || !selectedBankId}
+                disabled={loading || submitLocked || !selectedBankId}
                 className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
               >
                 {loading ? "Saving..." : "Save Cash Pickup"}
@@ -377,6 +400,17 @@ export default function CashPickup() {
           </>
         )}
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="Cash Pickup Saved"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetForm();
+        }}
+      />
     </AppLayout>
   );
 }

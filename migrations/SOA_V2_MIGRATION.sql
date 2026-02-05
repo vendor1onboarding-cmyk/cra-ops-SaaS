@@ -51,6 +51,17 @@ ALTER TABLE soa_adjustments
 ADD COLUMN IF NOT EXISTS exchange_metadata JSONB DEFAULT NULL,
 ADD COLUMN IF NOT EXISTS transfer_metadata JSONB DEFAULT NULL;
 
+-- Ensure soa_id FK points to assignments (historically named soa_adjustments_soa_fk)
+ALTER TABLE soa_adjustments
+DROP CONSTRAINT IF EXISTS soa_adjustments_soa_fk;
+
+ALTER TABLE soa_adjustments
+DROP CONSTRAINT IF EXISTS soa_adjustments_soa_id_fkey;
+
+ALTER TABLE soa_adjustments
+ADD CONSTRAINT soa_adjustments_soa_fk
+FOREIGN KEY (soa_id) REFERENCES assignments(id) ON DELETE CASCADE;
+
 COMMENT ON COLUMN soa_adjustments.exchange_metadata IS 
 'JSONB metadata for EXCHANGE type adjustments. Structure:
 {
@@ -126,51 +137,17 @@ SELECT
   a.custodian_id,
   a.assignment_date,
   
-  -- Opening balance (previous day's closing)
+  -- Opening balance (same day bank pickup)
   COALESCE(
-    (
-      SELECT 
-        COALESCE(
-          (SELECT SUM(
-            cp.denom_2000 * 2000 + 
-            cp.denom_500 * 500 + 
-            cp.denom_200 * 200 + 
-            cp.denom_100 * 100 + 
-            cp.denom_50 * 50 + 
-            cp.denom_20 * 20 + 
-            cp.denom_10 * 10
-          ) FROM cash_pickups cp WHERE cp.assignment_id = prev.id),
-          0
-        )
-        - COALESCE(
-          (SELECT SUM(
-            ar.denom_2000 * 2000 + 
-            ar.denom_500 * 500 + 
-            ar.denom_200 * 200 + 
-            ar.denom_100 * 100
-          ) FROM atm_replenishments ar WHERE ar.assignment_id = prev.id),
-          0
-        )
-        + COALESCE(
-          (SELECT SUM(
-            CASE 
-              WHEN sa.adjustment_type = 'CREDIT' THEN sa.adjustment_amount
-              WHEN sa.adjustment_type = 'DEBIT' THEN -sa.adjustment_amount
-              ELSE 0
-            END
-          ) FROM soa_adjustments sa 
-          WHERE sa.assignment_id = prev.id 
-          AND sa.adjustment_type IN ('CREDIT', 'DEBIT')),
-          0
-        )
-        + COALESCE(
-          (SELECT SUM(tl.allowance_amount) FROM travel_logs tl WHERE tl.assignment_id = prev.id),
-          0
-        )
-      FROM assignments prev
-      WHERE prev.custodian_id = a.custodian_id 
-      AND prev.assignment_date = a.assignment_date - INTERVAL '1 day'
-    ), 
+    (SELECT SUM(
+      cp.denom_2000 * 2000 + 
+      cp.denom_500 * 500 + 
+      cp.denom_200 * 200 + 
+      cp.denom_100 * 100 + 
+      cp.denom_50 * 50 + 
+      cp.denom_20 * 20 + 
+      cp.denom_10 * 10
+    ) FROM cash_pickups cp WHERE cp.assignment_id = a.id),
     0
   ) as opening_balance,
   
@@ -199,20 +176,8 @@ SELECT
     0
   ) as total_loads,
   
-  -- Manual adjustments (CREDIT/DEBIT only, excluding operational adjustments)
-  COALESCE(
-    (SELECT SUM(
-      CASE 
-        WHEN sa.adjustment_type = 'CREDIT' THEN sa.adjustment_amount
-        WHEN sa.adjustment_type = 'DEBIT' THEN -sa.adjustment_amount
-        ELSE 0
-      END
-    ) FROM soa_adjustments sa 
-    WHERE sa.assignment_id = a.id 
-    AND sa.adjustment_type IN ('CREDIT', 'DEBIT')
-    ), 
-    0
-  ) as net_adjustments,
+  -- Manual cash adjustments are deprecated (no SOA impact)
+  0 as net_adjustments,
   
   -- Exchanges count (operational, no net impact)
   (SELECT COUNT(*) 
@@ -295,18 +260,7 @@ SELECT
     ) FROM atm_replenishments ar WHERE ar.assignment_id = a.id),
     0
   ) as cash_loaded,
-  COALESCE(
-    (SELECT SUM(
-      CASE 
-        WHEN sa.adjustment_type = 'CREDIT' THEN sa.adjustment_amount
-        WHEN sa.adjustment_type = 'DEBIT' THEN -sa.adjustment_amount
-        ELSE 0
-      END
-    ) FROM soa_adjustments sa 
-    WHERE sa.assignment_id = a.id 
-    AND sa.adjustment_type IN ('CREDIT', 'DEBIT')),
-    0
-  ) as cash_adjusted,
+  0 as cash_adjusted,
   COALESCE(
     (SELECT SUM(
       ec.denom_2000 * 2000 +
@@ -347,18 +301,6 @@ SELECT
       0
     )
     + COALESCE(
-      (SELECT SUM(
-        CASE 
-          WHEN sa.adjustment_type = 'CREDIT' THEN sa.adjustment_amount
-          WHEN sa.adjustment_type = 'DEBIT' THEN -sa.adjustment_amount
-          ELSE 0
-        END
-      ) FROM soa_adjustments sa 
-      WHERE sa.assignment_id = a.id 
-      AND sa.adjustment_type IN ('CREDIT', 'DEBIT')),
-      0
-    )
-    + COALESCE(
       (SELECT SUM(tl.allowance_amount) FROM travel_logs tl WHERE tl.assignment_id = a.id),
       0
     )
@@ -376,7 +318,7 @@ COMMENT ON VIEW v_soa_detailed IS
 - Opening balance (previous day closing)
 - Bank withdrawals (cash pickups)
 - ATM loads (replenishments)
-- Manual adjustments (CREDIT/DEBIT)
+- Manual cash adjustments deprecated (no SOA impact)
 - Operational adjustments (EXCHANGE/TRANSFER counts)
 - Excess reported (separate)
 - Travel allowance
@@ -396,7 +338,6 @@ DECLARE
   v_opening DECIMAL(12, 2);
   v_withdrawals DECIMAL(12, 2);
   v_loads DECIMAL(12, 2);
-  v_adjustments DECIMAL(12, 2);
   v_allowance DECIMAL(12, 2);
   v_closing DECIMAL(12, 2);
 BEGIN
@@ -404,13 +345,12 @@ BEGIN
     opening_balance,
     total_withdrawals,
     total_loads,
-    net_adjustments,
     travel_allowance
-  INTO v_opening, v_withdrawals, v_loads, v_adjustments, v_allowance
+  INTO v_opening, v_withdrawals, v_loads, v_allowance
   FROM v_soa_detailed
   WHERE assignment_id = p_assignment_id;
   
-  v_closing := v_opening + v_withdrawals - v_loads + v_adjustments + v_allowance;
+  v_closing := v_opening - v_loads + v_allowance;
   
   RETURN v_closing;
 END;
@@ -418,7 +358,7 @@ $$;
 
 COMMENT ON FUNCTION calculate_closing_balance IS 
 'Calculate closing balance for a given assignment.
-Formula: Opening + Withdrawals - Loads + Adjustments + Allowance = Closing';
+Formula: Opening + Withdrawals - Loads + Allowance = Closing';
 
 
 -- ============================================

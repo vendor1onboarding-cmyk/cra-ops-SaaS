@@ -2,6 +2,7 @@ import React, { useEffect, useState , useRef} from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import SignatureCanvas from "react-signature-canvas";
 import {
   getISTDateString,
@@ -28,7 +29,10 @@ export default function EODSummary() {
   const [routeSites, setRouteSites] = useState<any[]>([]);
   const [taskSummary, setTaskSummary] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const modalSigPadRef = useRef<any>(null);
 
@@ -123,7 +127,7 @@ export default function EODSummary() {
   // --------------------------------------------------
 
   async function submitEOD() {
-    if (submitting) return;
+    if (submitting || submitLocked) return;
     if (!assignment) return;
 
     setSubmitting(true);
@@ -139,6 +143,9 @@ export default function EODSummary() {
     } else {
       setSubmitMsg("EOD submitted successfully. Awaiting admin approval.");
       setAssignment({ ...assignment, status: "submitted" });
+      setSubmitLocked(true);
+      setConfirmMessage("EOD submitted successfully. Awaiting admin approval.");
+      setShowConfirm(true);
     }
 
     setSubmitting(false);
@@ -199,6 +206,7 @@ export default function EODSummary() {
           taskSummary={taskSummary}
           onSubmit={submitEOD}
           submitting={submitting}
+          submitLocked={submitLocked}
           submitMsg={submitMsg}
           onSignatureComplete={(updatedAssignment) => setAssignment(updatedAssignment)}
         />
@@ -212,6 +220,15 @@ export default function EODSummary() {
             issueSummary={issueSummary}
           />
         )}
+      <ConfirmationModal
+        open={showConfirm}
+        title="EOD Submitted"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+        }}
+      />
     </AppLayout>
   );
 }
@@ -225,6 +242,7 @@ function CustodianEOD({
   taskSummary,
   onSubmit,
   submitting,
+  submitLocked,
   submitMsg,
   onSignatureComplete,
 }: any) {
@@ -233,8 +251,11 @@ function CustodianEOD({
   const previewCanvasWrapRef = useRef<HTMLDivElement | null>(null);
   const modalCanvasWrapRef = useRef<HTMLDivElement | null>(null);
   const [signing, setSigning] = useState(false);
+  const [signatureLocked, setSignatureLocked] = useState(false);
   const [sigError, setSigError] = useState<string | null>(null);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [showSignatureConfirm, setShowSignatureConfirm] = useState(false);
+  const [signatureConfirmMessage, setSignatureConfirmMessage] = useState("");
 
   const resizeSignatureCanvas = (
     ref: React.MutableRefObject<any>,
@@ -289,7 +310,7 @@ function CustodianEOD({
   }, [showSignatureModal]);
 
   async function submitSignature() {
-    if (signing) return;
+    if (signing || signatureLocked) return;
     if (!assignment?.id) return;
 
     if (!sigPadRef.current || sigPadRef.current.isEmpty()) {
@@ -343,7 +364,10 @@ function CustodianEOD({
         onSignatureComplete(updatedAssignment);
       }
 
-      alert("EOD signed and locked successfully.");
+      setSignatureLocked(true);
+      setSignatureConfirmMessage("EOD signed and locked successfully.");
+      setShowSignatureConfirm(true);
+      setShowSignatureModal(false);
       sigPadRef.current.clear();
     } catch (err) {
       setSigError("Failed to save signature. Please try again.");
@@ -402,7 +426,7 @@ function CustodianEOD({
             <div className="pt-4">
               <button
                 onClick={onSubmit}
-                disabled={submitting}
+                disabled={submitting || submitLocked}
                 className="w-full bg-primary text-white py-2 rounded"
               >
                 {submitting ? "Submitting..." : "Submit End of Day Report"}
@@ -548,6 +572,14 @@ function CustodianEOD({
           )}
         </div>
       )}
+
+      <ConfirmationModal
+        open={showSignatureConfirm}
+        title="EOD Signed"
+        message={signatureConfirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => setShowSignatureConfirm(false)}
+      />
     </div>
   );
 }

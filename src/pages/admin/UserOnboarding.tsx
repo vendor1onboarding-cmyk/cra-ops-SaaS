@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
+import ConfirmationModal from "../../components/ConfirmationModal";
 
 type UserRole = "admin" | "supervisor" | "custodian";
 
 export default function UserOnboarding() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
   
   // Form fields
   const [formData, setFormData] = useState({
@@ -104,6 +108,7 @@ export default function UserOnboarding() {
   /* ---------------- Create User via Supabase Auth API ---------------- */
   
   async function handleSubmit() {
+    if (submitLocked || loading) return;
     setMessage(null);
     setGeneratedCredentials(null);
     
@@ -198,14 +203,11 @@ export default function UserOnboarding() {
         type: "success", 
         text: `User created successfully! Share credentials securely with ${formData.fullName}.` 
       });
-      
-      // Reset form
-      setFormData({
-        email: "",
-        fullName: "",
-        role: "custodian",
-      });
-      setErrors({});
+      setSubmitLocked(true);
+      setConfirmMessage(
+        `User created successfully for ${formData.fullName.trim() || "user"}.`
+      );
+      setShowConfirm(true);
       
     } catch (err) {
       console.error("Unexpected error during user creation:", err);
@@ -229,6 +231,7 @@ export default function UserOnboarding() {
     setErrors({});
     setMessage(null);
     setGeneratedCredentials(null);
+    setSubmitLocked(false);
   }
   
   /* ---------------- Copy to Clipboard ---------------- */
@@ -329,7 +332,7 @@ export default function UserOnboarding() {
         <div className="flex gap-3 pt-2">
           <button
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={loading || submitLocked}
             className="flex-1 bg-primary text-white py-3 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             {loading ? "Creating User..." : "Create User"}
@@ -444,4 +447,15 @@ export default function UserOnboarding() {
       </div>
     </div>
   );
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="User Created"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          handleReset();
+        }}
+      />
 }

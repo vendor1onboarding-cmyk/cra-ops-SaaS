@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
+import ConfirmationModal from "../../components/ConfirmationModal";
 
 interface BankAccount {
   id: string;
@@ -39,8 +40,11 @@ export default function BankAccountOnboarding() {
   const [view, setView] = useState<"list" | "form">("list");
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageType, setMessageType] = useState<"success" | "error">("success");
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
 
   const [form, setForm] = useState<FormData>({
     bank_name: "",
@@ -140,6 +144,8 @@ export default function BankAccountOnboarding() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    if (submitLocked || loading) return;
+
     if (!validateForm()) {
       return;
     }
@@ -176,30 +182,12 @@ export default function BankAccountOnboarding() {
         setMessage("Failed to save bank account");
         setMessageType("error");
       } else {
-        setMessage("✅ Bank account added successfully!");
         setMessageType("success");
-        
-        // Reset form
-        setForm({
-          bank_name: "",
-          account_number: "",
-          ifsc_code: "",
-          branch_code: "",
-          branch_name: "",
-          branch_phone: "",
-          branch_email: "",
-          branch_address: "",
-          is_active: true,
-        });
-        setErrors({});
-
-        // Reload list
-        await loadBankAccounts();
-
-        // Switch back to list after 2 seconds
-        setTimeout(() => {
-          setView("list");
-        }, 2000);
+        setSubmitLocked(true);
+        setConfirmMessage(
+          `Bank account added successfully for ${form.bank_name.trim() || "bank"}.`
+        );
+        setShowConfirm(true);
       }
     } catch (err) {
       console.error(err);
@@ -208,6 +196,24 @@ export default function BankAccountOnboarding() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function resetFormAfterSave() {
+    setForm({
+      bank_name: "",
+      account_number: "",
+      ifsc_code: "",
+      branch_code: "",
+      branch_name: "",
+      branch_phone: "",
+      branch_email: "",
+      branch_address: "",
+      is_active: true,
+    });
+    setErrors({});
+    await loadBankAccounts();
+    setView("list");
+    setSubmitLocked(false);
   }
 
   // Handle toggle is_active
@@ -541,7 +547,7 @@ export default function BankAccountOnboarding() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || submitLocked}
                   className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
                 >
                   {loading ? "Saving..." : "✅ Save Bank Account"}
@@ -572,6 +578,17 @@ export default function BankAccountOnboarding() {
           </div>
         )}
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="Bank Account Saved"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetFormAfterSave();
+        }}
+      />
     </div>
   );
 }

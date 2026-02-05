@@ -3,6 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 import FileUpload from "../components/FileUpload";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";
 
 type SiteOption = {
@@ -31,7 +32,10 @@ export default function TechnicalIssues() {
   const [photo, setPhoto] = useState<File | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
 
   const today = getISTDateString();
 
@@ -88,8 +92,17 @@ export default function TechnicalIssues() {
   // --------------------------------------------------
   // Save Technical Issue
   // --------------------------------------------------
+  function resetForm() {
+    setIssueType("");
+    setErrorCode("");
+    setDescription("");
+    setPhoto(null);
+    setSelectedSite(null);
+    setSubmitLocked(false);
+  }
+
   async function handleSave() {
-    if (loading) return;
+    if (loading || submitLocked) return;
     if (!assignmentId || !selectedSite || !issueType) {
       setMessage("Assignment, Site, and Issue Type are required");
       return;
@@ -134,12 +147,14 @@ export default function TechnicalIssues() {
       console.error(error);
       setMessage("Failed to report issue");
     } else {
+      setSubmitLocked(true);
       setMessage("Issue reported successfully");
-      setIssueType("");
-      setErrorCode("");
-      setDescription("");
-      setPhoto(null);
-      setSelectedSite(null);
+      const siteLabel = sites.find((s) => s.site_id === selectedSite)
+        ?.display_label;
+      setConfirmMessage(
+        `Issue reported successfully for ${siteLabel || "site"}.`
+      );
+      setShowConfirm(true);
     }
 
     setLoading(false);
@@ -247,7 +262,7 @@ export default function TechnicalIssues() {
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 onClick={handleSave}
-                disabled={loading}
+                disabled={loading || submitLocked}
                 className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
               >
                 {loading ? "Submitting..." : "Report Issue"}
@@ -266,6 +281,17 @@ export default function TechnicalIssues() {
           </>
         )}
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="Issue Reported"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetForm();
+        }}
+      />
     </AppLayout>
   );
 }

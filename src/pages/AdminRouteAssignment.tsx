@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 
 type Assignment = {
@@ -53,7 +54,14 @@ export default function AdminRouteAssignment() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [confirmAction, setConfirmAction] = useState<
+    "create" | "route" | null
+  >(null);
 
   // --------------------------------------------------
   // Load base data (ADMIN ONLY)
@@ -134,6 +142,7 @@ export default function AdminRouteAssignment() {
   // Create Assignment (Option B – unchanged)
   // --------------------------------------------------
   async function createAssignment() {
+    if (submitLocked) return;
     if (!selectedCustodian || !assignmentDate) {
       setMessage("Select custodian and date");
       return;
@@ -161,9 +170,16 @@ export default function AdminRouteAssignment() {
       setMessage("Failed to create assignment");
     } else {
       setMessage("Assignment created successfully");
-      setSelectedCustodian("");
-      setAssignmentDate("");
-      window.location.reload();
+      setSubmitLocked(true);
+      const custodianLabel = custodians.find(
+        (c) => c.id === selectedCustodian
+      )?.full_name;
+      setConfirmTitle("Assignment Created");
+      setConfirmMessage(
+        `Assignment created successfully for ${custodianLabel || "custodian"}.`
+      );
+      setConfirmAction("create");
+      setShowConfirm(true);
     }
   }
 
@@ -182,6 +198,7 @@ export default function AdminRouteAssignment() {
   // Save route (manual – unchanged)
   // --------------------------------------------------
   async function saveRoute() {
+    if (submitLocked) return;
     const assignment = assignments.find(a => a.id === selectedAssignment);
 
     if (!assignment || assignment.status !== "open") {
@@ -212,7 +229,16 @@ export default function AdminRouteAssignment() {
       .from("route_sites")
       .insert(inserts);
 
-    setMessage(error ? "Failed to save route" : "Route assigned successfully");
+    if (error) {
+      setMessage("Failed to save route");
+    } else {
+      setMessage("Route assigned successfully");
+      setSubmitLocked(true);
+      setConfirmTitle("Route Assigned");
+      setConfirmMessage("Route assigned successfully.");
+      setConfirmAction("route");
+      setShowConfirm(true);
+    }
     setSaving(false);
   }
 
@@ -220,6 +246,7 @@ export default function AdminRouteAssignment() {
   // AUTO ASSIGN BY DISTRICT (RPC – unchanged)
   // --------------------------------------------------
   async function autoAssignByDistrict() {
+    if (submitLocked) return;
     if (!selectedAssignment || !selectedDistrict) {
       setMessage("Select assignment and district");
       return;
@@ -243,6 +270,11 @@ export default function AdminRouteAssignment() {
       setMessage(error.message);
     } else {
       setMessage("Route auto-assigned by district");
+      setSubmitLocked(true);
+      setConfirmTitle("Route Assigned");
+      setConfirmMessage("Route auto-assigned by district.");
+      setConfirmAction("route");
+      setShowConfirm(true);
 
       const { data } = await supabase
         .from("route_sites")
@@ -296,7 +328,8 @@ export default function AdminRouteAssignment() {
 
               <button
                 onClick={createAssignment}
-                className="bg-primary text-white px-4 py-2 rounded text-sm"
+                disabled={submitLocked}
+                className="bg-primary text-white px-4 py-2 rounded text-sm disabled:opacity-50"
               >
                 Create Assignment
               </button>
@@ -374,9 +407,9 @@ export default function AdminRouteAssignment() {
                 </div>
 
                 <button
-                  disabled={saving}
+                  disabled={saving || submitLocked}
                   onClick={saveRoute}
-                  className="bg-primary text-white px-4 py-2 rounded"
+                  className="bg-primary text-white px-4 py-2 rounded disabled:opacity-50"
                 >
                   Save Route
                 </button>
@@ -389,6 +422,26 @@ export default function AdminRouteAssignment() {
           </>
         )}
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title={confirmTitle}
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          if (confirmAction === "create") {
+            setSelectedCustodian("");
+            setAssignmentDate("");
+          }
+          if (confirmAction === "route") {
+            setSelectedAssignment(null);
+            setSelectedSites([]);
+          }
+          setConfirmAction(null);
+          setSubmitLocked(false);
+        }}
+      />
     </AppLayout>
   );
 }

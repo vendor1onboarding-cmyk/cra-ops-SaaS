@@ -1,6 +1,7 @@
 import React, { useEffect, useState , useRef} from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import {
   MapContainer,
@@ -91,6 +92,8 @@ export default function TravelTracking() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
   
   const [playIndex, setPlayIndex] = useState<number | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -197,6 +200,8 @@ useEffect(() => {
       setSegments(prev => [...prev, data]);
       setOdoStart("");
       setInfo("Travel started.");
+      setConfirmMessage("Travel started successfully.");
+      setShowConfirm(true);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -252,6 +257,8 @@ useEffect(() => {
       setActiveTravel(null);
       setOdoEnd("");
       setInfo(`Travel completed (${finalKm.toFixed(2)} km, ${method} distance).`);
+      setConfirmMessage("Travel ended successfully.");
+      setShowConfirm(true);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -561,6 +568,14 @@ function stopPlayback() {
 
         </div>
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="Travel Update"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => setShowConfirm(false)}
+      />
     </AppLayout>
   );
 }

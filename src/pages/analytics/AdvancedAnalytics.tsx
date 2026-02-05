@@ -7,7 +7,6 @@ interface AnalyticsMetrics {
   totalAssignments: number;
   totalCashPicked: number;
   totalCashLoaded: number;
-  totalAdjustments: number;
   totalExcessReported: number;
   avgNetCashPosition: number;
   totalTravelKm: number;
@@ -126,7 +125,6 @@ export default function AdvancedAnalytics() {
 
         const [
           { data: soaRows, error: soaError },
-          { data: adjustments, error: adjustmentsError },
           { data: travelLogs, error: travelError },
           { data: loadsAll, error: loadsAllError },
         ] = await Promise.all([
@@ -137,15 +135,10 @@ export default function AdvancedAnalytics() {
                assignment_date,
                cash_picked,
                cash_loaded,
-               cash_adjusted,
                excess_reported,
                final_net_cash_position,
                custodian_id`
             )
-            .in("assignment_id", filteredAssignmentIds),
-          supabase
-            .from("soa_adjustments")
-            .select("adjustment_amount, adjustment_type, assignment_id")
             .in("assignment_id", filteredAssignmentIds),
           supabase
             .from("travel_logs")
@@ -160,12 +153,10 @@ export default function AdvancedAnalytics() {
         ]);
 
         if (soaError) throw soaError;
-        if (adjustmentsError) throw adjustmentsError;
         if (travelError) throw travelError;
         if (loadsAllError) throw loadsAllError;
 
         const soaData = soaRows || [];
-        const adjustmentData = adjustments || [];
         const travelData = travelLogs || [];
         const loadsData = selectedSites.length > 0 ? loadRows : loadsAll || [];
 
@@ -188,10 +179,6 @@ export default function AdvancedAnalytics() {
         );
         const totalCashLoaded = soaData.reduce(
           (sum: number, r: any) => sum + (r.cash_loaded || 0),
-          0
-        );
-        const totalAdjustments = adjustmentData.reduce(
-          (sum: number, a: any) => sum + (a.adjustment_amount || 0),
           0
         );
         const totalExcessReported = soaData.reduce(
@@ -315,7 +302,6 @@ export default function AdvancedAnalytics() {
           totalAssignments,
           totalCashPicked,
           totalCashLoaded,
-          totalAdjustments,
           totalExcessReported,
           avgNetCashPosition,
           totalTravelKm,
@@ -434,7 +420,6 @@ export default function AdvancedAnalytics() {
               <MetricCard label="Avg Load Time" value={`${metrics.avgLoadMinutes.toFixed(0)} min`} icon="⏱️" />
               <MetricCard label="Cash Picked" value={formatCurrency(metrics.totalCashPicked)} icon="💵" />
               <MetricCard label="Cash Loaded" value={formatCurrency(metrics.totalCashLoaded)} icon="🚚" />
-              <MetricCard label="Adjustments" value={formatCurrency(metrics.totalAdjustments)} icon="📝" />
               <MetricCard label="Avg Net Position" value={formatCurrency(metrics.avgNetCashPosition)} icon="📊" />
             </section>
 
@@ -782,7 +767,6 @@ function buildEmptyMetrics(dateKeys: string[]): AnalyticsMetrics {
     totalAssignments: 0,
     totalCashPicked: 0,
     totalCashLoaded: 0,
-    totalAdjustments: 0,
     totalExcessReported: 0,
     avgNetCashPosition: 0,
     totalTravelKm: 0,

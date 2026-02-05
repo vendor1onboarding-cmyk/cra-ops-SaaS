@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
 
@@ -21,7 +22,10 @@ export default function ATMExcessCash() {
   const [receipt, setReceipt] = useState<File | null>(null);
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
 
   /* ---------------- Load assignment & sites ---------------- */
 
@@ -55,8 +59,21 @@ export default function ATMExcessCash() {
 
   /* ---------------- Save Excess Cash ---------------- */
 
+  function resetForm() {
+    setSiteId(null);
+    setDenoms({
+      denom_100: 0,
+      denom_200: 0,
+      denom_500: 0,
+      denom_2000: 0,
+    });
+    setReceipt(null);
+    setRemarks("");
+    setSubmitLocked(false);
+  }
+
   async function handleSave() {
-    if (saving) return;
+    if (saving || submitLocked) return;
     setError(null);
     setSaving(true);
 
@@ -110,19 +127,14 @@ export default function ATMExcessCash() {
       return;
     }
 
-    /* Reset form */
-    setSiteId(null);
-    setDenoms({
-      denom_100: 0,
-      denom_200: 0,
-      denom_500: 0,
-      denom_2000: 0,
-    });
-    setReceipt(null);
-    setRemarks("");
-
-    alert("ATM Excess Cash recorded successfully.");
     setSaving(false);
+    setSubmitLocked(true);
+    setConfirmMessage(
+      `ATM excess cash recorded successfully for ${
+        sites.find((s) => s.id === siteId)?.bank_name || "site"
+      }.`
+    );
+    setShowConfirm(true);
   }
 
   /* ---------------- UI ---------------- */
@@ -193,12 +205,23 @@ export default function ATMExcessCash() {
 
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || submitLocked}
           className="w-full py-2 bg-green-600 text-white rounded text-sm"
         >
           {saving ? "Saving…" : "Save Excess Cash Record"}
         </button>
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="Excess Cash Saved"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetForm();
+        }}
+      />
     </AppLayout>
   );
 }

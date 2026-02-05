@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -21,7 +21,7 @@ type Adjustment = {
   id: number;
   assignment_id: number;
   custodian_id: string;
-  adjustment_type: "CREDIT" | "DEBIT" | "EXCHANGE" | "INTER_SITE_TRANSFER";
+  adjustment_type: "EXCHANGE" | "INTER_SITE_TRANSFER";
   adjustment_amount: number;
   reason: string;
   reference?: string | null;
@@ -39,21 +39,13 @@ export default function AdminSOAAdjustments() {
   const [soaList, setSoaList] = useState<SOA[]>([]);
   const [selectedSOA, setSelectedSOA] = useState<SOA | null>(null);
 
-  const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState("");
-  const [reference, setReference] = useState("");
-
-  const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  const [showPreview, setShowPreview] = useState(false);
 
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [adjustmentsLoading, setAdjustmentsLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useState<
-    "ALL" | "CREDIT" | "DEBIT" | "EXCHANGE" | "INTER_SITE_TRANSFER"
+    "ALL" | "EXCHANGE" | "INTER_SITE_TRANSFER"
   >("ALL");
   const [onlySelectedAssignment, setOnlySelectedAssignment] = useState(false);
 
@@ -143,6 +135,8 @@ export default function AdminSOAAdjustments() {
 
       if (typeFilter !== "ALL") {
         query = query.eq("adjustment_type", typeFilter);
+      } else {
+        query = query.in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"]);
       }
 
       if (onlySelectedAssignment && selectedSOA) {
@@ -204,42 +198,19 @@ export default function AdminSOAAdjustments() {
     loadAdjustments();
   }, [loadAdjustments]);
 
-  // =========================
-  // VALIDATION
-  // =========================
-  const parsedAmount = Number(amount || 0);
-  const isValidAmount =
-    amount !== "" && !isNaN(parsedAmount) && parsedAmount !== 0;
-  const isValidReason = reason.trim().length > 0;
-  const canSubmit = selectedSOA && isValidAmount && isValidReason && !loading;
-
-  // =========================
-  // PREVIEW CALCULATION
-  // =========================
-  const previewNetPosition = useMemo(() => {
-    if (!selectedSOA) return null;
-    return selectedSOA.final_net_cash_position + parsedAmount;
-  }, [selectedSOA, parsedAmount]);
-
-  const typeMeta: Record<Adjustment["adjustment_type"], { label: string; badge: string }>
-    = {
-      CREDIT: {
-        label: "Credit",
-        badge: "bg-emerald-100 text-emerald-800",
-      },
-      DEBIT: {
-        label: "Debit",
-        badge: "bg-rose-100 text-rose-800",
-      },
-      EXCHANGE: {
-        label: "Exchange",
-        badge: "bg-amber-100 text-amber-800",
-      },
-      INTER_SITE_TRANSFER: {
-        label: "Transfer",
-        badge: "bg-blue-100 text-blue-800",
-      },
-    };
+  const typeMeta: Record<
+    Adjustment["adjustment_type"],
+    { label: string; badge: string }
+  > = {
+    EXCHANGE: {
+      label: "Exchange",
+      badge: "bg-amber-100 text-amber-800",
+    },
+    INTER_SITE_TRANSFER: {
+      label: "Transfer",
+      badge: "bg-blue-100 text-blue-800",
+    },
+  };
 
   function formatDenoms(denoms: Record<string, number> | undefined) {
     if (!denoms) return "-";
@@ -258,78 +229,13 @@ export default function AdminSOAAdjustments() {
       return adj.exchange_metadata?.total_amount ?? 0;
     }
     if (adj.adjustment_type === "INTER_SITE_TRANSFER") {
-      return adj.transfer_metadata?.amount ?? 0;
+      return (
+        adj.transfer_metadata?.total_amount ??
+        adj.transfer_metadata?.source_total_amount ??
+        0
+      );
     }
     return adj.adjustment_amount;
-  }
-
-  // =========================
-  // SUBMIT ADJUSTMENT
-  // =========================
-  async function submitAdjustment() {
-    if (!canSubmit) {
-      setError("Please fill in all required fields correctly");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      const { error: insertError } = await supabase
-        .from("soa_adjustments")
-        .insert({
-          soa_id: selectedSOA!.id,
-          assignment_id: selectedSOA!.assignment_id,
-          custodian_id: selectedSOA!.custodian_id,
-          adjustment_type: parsedAmount >= 0 ? "CREDIT" : "DEBIT",
-          adjustment_amount: Math.abs(parsedAmount),
-          reason: reason.trim(),
-          reference: reference.trim() || null,
-          created_by: profile?.id,
-        });
-
-      if (insertError) {
-        setError(
-          "Failed to post SOA adjustment. " +
-            (insertError.message || "Please try again.")
-        );
-        console.error("Insert Error:", insertError);
-      } else {
-        setSuccessMessage(
-          `✅ SOA adjustment posted successfully! New net position: ₹${previewNetPosition?.toFixed(2)}`
-        );
-
-        // Reset form
-        setTimeout(() => {
-          setAmount("");
-          setReason("");
-          setReference("");
-          setSelectedSOA(null);
-          setShowPreview(false);
-          setSuccessMessage(null);
-        }, 2000);
-
-        await loadSOA();
-        await loadAdjustments();
-      }
-    } catch (err) {
-      setError("An unexpected error occurred. Please try again.");
-      console.error("Unexpected Error:", err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function resetForm() {
-    setAmount("");
-    setReason("");
-    setReference("");
-    setSelectedSOA(null);
-    setShowPreview(false);
-    setError(null);
-    setSuccessMessage(null);
   }
 
   // =========================
@@ -355,10 +261,10 @@ export default function AdminSOAAdjustments() {
         {/* ===== PAGE HEADER ===== */}
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-slate-900">
-            SOA Manual Adjustments
+            SOA Operational Records
           </h1>
           <p className="text-sm text-slate-600">
-            Make corrections to Statement of Accounts records when needed
+            Review exchanges and inter-site transfers logged against SOA
           </p>
         </div>
 
@@ -366,15 +272,6 @@ export default function AdminSOAAdjustments() {
         {error && (
           <div className="rounded-lg bg-red-50 border border-red-200 p-4">
             <p className="text-sm text-red-700 font-medium">⚠️ {error}</p>
-          </div>
-        )}
-
-        {/* ===== SUCCESS MESSAGE ===== */}
-        {successMessage && (
-          <div className="rounded-lg bg-green-50 border border-green-200 p-4">
-            <p className="text-sm text-green-700 font-medium">
-              {successMessage}
-            </p>
           </div>
         )}
 
@@ -461,197 +358,15 @@ export default function AdminSOAAdjustments() {
           )}
         </div>
 
-        {/* ===== ADJUSTMENT FORM ===== */}
-        {selectedSOA && (
-          <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Adjustment Details
-            </h2>
-
-            {/* Amount Input */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-900 mb-2">
-                Adjustment Amount <span className="text-red-600">*</span>
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 font-semibold">
-                  ₹
-                </span>
-                <input
-                  type="number"
-                  className={`input w-full pl-7 ${
-                    amount &&
-                    !isValidAmount &&
-                    "border-red-500 focus:ring-red-500 focus:border-red-500"
-                  }`}
-                  placeholder="Enter amount (+500 or -250)"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  step="0.01"
-                />
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Positive for credit, negative for debit
-              </p>
-              {amount && !isValidAmount && (
-                <p className="text-xs text-red-600 mt-1">
-                  ⚠️ Please enter a valid non-zero amount
-                </p>
-              )}
-            </div>
-
-            {/* Reason Input */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-900 mb-2">
-                Reason for Adjustment
-                <span className="text-red-600 ml-1">*</span>
-              </label>
-              <textarea
-                className={`input w-full resize-none ${
-                  reason &&
-                  !isValidReason &&
-                  "border-red-500 focus:ring-red-500 focus:border-red-500"
-                }`}
-                rows={3}
-                placeholder="e.g., Cash count discrepancy, bank reconciliation adjustment, receipt correction..."
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-              <div className="flex justify-between items-center mt-1">
-                <p className="text-xs text-slate-500">
-                  Describe the reason for this adjustment
-                </p>
-                <p
-                  className={`text-xs font-medium ${
-                    reason.length > 100 ? "text-amber-600" : "text-slate-500"
-                  }`}
-                >
-                  {reason.length} characters
-                </p>
-              </div>
-              {reason && !isValidReason && (
-                <p className="text-xs text-red-600 mt-1">
-                  ⚠️ Please provide a valid reason
-                </p>
-              )}
-            </div>
-
-            {/* Reference Input */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-900 mb-2">
-                Reference (Optional)
-              </label>
-              <input
-                type="text"
-                className="input w-full"
-                placeholder="e.g., Invoice #12345, Check #5678, Reference ID..."
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Add supporting documentation reference if applicable
-              </p>
-            </div>
-
-            {/* Preview & Submit Buttons */}
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-2">
-              <button
-                onClick={() => setShowPreview(!showPreview)}
-                className="flex-1 btn-secondary"
-                disabled={!selectedSOA || !isValidAmount}
-              >
-                {showPreview ? "Hide Preview" : "Show Preview"}
-              </button>
-              <button
-                onClick={resetForm}
-                className="flex-1 btn-secondary opacity-75 hover:opacity-100"
-              >
-                Reset Form
-              </button>
-              <button
-                onClick={submitAdjustment}
-                disabled={!canSubmit}
-                className={`flex-1 ${
-                  canSubmit
-                    ? "btn-primary"
-                    : "bg-slate-300 text-slate-500 cursor-not-allowed rounded-lg px-4 py-2"
-                }`}
-              >
-                {loading ? "Processing…" : "Post Adjustment"}
-              </button>
-            </div>
-
-            {/* ===== PREVIEW SECTION ===== */}
-            {showPreview && (
-              <div className="mt-6 p-4 bg-slate-50 border-2 border-slate-200 rounded-lg space-y-3">
-                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                  👁️ Adjustment Preview
-                </h3>
-
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Current Net Position:</span>
-                    <span className="font-semibold text-slate-900">
-                      ₹
-                      {selectedSOA.final_net_cash_position.toLocaleString(
-                        "en-IN",
-                        { minimumFractionDigits: 2 }
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Adjustment Amount:</span>
-                    <span
-                      className={`font-semibold ${
-                        parsedAmount >= 0
-                          ? "text-green-700"
-                          : "text-red-700"
-                      }`}
-                    >
-                      {parsedAmount >= 0 ? "+" : ""}
-                      ₹{parsedAmount.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </span>
-                  </div>
-
-                  <div className="border-t border-slate-300 pt-2 flex justify-between">
-                    <span className="font-semibold text-slate-900">
-                      Resulting Net Position:
-                    </span>
-                    <span className="text-lg font-bold text-indigo-700">
-                      ₹
-                      {previewNetPosition?.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
-                  💡 <strong>Reason:</strong> {reason || "(Not provided)"}
-                </div>
-
-                {reference && (
-                  <div className="p-3 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
-                    📎 <strong>Reference:</strong> {reference}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ===== ADJUSTMENT HISTORY ===== */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">
-                Adjustment History
+                Operational Adjustment History
               </h2>
               <p className="text-xs text-slate-500">
-                Latest 200 adjustments (credits, debits, exchanges, transfers)
+                Latest 200 adjustments (exchanges, transfers)
               </p>
             </div>
 
@@ -663,16 +378,12 @@ export default function AdminSOAAdjustments() {
                   setTypeFilter(
                     e.target.value as
                       | "ALL"
-                      | "CREDIT"
-                      | "DEBIT"
                       | "EXCHANGE"
                       | "INTER_SITE_TRANSFER"
                   )
                 }
               >
                 <option value="ALL">All Types</option>
-                <option value="CREDIT">Credit</option>
-                <option value="DEBIT">Debit</option>
                 <option value="EXCHANGE">Exchange</option>
                 <option value="INTER_SITE_TRANSFER">Inter-site Transfer</option>
               </select>
@@ -703,19 +414,12 @@ export default function AdminSOAAdjustments() {
               {adjustments.map((adj) => {
                 const meta = typeMeta[adj.adjustment_type];
                 const operationalAmount = getOperationalAmount(adj);
-                const isCredit = adj.adjustment_type === "CREDIT";
-                const isDebit = adj.adjustment_type === "DEBIT";
-                const displayAmount = isCredit
-                  ? `+₹${adj.adjustment_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}`
-                  : isDebit
-                  ? `-₹${adj.adjustment_amount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}`
-                  : `₹${operationalAmount.toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}`;
+                const displayAmount = `₹${operationalAmount.toLocaleString(
+                  "en-IN",
+                  {
+                    minimumFractionDigits: 2,
+                  }
+                )}`;
 
                 return (
                   <div
@@ -794,10 +498,8 @@ export default function AdminSOAAdjustments() {
             </p>
             <ul className="text-xs text-amber-800 space-y-1 list-disc list-inside">
               <li>Select an SOA record from the dropdown above</li>
-              <li>Enter the adjustment amount (positive for credit, negative for debit)</li>
-              <li>Provide a detailed reason for the adjustment</li>
-              <li>Optionally add a reference number</li>
-              <li>Review the preview and submit the adjustment</li>
+              <li>Filter by exchange or inter-site transfer type</li>
+              <li>Use the history list to audit operational movements</li>
             </ul>
           </div>
         )}

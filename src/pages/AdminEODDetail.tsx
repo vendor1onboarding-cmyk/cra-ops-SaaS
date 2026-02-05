@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { formatIST, formatISTAudit } from "../utils/time";
 
@@ -35,6 +36,11 @@ export default function AdminEODDetail() {
   const [assignment, setAssignment] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [showSignature, setShowSignature] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [confirmNavigate, setConfirmNavigate] = useState(false);
 
   const [data, setData] = useState<any>({
     routeSites: [],
@@ -276,6 +282,8 @@ export default function AdminEODDetail() {
               <button
                 className="btn-primary"
                 onClick={async () => {
+                  if (submitLocked) return;
+                  setSubmitLocked(true);
                   console.log("=== APPROVAL STARTED ===");
                   console.log("Assignment ID:", assignment.id);
                   console.log("Approved by:", profile?.id);
@@ -295,6 +303,7 @@ export default function AdminEODDetail() {
 
                     if (error) {
                       console.error("RPC error:", error);
+                      setSubmitLocked(false);
                       alert(
                         `Failed to approve EOD: ${error.message}\n\n` +
                         `Please ensure you have run FIX_EOD_APPROVAL_TRIGGER.sql in Supabase SQL Editor.\n\n` +
@@ -306,15 +315,20 @@ export default function AdminEODDetail() {
                     // Check if the function returned an error in the result
                     if (data && !data.success) {
                       console.error("Function returned error:", data);
+                      setSubmitLocked(false);
                       alert(`Failed to approve EOD: ${data.message || 'Unknown error'}`);
                       return;
                     }
 
                     // Success
                     console.log("Approval successful, navigating back...");
-                    navigate("/admin/approvals");
+                    setConfirmTitle("EOD Approved");
+                    setConfirmMessage("EOD approved successfully.");
+                    setConfirmNavigate(true);
+                    setShowConfirm(true);
                   } catch (err: any) {
                     console.error("Approval error:", err);
+                    setSubmitLocked(false);
                     alert(
                       `Failed to approve EOD: ${err.message || "Unknown error"}\n\n` +
                       `Please ensure you have run FIX_EOD_APPROVAL_TRIGGER.sql in Supabase SQL Editor.`
@@ -343,10 +357,13 @@ export default function AdminEODDetail() {
             <button
               className="btn-danger mt-2"
               onClick={async () => {
+                if (submitLocked) return;
                 if (!rejectReason.trim()) {
                   alert("Rejection reason is mandatory");
                   return;
                 }
+
+                setSubmitLocked(true);
 
                 const { error } = await supabase
                   .from("assignments")
@@ -360,11 +377,15 @@ export default function AdminEODDetail() {
 
                 if (error) {
                   console.error("Rejection error:", error);
+                  setSubmitLocked(false);
                   alert(`Failed to reject EOD: ${error.message}`);
                   return;
                 }
 
-                navigate("/admin/approvals");
+                setConfirmTitle("EOD Rejected");
+                setConfirmMessage("EOD rejected successfully.");
+                setConfirmNavigate(true);
+                setShowConfirm(true);
               }}
             >
               ❌ Reject EOD
@@ -372,6 +393,19 @@ export default function AdminEODDetail() {
           </Section>
         )}
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title={confirmTitle}
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          if (confirmNavigate) {
+            navigate("/admin/approvals");
+          }
+        }}
+      />
     </AppLayout>
   );
 }

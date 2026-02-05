@@ -13,7 +13,6 @@ type SOASummaryRow = {
   assignment_date: string;
   cash_picked: number;
   cash_loaded: number;
-  cash_adjusted: number;
   excess_reported: number;
   travel_km: number;
   travel_allowance: number;
@@ -30,7 +29,6 @@ type SOADetailedRow = {
   opening_balance: number;
   total_withdrawals: number;
   total_loads: number;
-  net_adjustments: number;
   exchange_count: number;
   transfer_count: number;
   excess_reported: number;
@@ -73,7 +71,6 @@ export default function StatementOfAccounts() {
                 assignment_date,
                 cash_picked,
                 cash_loaded,
-                cash_adjusted,
                 excess_reported,
                 travel_km,
                 travel_allowance,
@@ -86,7 +83,6 @@ export default function StatementOfAccounts() {
                 opening_balance,
                 total_withdrawals,
                 total_loads,
-                net_adjustments,
                 exchange_count,
                 transfer_count,
                 excess_reported,
@@ -164,9 +160,7 @@ export default function StatementOfAccounts() {
 
   const getClosingBalance = (row: SOADetailedRow) =>
     row.opening_balance +
-    row.total_withdrawals -
     row.total_loads +
-    row.net_adjustments +
     row.travel_allowance;
 
   // Calculate totals
@@ -189,7 +183,6 @@ export default function StatementOfAccounts() {
         acc.opening += r.opening_balance;
         acc.withdrawals += r.total_withdrawals;
         acc.loads += r.total_loads;
-        acc.adjustments += r.net_adjustments;
         acc.allowance += r.travel_allowance;
         acc.closing += getClosingBalance(r);
         return acc;
@@ -198,7 +191,6 @@ export default function StatementOfAccounts() {
         opening: 0,
         withdrawals: 0,
         loads: 0,
-        adjustments: 0,
         allowance: 0,
         closing: 0,
       }
@@ -219,7 +211,6 @@ export default function StatementOfAccounts() {
           "Date",
           "Cash Picked",
           "Cash Loaded",
-          "Adjusted",
           "Excess",
           "Travel KM",
           "Allowance",
@@ -230,7 +221,6 @@ export default function StatementOfAccounts() {
           "Opening Balance",
           "Withdrawals",
           "Loads",
-          "Adjustments",
           "Exchanges",
           "Transfers",
           "Excess",
@@ -248,7 +238,6 @@ export default function StatementOfAccounts() {
             row.assignment_date,
             row.cash_picked,
             row.cash_loaded,
-            row.cash_adjusted,
             row.excess_reported,
             row.travel_km,
             row.travel_allowance,
@@ -262,7 +251,6 @@ export default function StatementOfAccounts() {
           row.opening_balance,
           row.total_withdrawals,
           row.total_loads,
-          row.net_adjustments,
           row.exchange_count,
           row.transfer_count,
           row.excess_reported,
@@ -534,9 +522,6 @@ export default function StatementOfAccounts() {
                         Loaded
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Adjusted
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
                         Excess
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
@@ -575,17 +560,6 @@ export default function StatementOfAccounts() {
                           {r.cash_loaded.toLocaleString("en-IN", {
                             minimumFractionDigits: 2,
                           })}
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-900">
-                          <span
-                            className={
-                              r.cash_adjusted !== 0 ? "font-semibold" : ""
-                            }
-                          >
-                            {r.cash_adjusted.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                            })}
-                          </span>
                         </td>
                         <td className="px-4 py-3 text-right text-slate-900">
                           <span
@@ -635,7 +609,7 @@ export default function StatementOfAccounts() {
                           minimumFractionDigits: 2,
                         })}
                       </td>
-                      <td colSpan={3}></td>
+                      <td colSpan={2}></td>
                       <td className="px-4 py-3 text-right font-semibold text-slate-900">
                         {summaryTotals.allowance.toLocaleString("en-IN", {
                           minimumFractionDigits: 2,
@@ -669,9 +643,6 @@ export default function StatementOfAccounts() {
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
                         Loads
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Adjustments
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
                         Exchanges
@@ -723,19 +694,6 @@ export default function StatementOfAccounts() {
                             {r.total_loads.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                             })}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            <span
-                              className={
-                                r.net_adjustments !== 0
-                                  ? "font-semibold"
-                                  : ""
-                              }
-                            >
-                              {r.net_adjustments.toLocaleString("en-IN", {
-                                minimumFractionDigits: 2,
-                              })}
-                            </span>
                           </td>
                           <td className="px-4 py-3 text-right text-slate-900">
                             {r.exchange_count}
@@ -799,17 +757,13 @@ export default function StatementOfAccounts() {
                           minimumFractionDigits: 2,
                         })}
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {detailedTotals.adjustments.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td colSpan={3}></td>
+                      <td colSpan={2}></td>
                       <td className="px-4 py-3 text-right font-semibold text-slate-900">
                         {detailedTotals.allowance.toLocaleString("en-IN", {
                           minimumFractionDigits: 2,
                         })}
                       </td>
+                      <td></td>
                       <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
                         {detailedTotals.closing.toLocaleString("en-IN", {
                           minimumFractionDigits: 2,

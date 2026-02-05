@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
@@ -97,7 +98,10 @@ export default function ATMReplenishment() {
 
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
 
   // Travel log integration (optional, non-blocking)
   const [captureTravelLog, setCaptureTravelLog] = useState(true);
@@ -108,26 +112,29 @@ export default function ATMReplenishment() {
   useEffect(() => {
     if (!profile) return;
 
-    (async () => {
+    async function loadData() {
       const today = getISTDateString();
 
-      const { data: a } = await supabase
+      const { data: assignment } = await supabase
         .from("assignments")
         .select("id")
         .eq("custodian_id", profile.id)
         .eq("assignment_date", today)
         .single();
 
-      if (!a) return;
-      setAssignmentId(a.id);
+      if (!assignment) return;
+
+      setAssignmentId(assignment.id);
 
       const { data } = await supabase
         .from("route_sites")
         .select("site:sites(id, bank_name, address, latitude, longitude)")
-        .eq("assignment_id", a.id);
+        .eq("assignment_id", assignment.id);
 
       setSites((data || []).map((r: any) => r.site));
-    })();
+    }
+
+    loadData();
   }, [profile]);
 
   /* ---------------- Load denomination plan (read-only preview) ---------------- */
@@ -421,8 +428,23 @@ export default function ATMReplenishment() {
 
   /* ---------------- Save ---------------- */
 
+  function resetForm() {
+    setSiteId(null);
+    setTimeIn(null);
+    setRemarks("");
+    setDenoms({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
+    setDenomSource(null);
+    setGpsStatus("unknown");
+    setGpsMsg(null);
+    setDistance(null);
+    setLat(null);
+    setLng(null);
+    setPhoto(null);
+    setSubmitLocked(false);
+  }
+
   async function saveLoad() {
-    if (saving) return;
+    if (saving || submitLocked) return;
     setError(null);
 
     // Validate cash availability before proceeding
@@ -545,21 +567,12 @@ export default function ATMReplenishment() {
       }
     }
 
-    // Reset
-    setSiteId(null);
-    setTimeIn(null);
-    setRemarks("");
-    setDenoms({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
-    setDenomSource(null);
-    setGpsStatus("unknown");
-    setGpsMsg(null);
-    setDistance(null);
-    setLat(null);
-    setLng(null);
-    setPhoto(null);
     setSaving(false);
-
-    alert("ATM Load saved successfully");
+    setSubmitLocked(true);
+    setConfirmMessage(
+      `ATM Load completed successfully for ${site?.bank_name || "site"}.`
+    );
+    setShowConfirm(true);
   }
 
   /* ---------------- UI ---------------- */
@@ -1022,6 +1035,7 @@ export default function ATMReplenishment() {
             onClick={saveLoad}
             disabled={
               saving ||
+              submitLocked ||
               Object.keys(validationErrors).length > 0 ||
               totalCashError !== null ||
               totalNotes === 0
@@ -1045,6 +1059,17 @@ export default function ATMReplenishment() {
           </button>
         </div>
       </div>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="ATM Load Saved"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          resetForm();
+        }}
+      />
     </AppLayout>
   );
 }

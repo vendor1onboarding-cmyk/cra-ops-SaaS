@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../../api/supabaseClient";
+import ConfirmationModal from "../../components/ConfirmationModal";
 
 interface SiteFormData {
   site_code: string;
@@ -30,7 +31,10 @@ export default function ATMSiteOnboarding() {
   const [formData, setFormData] = useState<SiteFormData>(INITIAL_FORM_DATA);
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [saving, setSaving] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
 
   const updateField = (field: keyof SiteFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -178,6 +182,7 @@ export default function ATMSiteOnboarding() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLocked || saving) return;
     setErrors([]);
     setSuccessMessage(null);
 
@@ -248,9 +253,11 @@ export default function ATMSiteOnboarding() {
       setSuccessMessage(
         `✓ Site "${displayName}" onboarded successfully (ID: ${newSite.id})`
       );
-
-      // Reset form
-      setFormData(INITIAL_FORM_DATA);
+      setSubmitLocked(true);
+      setConfirmMessage(
+        `ATM site onboarded successfully for ${displayName}.`
+      );
+      setShowConfirm(true);
     } catch (err: any) {
       console.error("Unexpected error:", err);
       setErrors([
@@ -268,6 +275,7 @@ export default function ATMSiteOnboarding() {
     setFormData(INITIAL_FORM_DATA);
     setErrors([]);
     setSuccessMessage(null);
+    setSubmitLocked(false);
   };
 
   const getFieldError = (field: keyof SiteFormData) =>
@@ -500,7 +508,7 @@ export default function ATMSiteOnboarding() {
         <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-200">
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || submitLocked}
             className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             {saving ? "Creating Site..." : "Create ATM Site"}
@@ -515,6 +523,17 @@ export default function ATMSiteOnboarding() {
           </button>
         </div>
       </section>
+
+      <ConfirmationModal
+        open={showConfirm}
+        title="ATM Site Saved"
+        message={confirmMessage}
+        confirmLabel="Done"
+        onConfirm={() => {
+          setShowConfirm(false);
+          handleReset();
+        }}
+      />
     </form>
   );
 }
