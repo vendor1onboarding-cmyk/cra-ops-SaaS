@@ -300,10 +300,6 @@ SELECT
       ) FROM atm_replenishments ar WHERE ar.assignment_id = a.id),
       0
     )
-    + COALESCE(
-      (SELECT SUM(tl.allowance_amount) FROM travel_logs tl WHERE tl.assignment_id = a.id),
-      0
-    )
   ) as final_net_cash_position,
   a.created_at as posted_at
 FROM assignments a;
@@ -350,7 +346,7 @@ BEGIN
   FROM v_soa_detailed
   WHERE assignment_id = p_assignment_id;
   
-  v_closing := v_opening - v_loads + v_allowance;
+  v_closing := v_opening - v_loads;
   
   RETURN v_closing;
 END;
@@ -358,7 +354,7 @@ $$;
 
 COMMENT ON FUNCTION calculate_closing_balance IS 
 'Calculate closing balance for a given assignment.
-Formula: Opening + Withdrawals - Loads + Allowance = Closing';
+Formula: Opening + Withdrawals - Loads = Closing';
 
 
 -- ============================================

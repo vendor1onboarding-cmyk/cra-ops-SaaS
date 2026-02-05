@@ -50,6 +50,10 @@ export default function StatementOfAccounts() {
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "open" | "submitted" | "approved" | "rejected"
   >("ALL");
+  const [custodianFilter, setCustodianFilter] = useState("ALL");
+  const [custodianOptions, setCustodianOptions] = useState<
+    { id: string; full_name: string }[]
+  >([]);
 
   // Initialize dates based on IST timezone
   // These are used for database queries (stored in DATE format, not timestamps)
@@ -104,6 +108,10 @@ export default function StatementOfAccounts() {
         // 🔐 Custodian isolation - custodians see only their records
         if (profile.role === "custodian") {
           query = query.eq("custodian_id", profile.id);
+        }
+
+        if (isAdmin && custodianFilter !== "ALL") {
+          query = query.eq("custodian_id", custodianFilter);
         }
 
         const { data, error: queryError } = await query;
@@ -186,13 +194,27 @@ export default function StatementOfAccounts() {
     }
 
     loadSOA();
-  }, [profile, fromDate, toDate, isAdmin, viewMode, statusFilter]);
+  }, [profile, fromDate, toDate, isAdmin, viewMode, statusFilter, custodianFilter]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    async function loadCustodians() {
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("role", "custodian")
+        .order("full_name", { ascending: true });
+
+      setCustodianOptions(data || []);
+    }
+
+    loadCustodians();
+  }, [isAdmin]);
 
 
   const getClosingBalance = (row: SOADetailedRow) =>
-    row.opening_balance +
-    row.total_loads +
-    row.travel_allowance;
+    row.opening_balance - row.total_loads;
 
   // Calculate totals
   const summaryTotals = useMemo(() => {
@@ -419,6 +441,26 @@ export default function StatementOfAccounts() {
                 <option value="rejected">Rejected</option>
               </select>
             </div>
+
+            {isAdmin && (
+              <div className="w-full sm:w-auto">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Custodian
+                </label>
+                <select
+                  value={custodianFilter}
+                  onChange={(e) => setCustodianFilter(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="ALL">All Custodians</option>
+                  {custodianOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.full_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="flex gap-2 w-full sm:w-auto">
                 <div className="flex rounded-lg border border-slate-200 overflow-hidden">
