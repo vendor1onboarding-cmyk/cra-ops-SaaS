@@ -392,6 +392,28 @@ export default function ATMReplenishment() {
   const plannedTotalNotes = plannedBreakup.reduce((a, d) => a + d.count, 0);
   const plannedTotalAmount = plannedBreakup.reduce((a, d) => a + d.amount, 0);
 
+  const remainingCash = Object.entries(DENOM_VALUES).reduce(
+    (acc, [key]) => {
+      const available = availableCash[key as keyof typeof availableCash] || 0;
+      const entered = denoms[key as keyof typeof denoms] || 0;
+      const remaining = Math.max(0, available - entered);
+      acc[key as keyof typeof availableCash] = remaining;
+      return acc;
+    },
+    {
+      denom_100: 0,
+      denom_200: 0,
+      denom_500: 0,
+      denom_2000: 0,
+    } as typeof availableCash
+  );
+
+  const remainingTotalAmount =
+    remainingCash.denom_100 * 100 +
+    remainingCash.denom_200 * 200 +
+    remainingCash.denom_500 * 500 +
+    remainingCash.denom_2000 * 2000;
+
   /* Validate on denomination change (after totalNotes is defined) */
   useEffect(() => {
     validateCashAvailability();
@@ -784,38 +806,51 @@ export default function ATMReplenishment() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-green-700 font-semibold">
-                      Cash-in-Hand (Live)
+                      Remaining Cash-in-Hand (Live)
                     </p>
                     <p className="text-xs text-slate-500">
                       Updates instantly as you edit the load.
                     </p>
                   </div>
                   <span className="text-xs font-semibold text-slate-600">
-                    Total Notes: {totalNotes}
+                    Remaining Total: ₹{remainingTotalAmount.toLocaleString("en-IN")}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {denomBreakup.map((d) => (
+                  {denomBreakup.map((d) => {
+                    const remaining =
+                      remainingCash[d.key as keyof typeof remainingCash];
+                    const isZero = remaining === 0;
+                    return (
                     <div
                       key={d.key}
-                      className="rounded-md border border-slate-200 bg-white px-3 py-2"
+                      className={`rounded-md border px-3 py-2 ${
+                        isZero
+                          ? "border-amber-200 bg-amber-50"
+                          : "border-slate-200 bg-white"
+                      }`}
                     >
                       <div className="text-xs text-slate-500">₹{d.value}</div>
-                      <div className="text-sm font-semibold text-slate-800">
-                        {d.count}
+                      <div
+                        className={`text-sm font-semibold ${
+                          isZero ? "text-amber-900" : "text-slate-800"
+                        }`}
+                      >
+                        {remaining}
                       </div>
                       <div className="text-xs text-slate-500">
-                        ₹{d.amount.toLocaleString("en-IN")}
+                        ₹{(remaining * d.value).toLocaleString("en-IN")}
                       </div>
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200 pt-2">
-                  <span>Live Total</span>
+                  <span>Remaining Total</span>
                   <span className="font-semibold text-slate-800">
-                    ₹{totalAmount.toLocaleString("en-IN")}
+                    ₹{remainingTotalAmount.toLocaleString("en-IN")}
                   </span>
                 </div>
               </div>
@@ -825,38 +860,51 @@ export default function ATMReplenishment() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                    Cash-in-Hand (Live)
+                    Remaining Cash-in-Hand (Live)
                   </p>
                   <p className="text-xs text-slate-500">
                     Updates instantly as you edit the ATM load denominations.
                   </p>
                 </div>
                 <span className="text-xs font-semibold text-slate-600">
-                  Total Notes: {totalNotes}
+                  Remaining Total: ₹{remainingTotalAmount.toLocaleString("en-IN")}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {denomBreakup.map((d) => (
+                {denomBreakup.map((d) => {
+                  const remaining =
+                    remainingCash[d.key as keyof typeof remainingCash];
+                  const isZero = remaining === 0;
+                  return (
                   <div
                     key={d.key}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-2"
+                    className={`rounded-md border px-3 py-2 ${
+                      isZero
+                        ? "border-amber-200 bg-amber-50"
+                        : "border-slate-200 bg-white"
+                    }`}
                   >
                     <div className="text-xs text-slate-500">₹{d.value}</div>
-                    <div className="text-sm font-semibold text-slate-800">
-                      {d.count}
+                    <div
+                      className={`text-sm font-semibold ${
+                        isZero ? "text-amber-900" : "text-slate-800"
+                      }`}
+                    >
+                      {remaining}
                     </div>
                     <div className="text-xs text-slate-500">
-                      ₹{d.amount.toLocaleString("en-IN")}
+                      ₹{(remaining * d.value).toLocaleString("en-IN")}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200 pt-2">
-                <span>Live Total</span>
+                <span>Remaining Total</span>
                 <span className="font-semibold text-slate-800">
-                  ₹{totalAmount.toLocaleString("en-IN")}
+                  ₹{remainingTotalAmount.toLocaleString("en-IN")}
                 </span>
               </div>
             </div>
