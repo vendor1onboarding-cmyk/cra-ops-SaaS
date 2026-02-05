@@ -14,6 +14,8 @@ import CashPickupPage from "./pages/CashPickup";
 import ATMReplenishmentPage from "./pages/ATMReplenishment";
 import ATMExcessCashPage from "./pages/ATMExcessCash";
 import ATMCashAdjustmentPage from "./pages/ATMCashAdjustment";
+import DenominationExchange from "./pages/DenominationExchange";
+import InterSiteTransfer from "./pages/InterSiteTransfer";
 import TechnicalIssuesPage from "./pages/TechnicalIssues";
 import EODSummaryPage from "./pages/EODSummary";
 import TravelTrackingPage from "./pages/TravelTracking";
@@ -114,6 +116,24 @@ export default function App() {
           element={
             <PrivateRoute>
               <ATMCashAdjustmentPage />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/denomination-exchange"
+          element={
+            <PrivateRoute>
+              <DenominationExchange />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/inter-site-transfer"
+          element={
+            <PrivateRoute>
+              <InterSiteTransfer />
             </PrivateRoute>
           }
         />

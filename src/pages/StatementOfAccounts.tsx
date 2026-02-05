@@ -8,7 +8,7 @@ import {
   formatISTDate,
 } from "../utils/time";
 
-type SOARow = {
+type SOASummaryRow = {
   soa_id: number;
   assignment_date: string;
   cash_picked: number;
@@ -23,9 +23,28 @@ type SOARow = {
   full_name?: string;
 };
 
+type SOADetailedRow = {
+  assignment_id: number;
+  custodian_id?: string;
+  assignment_date: string;
+  opening_balance: number;
+  total_withdrawals: number;
+  total_loads: number;
+  net_adjustments: number;
+  exchange_count: number;
+  transfer_count: number;
+  excess_reported: number;
+  travel_km: number;
+  travel_allowance: number;
+  status?: string;
+  full_name?: string;
+};
+
 export default function StatementOfAccounts() {
   const { profile } = useAuth();
-  const [rows, setRows] = useState<SOARow[]>([]);
+  const [viewMode, setViewMode] = useState<"summary" | "detailed">("summary");
+  const [summaryRows, setSummaryRows] = useState<SOASummaryRow[]>([]);
+  const [detailedRows, setDetailedRows] = useState<SOADetailedRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,21 +62,37 @@ export default function StatementOfAccounts() {
       setLoading(true);
       setError(null);
 
+      const isSummary = viewMode === "summary";
+
       try {
         let query = supabase
-          .from("v_soa_effective")
+          .from(isSummary ? "v_soa_effective" : "v_soa_detailed")
           .select(
-            `soa_id,
-            assignment_date,
-            cash_picked,
-            cash_loaded,
-            cash_adjusted,
-            excess_reported,
-            travel_km,
-            travel_allowance,
-            final_net_cash_position,
-            posted_at,
-            custodian_id`
+            isSummary
+              ? `soa_id,
+                assignment_date,
+                cash_picked,
+                cash_loaded,
+                cash_adjusted,
+                excess_reported,
+                travel_km,
+                travel_allowance,
+                final_net_cash_position,
+                posted_at,
+                custodian_id`
+              : `assignment_id,
+                custodian_id,
+                assignment_date,
+                opening_balance,
+                total_withdrawals,
+                total_loads,
+                net_adjustments,
+                exchange_count,
+                transfer_count,
+                excess_reported,
+                travel_km,
+                travel_allowance,
+                status`
           )
           .gte("assignment_date", fromDate)
           .lte("assignment_date", toDate)
@@ -73,11 +108,16 @@ export default function StatementOfAccounts() {
         if (queryError) {
           setError("Failed to load SOA records. Please try again.");
           console.error("SOA Query Error:", queryError);
-          setRows([]);
+          if (isSummary) {
+            setSummaryRows([]);
+          } else {
+            setDetailedRows([]);
+          }
         } else {
-          // Fetch custodian names for admin view
           if (isAdmin && data && data.length > 0) {
-            const custodianIds = [...new Set(data.map((r: any) => r.custodian_id))];
+            const custodianIds = [
+              ...new Set(data.map((r: any) => r.custodian_id)),
+            ];
             const { data: custodians } = await supabase
               .from("profiles")
               .select("id, full_name")
@@ -91,27 +131,47 @@ export default function StatementOfAccounts() {
               ...row,
               full_name: custodianMap.get(row.custodian_id) || "Unknown",
             }));
-            setRows(processedData);
+
+            if (isSummary) {
+              setSummaryRows(processedData);
+            } else {
+              setDetailedRows(processedData);
+            }
           } else {
-            setRows(data || []);
+            if (isSummary) {
+              setSummaryRows(data || []);
+            } else {
+              setDetailedRows(data || []);
+            }
           }
         }
       } catch (err) {
         setError("An unexpected error occurred while loading SOA records.");
         console.error("Unexpected Error:", err);
-        setRows([]);
+        if (viewMode === "summary") {
+          setSummaryRows([]);
+        } else {
+          setDetailedRows([]);
+        }
       } finally {
         setLoading(false);
       }
     }
 
     loadSOA();
-  }, [profile, fromDate, toDate, isAdmin]);
+  }, [profile, fromDate, toDate, isAdmin, viewMode]);
 
+
+  const getClosingBalance = (row: SOADetailedRow) =>
+    row.opening_balance +
+    row.total_withdrawals -
+    row.total_loads +
+    row.net_adjustments +
+    row.travel_allowance;
 
   // Calculate totals
-  const totals = useMemo(() => {
-    return rows.reduce(
+  const summaryTotals = useMemo(() => {
+    return summaryRows.reduce(
       (acc, r) => {
         acc.cashPicked += r.cash_picked;
         acc.cashLoaded += r.cash_loaded;
@@ -121,39 +181,96 @@ export default function StatementOfAccounts() {
       },
       { cashPicked: 0, cashLoaded: 0, allowance: 0, net: 0 }
     );
-  }, [rows]);
+  }, [summaryRows]);
+
+  const detailedTotals = useMemo(() => {
+    return detailedRows.reduce(
+      (acc, r) => {
+        acc.opening += r.opening_balance;
+        acc.withdrawals += r.total_withdrawals;
+        acc.loads += r.total_loads;
+        acc.adjustments += r.net_adjustments;
+        acc.allowance += r.travel_allowance;
+        acc.closing += getClosingBalance(r);
+        return acc;
+      },
+      {
+        opening: 0,
+        withdrawals: 0,
+        loads: 0,
+        adjustments: 0,
+        allowance: 0,
+        closing: 0,
+      }
+    );
+  }, [detailedRows]);
 
   function exportCSV() {
-    if (rows.length === 0) {
+    const isSummary = viewMode === "summary";
+    const exportRows = isSummary ? summaryRows : detailedRows;
+
+    if (exportRows.length === 0) {
       alert("No records to export");
       return;
     }
 
-    const header = [
-      "Date",
-      "Cash Picked",
-      "Cash Loaded",
-      "Adjusted",
-      "Excess",
-      "Travel KM",
-      "Allowance",
-      "Final Net Position",
-    ];
+    const header = isSummary
+      ? [
+          "Date",
+          "Cash Picked",
+          "Cash Loaded",
+          "Adjusted",
+          "Excess",
+          "Travel KM",
+          "Allowance",
+          "Final Net Position",
+        ]
+      : [
+          "Date",
+          "Opening Balance",
+          "Withdrawals",
+          "Loads",
+          "Adjustments",
+          "Exchanges",
+          "Transfers",
+          "Excess",
+          "Travel KM",
+          "Allowance",
+          "Closing Balance",
+        ];
 
     const csv = [
       header.join(","),
-      ...rows.map((r) =>
-        [
-          r.assignment_date,
-          r.cash_picked,
-          r.cash_loaded,
-          r.cash_adjusted,
-          r.excess_reported,
-          r.travel_km,
-          r.travel_allowance,
-          r.final_net_cash_position,
-        ].join(",")
-      ),
+      ...exportRows.map((r) => {
+        if (isSummary) {
+          const row = r as SOASummaryRow;
+          return [
+            row.assignment_date,
+            row.cash_picked,
+            row.cash_loaded,
+            row.cash_adjusted,
+            row.excess_reported,
+            row.travel_km,
+            row.travel_allowance,
+            row.final_net_cash_position,
+          ].join(",");
+        }
+
+        const row = r as SOADetailedRow;
+        return [
+          row.assignment_date,
+          row.opening_balance,
+          row.total_withdrawals,
+          row.total_loads,
+          row.net_adjustments,
+          row.exchange_count,
+          row.transfer_count,
+          row.excess_reported,
+          row.travel_km,
+          row.travel_allowance,
+          getClosingBalance(row),
+        ].join(",");
+      }),
     ].join("\n");
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -247,9 +364,39 @@ export default function StatementOfAccounts() {
             </div>
 
             <div className="flex gap-2 w-full sm:w-auto">
+                <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("summary")}
+                    className={`px-3 py-2 text-xs font-semibold transition-colors ${
+                      viewMode === "summary"
+                        ? "bg-primary text-white"
+                        : "bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Summary
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("detailed")}
+                    className={`px-3 py-2 text-xs font-semibold transition-colors ${
+                      viewMode === "detailed"
+                        ? "bg-primary text-white"
+                        : "bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Detailed
+                  </button>
+                </div>
+
               <button
                 onClick={exportCSV}
-                disabled={loading || rows.length === 0}
+                  disabled={
+                    loading ||
+                    (viewMode === "summary"
+                      ? summaryRows.length === 0
+                      : detailedRows.length === 0)
+                  }
                 className="flex-1 sm:flex-none btn-secondary"
                 title="Export current records to CSV"
               >
@@ -277,29 +424,59 @@ export default function StatementOfAccounts() {
         </div>
 
         {/* ===== KPI Section ===== */}
-        {!loading && (
+        {!loading && viewMode === "summary" && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             <KPI
               label="Total Picked"
-              value={totals.cashPicked}
+              value={summaryTotals.cashPicked}
               subtext="₹"
               color="blue"
             />
             <KPI
               label="Total Loaded"
-              value={totals.cashLoaded}
+              value={summaryTotals.cashLoaded}
               subtext="₹"
               color="green"
             />
             <KPI
               label="Travel Allowance"
-              value={totals.allowance}
+              value={summaryTotals.allowance}
               subtext="₹"
               color="amber"
             />
             <KPI
               label="Net Position"
-              value={totals.net}
+              value={summaryTotals.net}
+              subtext="₹"
+              color="indigo"
+              highlight
+            />
+          </div>
+        )}
+
+        {!loading && viewMode === "detailed" && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <KPI
+              label="Opening Balance"
+              value={detailedTotals.opening}
+              subtext="₹"
+              color="blue"
+            />
+            <KPI
+              label="Withdrawals"
+              value={detailedTotals.withdrawals}
+              subtext="₹"
+              color="green"
+            />
+            <KPI
+              label="Loads"
+              value={detailedTotals.loads}
+              subtext="₹"
+              color="amber"
+            />
+            <KPI
+              label="Closing Balance"
+              value={detailedTotals.closing}
               subtext="₹"
               color="indigo"
               highlight
@@ -328,7 +505,9 @@ export default function StatementOfAccounts() {
                 Retry
               </button>
             </div>
-          ) : rows.length === 0 ? (
+          ) : (viewMode === "summary"
+              ? summaryRows.length === 0
+              : detailedRows.length === 0) ? (
             <div className="p-8 text-center">
               <p className="text-sm text-slate-600">
                 No SOA records found for the selected period.
@@ -336,139 +515,310 @@ export default function StatementOfAccounts() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-100 border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                      Date
-                    </th>
-                    {isAdmin && (
+              {viewMode === "summary" ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-100 border-b border-slate-200">
+                    <tr>
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Custodian
+                        Date
                       </th>
-                    )}
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      Picked
-                    </th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      Loaded
-                    </th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      Adjusted
-                    </th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      Excess
-                    </th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      KM
-                    </th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      Allowance
-                    </th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                      Final Net
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {rows.map((r, idx) => (
-                    <tr
-                      key={idx}
-                      className="hover:bg-slate-50 transition-colors"
-                    >
-                      <td className="px-4 py-3 text-slate-900">
-                        {formatISTDate(r.assignment_date, "short")}
-                      </td>
                       {isAdmin && (
-                        <td className="px-4 py-3 text-slate-700">
-                          <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
-                            {r.full_name || "Unknown"}
+                        <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                          Custodian
+                        </th>
+                      )}
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Picked
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Loaded
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Adjusted
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Excess
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        KM
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Allowance
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Final Net
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {summaryRows.map((r, idx) => (
+                      <tr
+                        key={idx}
+                        className="hover:bg-slate-50 transition-colors"
+                      >
+                        <td className="px-4 py-3 text-slate-900">
+                          {formatISTDate(r.assignment_date, "short")}
+                        </td>
+                        {isAdmin && (
+                          <td className="px-4 py-3 text-slate-700">
+                            <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
+                              {r.full_name || "Unknown"}
+                            </span>
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-right text-slate-900">
+                          {r.cash_picked.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-900">
+                          {r.cash_loaded.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-900">
+                          <span
+                            className={
+                              r.cash_adjusted !== 0 ? "font-semibold" : ""
+                            }
+                          >
+                            {r.cash_adjusted.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
                           </span>
                         </td>
-                      )}
-                      <td className="px-4 py-3 text-right text-slate-900">
-                        {r.cash_picked.toLocaleString("en-IN", {
+                        <td className="px-4 py-3 text-right text-slate-900">
+                          <span
+                            className={
+                              r.excess_reported > 0
+                                ? "text-red-600 font-semibold"
+                                : ""
+                            }
+                          >
+                            {r.excess_reported.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-900">
+                          {r.travel_km}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-900">
+                          {r.travel_allowance.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="inline-block bg-indigo-100 text-indigo-900 rounded px-2 py-1 font-semibold text-xs">
+                            {r.final_net_cash_position.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {/* Table Footer Summary */}
+                  <tfoot className="bg-slate-50 border-t border-slate-200">
+                    <tr>
+                      <td className="px-4 py-3 font-semibold text-slate-900">
+                        Total ({summaryRows.length} records)
+                      </td>
+                      {isAdmin && <td></td>}
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {summaryTotals.cashPicked.toLocaleString("en-IN", {
                           minimumFractionDigits: 2,
                         })}
                       </td>
-                      <td className="px-4 py-3 text-right text-slate-900">
-                        {r.cash_loaded.toLocaleString("en-IN", {
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {summaryTotals.cashLoaded.toLocaleString("en-IN", {
                           minimumFractionDigits: 2,
                         })}
                       </td>
-                      <td className="px-4 py-3 text-right text-slate-900">
-                        <span
-                          className={
-                            r.cash_adjusted !== 0 ? "font-semibold" : ""
-                          }
-                        >
-                          {r.cash_adjusted.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-900">
-                        <span
-                          className={
-                            r.excess_reported > 0
-                              ? "text-red-600 font-semibold"
-                              : ""
-                          }
-                        >
-                          {r.excess_reported.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-900">
-                        {r.travel_km}
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-900">
-                        {r.travel_allowance.toLocaleString("en-IN", {
+                      <td colSpan={3}></td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {summaryTotals.allowance.toLocaleString("en-IN", {
                           minimumFractionDigits: 2,
                         })}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="inline-block bg-indigo-100 text-indigo-900 rounded px-2 py-1 font-semibold text-xs">
-                          {r.final_net_cash_position.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
+                      <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
+                        {summaryTotals.net.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-                {/* Table Footer Summary */}
-                <tfoot className="bg-slate-50 border-t border-slate-200">
-                  <tr>
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      Total ({rows.length} records)
-                    </td>
-                    {isAdmin && <td></td>}
-                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                      {totals.cashPicked.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                      {totals.cashLoaded.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td colSpan={3}></td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                      {totals.allowance.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
-                      {totals.net.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+                  </tfoot>
+                </table>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-100 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Date
+                      </th>
+                      {isAdmin && (
+                        <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                          Custodian
+                        </th>
+                      )}
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Opening
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Withdrawals
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Loads
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Adjustments
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Exchanges
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Transfers
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Allowance
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Excess
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Closing
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {detailedRows.map((r, idx) => {
+                      const closing = getClosingBalance(r);
+                      const balanced = Math.abs(closing) < 0.01;
+                      return (
+                        <tr
+                          key={idx}
+                          className="hover:bg-slate-50 transition-colors"
+                        >
+                          <td className="px-4 py-3 text-slate-900">
+                            {formatISTDate(r.assignment_date, "short")}
+                          </td>
+                          {isAdmin && (
+                            <td className="px-4 py-3 text-slate-700">
+                              <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
+                                {r.full_name || "Unknown"}
+                              </span>
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            {r.opening_balance.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            {r.total_withdrawals.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            {r.total_loads.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            <span
+                              className={
+                                r.net_adjustments !== 0
+                                  ? "font-semibold"
+                                  : ""
+                              }
+                            >
+                              {r.net_adjustments.toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                              })}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            {r.exchange_count}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            {r.transfer_count}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            {r.travel_allowance.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-900">
+                            <span
+                              className={
+                                r.excess_reported > 0
+                                  ? "text-red-600 font-semibold"
+                                  : ""
+                              }
+                            >
+                              {r.excess_reported.toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                              })}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span
+                              className={`inline-block rounded px-2 py-1 font-semibold text-xs ${
+                                balanced
+                                  ? "bg-emerald-100 text-emerald-900"
+                                  : "bg-amber-100 text-amber-900"
+                              }`}
+                            >
+                              {closing.toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                              })}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t border-slate-200">
+                    <tr>
+                      <td className="px-4 py-3 font-semibold text-slate-900">
+                        Total ({detailedRows.length} records)
+                      </td>
+                      {isAdmin && <td></td>}
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {detailedTotals.opening.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {detailedTotals.withdrawals.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {detailedTotals.loads.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {detailedTotals.adjustments.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </td>
+                      <td colSpan={3}></td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                        {detailedTotals.allowance.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
+                        {detailedTotals.closing.toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
             </div>
           )}
         </div>
