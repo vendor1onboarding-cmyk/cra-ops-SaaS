@@ -24,6 +24,8 @@ function denomTotal(row: any) {
   );
 }
 
+const DENOM_ORDER = [100, 200, 500, 2000];
+
 /* ---------------- Component ---------------- */
 export default function AdminEODDetail() {
   const { assignmentId } = useParams();
@@ -47,6 +49,8 @@ export default function AdminEODDetail() {
     denominations: [],
     cashPickups: [],
     atmLoads: [],
+    excessCash: [],
+    adjustments: [],
     issues: [],
     travel: [],
   });
@@ -74,6 +78,8 @@ export default function AdminEODDetail() {
         denominations,
         cashPickups,
         atmLoads,
+        excessCash,
+        adjustments,
         issues,
         travel,
       ] = await Promise.all([
@@ -99,6 +105,18 @@ export default function AdminEODDetail() {
           .eq("assignment_id", id),
 
         supabase
+          .from("atm_excess_cash")
+          .select(`*, site:site_id(*)`)
+          .eq("assignment_id", id),
+
+        supabase
+          .from("soa_adjustments")
+          .select("adjustment_type, exchange_metadata, transfer_metadata, created_at")
+          .eq("assignment_id", id)
+          .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"])
+          .order("created_at", { ascending: true }),
+
+        supabase
           .from("technical_issues")
           .select(`*, site:site_id(*)`)
           .eq("assignment_id", id),
@@ -115,6 +133,8 @@ export default function AdminEODDetail() {
         denominations: denominations.data || [],
         cashPickups: cashPickups.data || [],
         atmLoads: atmLoads.data || [],
+        excessCash: excessCash.data || [],
+        adjustments: adjustments.data || [],
         issues: issues.data || [],
         travel: travel.data || [],
       });
@@ -141,17 +161,62 @@ export default function AdminEODDetail() {
     );
   }
 
+  const exchanges = (data.adjustments || []).filter(
+    (a: any) => a.adjustment_type === "EXCHANGE"
+  );
+  const transfers = (data.adjustments || []).filter(
+    (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
+  );
+
+  const totalPicked = (data.cashPickups || []).reduce(
+    (sum: number, row: any) => sum + denomTotal(row),
+    0
+  );
+  const totalLoaded = (data.atmLoads || []).reduce(
+    (sum: number, row: any) => sum + denomTotal(row),
+    0
+  );
+  const cashInHand = totalPicked - totalLoaded;
+  const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
+
   /* ---------------- Render ---------------- */
   return (
     <AppLayout>
       <div className="container space-y-6 text-sm">
-        <h2 className="text-xl font-semibold text-primary">
-          EOD Detail – Assignment #{assignment.id}
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <h2 className="text-xl font-semibold text-primary">
+            EOD Detail – Assignment #{assignment.id}
+          </h2>
+          <button
+            onClick={() => window.print()}
+            className="btn-secondary text-xs print:hidden"
+          >
+            🖨️ Print / PDF
+          </button>
+        </div>
 
         <Section title="Assignment Summary">
           <div>Date: {assignment.assignment_date}</div>
           <div>Status: {assignment.status}</div>
+        </Section>
+
+        <Section title="EOD Report Summary">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <div className="bg-slate-50 border border-slate-200 rounded p-3">
+              <div className="text-xs text-slate-600">Cash Picked</div>
+              <div className="font-semibold">₹{totalPicked.toLocaleString("en-IN")}</div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded p-3">
+              <div className="text-xs text-slate-600">Cash Loaded</div>
+              <div className="font-semibold">₹{totalLoaded.toLocaleString("en-IN")}</div>
+            </div>
+            <div className={`rounded p-3 border ${closingUnbalanced ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
+              <div className="text-xs text-slate-600">Cash in Hand (Expected 0)</div>
+              <div className="font-semibold">
+                ₹{cashInHand.toLocaleString("en-IN")}
+              </div>
+            </div>
+          </div>
         </Section>
 
         <Section title="Route Sites">
@@ -162,8 +227,8 @@ export default function AdminEODDetail() {
           ))}
         </Section>
 
-        <Section title="Cash Pickups (Detailed)">
-  {data.cashPickups.map((c: any, i: number) => {
+          <Section title="Cash Pickups (Detailed)">
+        {data.cashPickups.map((c: any, i: number) => {
     const total =
       (c.denom_100 || 0) * 100 +
       (c.denom_200 || 0) * 200 +
@@ -183,10 +248,9 @@ export default function AdminEODDetail() {
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-          <div>₹100 × {c.denom_100}</div>
-          <div>₹200 × {c.denom_200}</div>
-          <div>₹500 × {c.denom_500}</div>
-          <div>₹2000 × {c.denom_2000}</div>
+          {DENOM_ORDER.map((d) => (
+            <div key={d}>₹{d} × {c[`denom_${d}`] || 0}</div>
+          ))}
         </div>
 
         <div className="mt-2 font-semibold">
@@ -215,10 +279,9 @@ export default function AdminEODDetail() {
               <div className="font-medium">{formatSite(a.site)}</div>
 
               <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                <div>₹100 × {a.denom_100}</div>
-                <div>₹200 × {a.denom_200}</div>
-                <div>₹500 × {a.denom_500}</div>
-                <div>₹2000 × {a.denom_2000}</div>
+                {DENOM_ORDER.map((d) => (
+                  <div key={d}>₹{d} × {a[`denom_${d}`] || 0}</div>
+                ))}
               </div>
 
               <div className="mt-2 font-semibold">
@@ -230,6 +293,60 @@ export default function AdminEODDetail() {
                   Closing Balance: ₹{a.closing_balance}
                 </div>
               )}
+            </div>
+          ))}
+        </Section>
+
+        <Section title="Inter-Site Transfers">
+          {transfers.length === 0 && (
+            <div className="text-xs text-slate-500">No transfers recorded.</div>
+          )}
+          {transfers.map((t: any, i: number) => (
+            <div key={i} className="border rounded p-3 mb-2 text-xs">
+              <div className="font-medium">
+                {t.transfer_metadata?.source_site_name || "Source"}
+              </div>
+              <div className="text-slate-600">
+                Destinations: {t.transfer_metadata?.destinations?.length || 0}
+              </div>
+              <div className="mt-2 font-semibold">
+                Total: ₹{(t.transfer_metadata?.total_amount || 0).toLocaleString("en-IN")}
+              </div>
+            </div>
+          ))}
+        </Section>
+
+        <Section title="Denomination Exchanges">
+          {exchanges.length === 0 && (
+            <div className="text-xs text-slate-500">No exchanges recorded.</div>
+          )}
+          {exchanges.map((e: any, i: number) => (
+            <div key={i} className="border rounded p-3 mb-2 text-xs">
+              <div className="font-medium">
+                {e.exchange_metadata?.from_bank_name || "From"} → {e.exchange_metadata?.to_bank_name || "To"}
+              </div>
+              <div className="mt-2 font-semibold">
+                Total: ₹{(e.exchange_metadata?.total_amount || 0).toLocaleString("en-IN")}
+              </div>
+            </div>
+          ))}
+        </Section>
+
+        <Section title="Excess Cash">
+          {(data.excessCash || []).length === 0 && (
+            <div className="text-xs text-slate-500">No excess recorded.</div>
+          )}
+          {(data.excessCash || []).map((e: any, i: number) => (
+            <div key={i} className="border rounded p-3 mb-2 text-xs">
+              <div className="font-medium">{formatSite(e.site)}</div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {DENOM_ORDER.map((d) => (
+                  <div key={d}>₹{d} × {e[`denom_${d}`] || 0}</div>
+                ))}
+              </div>
+              <div className="mt-2 font-semibold">
+                Total: ₹{denomTotal(e)}
+              </div>
             </div>
           ))}
         </Section>

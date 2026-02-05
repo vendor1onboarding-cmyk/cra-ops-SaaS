@@ -1,4 +1,5 @@
 import React, { useEffect, useState , useRef} from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
@@ -6,6 +7,7 @@ import ConfirmationModal from "../components/ConfirmationModal";
 import SignatureCanvas from "react-signature-canvas";
 import {
   getISTDateString,
+  getISTMonthStart,
   formatISTDate,
   formatIST,
 } from "../utils/time";
@@ -18,6 +20,17 @@ function formatSite(site: any) {
   const address = site.address || site.site_code || "Location";
   const atm = site.atm_id ? ` (ATM: ${site.atm_id})` : "";
   return `${bank} – ${address}${atm}`;
+}
+
+const DENOM_ORDER = [100, 200, 500, 2000];
+
+function denomTotal(row: any) {
+  return (
+    (row.denom_100 || 0) * 100 +
+    (row.denom_200 || 0) * 200 +
+    (row.denom_500 || 0) * 500 +
+    (row.denom_2000 || 0) * 2000
+  );
 }
 
 export default function EODSummary() {
@@ -35,10 +48,27 @@ export default function EODSummary() {
   const [confirmMessage, setConfirmMessage] = useState("");
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const modalSigPadRef = useRef<any>(null);
+  const [custodianAssignments, setCustodianAssignments] = useState<any[]>([]);
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState<number | null>(null);
+  const [custodianNotice, setCustodianNotice] = useState<string | null>(null);
 
   // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
   const [issueSummary, setIssueSummary] = useState<any>(null);
+  const [eodDetails, setEodDetails] = useState<{
+    cashPickups: any[];
+    atmLoads: any[];
+    excessCash: any[];
+    adjustments: any[];
+  }>({ cashPickups: [], atmLoads: [], excessCash: [], adjustments: [] });
+
+  const [adminFromDate, setAdminFromDate] = useState(getISTMonthStart());
+  const [adminToDate, setAdminToDate] = useState(getISTDateString());
+  const [adminStatus, setAdminStatus] = useState<
+    "ALL" | "open" | "submitted" | "approved" | "rejected"
+  >("ALL");
+  const [adminCustodian, setAdminCustodian] = useState("ALL");
+  const [adminCustodians, setAdminCustodians] = useState<any[]>([]);
 
   const today = getISTDateString();
 
@@ -46,23 +76,59 @@ export default function EODSummary() {
     if (!profile) return;
 
     if (profile.role === "custodian") {
-      loadCustodianEOD();
+      loadCustodianAssignments();
     } else if (profile.role === "admin" || profile.role === "supervisor") {
       loadAdminDashboard();
     }
-  }, [profile]);
+  }, [profile, adminFromDate, adminToDate, adminStatus, adminCustodian]);
+
+  useEffect(() => {
+    if (!profile || profile.role !== "custodian") return;
+    if (!selectedAssignmentId) return;
+    loadCustodianEOD(selectedAssignmentId);
+  }, [profile, selectedAssignmentId]);
 
   // --------------------------------------------------
   // CUSTODIAN EOD SUMMARY
   // --------------------------------------------------
-  async function loadCustodianEOD() {
+  async function loadCustodianAssignments() {
+    if (!profile) return;
+    const { data } = await supabase
+      .from("assignments")
+      .select("id, assignment_date, status")
+      .eq("custodian_id", profile.id)
+      .order("assignment_date", { ascending: false })
+      .limit(30);
+
+    const rows = data || [];
+    setCustodianAssignments(rows);
+
+    const todayAssignment = rows.find((r) => r.assignment_date === today);
+    if (todayAssignment) {
+      setSelectedAssignmentId(todayAssignment.id);
+      setCustodianNotice(null);
+      return;
+    }
+
+    if (rows.length > 0) {
+      setSelectedAssignmentId(rows[0].id);
+      setCustodianNotice(
+        "No assignment for today. Showing latest available EOD."
+      );
+      return;
+    }
+
+    setSelectedAssignmentId(null);
+    setCustodianNotice("No EOD records found yet.");
+  }
+
+  async function loadCustodianEOD(assignmentId: number) {
     setLoading(true);
 
     const { data: assign } = await supabase
       .from("assignments")
       .select("*")
-      .eq("custodian_id", profile.id)
-      .eq("assignment_date", today)
+      .eq("id", assignmentId)
       .maybeSingle();
 
     if (!assign) {
@@ -91,7 +157,16 @@ export default function EODSummary() {
 
     setRouteSites(rsites || []);
 
-    const [denoms, pickups, loads, issues] = await Promise.all([
+    const [
+      denoms,
+      pickups,
+      loads,
+      issues,
+      pickupRows,
+      loadRows,
+      excessRows,
+      adjustmentRows,
+    ] = await Promise.all([
       supabase
         .from("denomination_plans")
         .select("*", { count: "exact", head: true })
@@ -108,6 +183,25 @@ export default function EODSummary() {
         .from("technical_issues")
         .select("*", { count: "exact", head: true })
         .eq("assignment_id", assign.id),
+      supabase
+        .from("cash_pickups")
+        .select("*")
+        .eq("assignment_id", assign.id)
+        .order("pickup_time", { ascending: true }),
+      supabase
+        .from("atm_replenishments")
+        .select(`*, site:site_id(*)`)
+        .eq("assignment_id", assign.id),
+      supabase
+        .from("atm_excess_cash")
+        .select(`*, site:site_id(*)`)
+        .eq("assignment_id", assign.id),
+      supabase
+        .from("soa_adjustments")
+        .select("adjustment_type, exchange_metadata, transfer_metadata, created_at")
+        .eq("assignment_id", assign.id)
+        .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"])
+        .order("created_at", { ascending: true }),
     ]);
 
     setTaskSummary({
@@ -115,6 +209,13 @@ export default function EODSummary() {
       pickupCount: pickups.count || 0,
       loadCount: loads.count || 0,
       issueCount: issues.count || 0,
+    });
+
+    setEodDetails({
+      cashPickups: pickupRows.data || [],
+      atmLoads: loadRows.data || [],
+      excessCash: excessRows.data || [],
+      adjustments: adjustmentRows.data || [],
     });
 
     setLoading(false);
@@ -157,10 +258,30 @@ export default function EODSummary() {
   async function loadAdminDashboard() {
     setLoading(true);
 
-    const { data: assigns } = await supabase
+    const { data: custodianList } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("role", "custodian")
+      .order("full_name", { ascending: true });
+
+    setAdminCustodians(custodianList || []);
+
+    let assignmentQuery = supabase
       .from("assignments")
       .select("*, custodian:custodian_id(full_name)")
-      .eq("assignment_date", today);
+      .gte("assignment_date", adminFromDate)
+      .lte("assignment_date", adminToDate)
+      .order("assignment_date", { ascending: false });
+
+    if (adminStatus !== "ALL") {
+      assignmentQuery = assignmentQuery.eq("status", adminStatus);
+    }
+
+    if (adminCustodian !== "ALL") {
+      assignmentQuery = assignmentQuery.eq("custodian_id", adminCustodian);
+    }
+
+    const { data: assigns } = await assignmentQuery;
 
     setAdminAssignments(assigns || []);
 
@@ -204,6 +325,11 @@ export default function EODSummary() {
           assignment={assignment}
           routeSites={routeSites}
           taskSummary={taskSummary}
+          eodDetails={eodDetails}
+          custodianAssignments={custodianAssignments}
+          selectedAssignmentId={selectedAssignmentId}
+          setSelectedAssignmentId={setSelectedAssignmentId}
+          custodianNotice={custodianNotice}
           onSubmit={submitEOD}
           submitting={submitting}
           submitLocked={submitLocked}
@@ -218,6 +344,15 @@ export default function EODSummary() {
           <AdminDashboard
             adminAssignments={adminAssignments}
             issueSummary={issueSummary}
+            adminFromDate={adminFromDate}
+            adminToDate={adminToDate}
+            adminStatus={adminStatus}
+            adminCustodian={adminCustodian}
+            adminCustodians={adminCustodians}
+            setAdminFromDate={setAdminFromDate}
+            setAdminToDate={setAdminToDate}
+            setAdminStatus={setAdminStatus}
+            setAdminCustodian={setAdminCustodian}
           />
         )}
       <ConfirmationModal
@@ -240,6 +375,11 @@ function CustodianEOD({
   assignment,
   routeSites,
   taskSummary,
+  eodDetails,
+  custodianAssignments,
+  selectedAssignmentId,
+  setSelectedAssignmentId,
+  custodianNotice,
   onSubmit,
   submitting,
   submitLocked,
@@ -256,6 +396,32 @@ function CustodianEOD({
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [showSignatureConfirm, setShowSignatureConfirm] = useState(false);
   const [signatureConfirmMessage, setSignatureConfirmMessage] = useState("");
+
+  const cashPickups = eodDetails?.cashPickups || [];
+  const atmLoads = eodDetails?.atmLoads || [];
+  const excessCash = eodDetails?.excessCash || [];
+  const adjustments = eodDetails?.adjustments || [];
+  const exchanges = adjustments.filter(
+    (a: any) => a.adjustment_type === "EXCHANGE"
+  );
+  const transfers = adjustments.filter(
+    (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
+  );
+
+  const totalPicked = cashPickups.reduce(
+    (sum: number, row: any) => sum + denomTotal(row),
+    0
+  );
+  const totalLoaded = atmLoads.reduce(
+    (sum: number, row: any) => sum + denomTotal(row),
+    0
+  );
+  const cashInHand = totalPicked - totalLoaded;
+  const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
+
+  const status = assignment?.status || "open";
+  const isEditable = status === "open" || status === "rejected";
+  const canSubmit = isEditable && !assignment?.eod_signed;
 
   const resizeSignatureCanvas = (
     ref: React.MutableRefObject<any>,
@@ -378,21 +544,61 @@ function CustodianEOD({
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-primary">
-        End of Day Summary – Today
-      </h2>
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold text-primary">
+          End of Day Summary
+        </h2>
+        <p className="text-xs text-slate-500">
+          Review and submit non-approved EODs. Approved EODs are read-only.
+        </p>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">
+              Select EOD Date
+            </label>
+            <select
+              value={selectedAssignmentId ?? ""}
+              onChange={(e) => setSelectedAssignmentId(Number(e.target.value))}
+              className="input w-full"
+            >
+              <option value="">-- Select --</option>
+              {custodianAssignments.map((a: any) => (
+                <option key={a.id} value={a.id}>
+                  {a.assignment_date} ({a.status})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-2 flex items-end">
+            {custodianNotice && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 w-full">
+                {custodianNotice}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {!assignment && (
-        <div className="p-4 bg-yellow-100 rounded">
-          No assignment created for today.
+        <div className="p-4 bg-yellow-100 rounded text-sm">
+          No EOD available for the selected date.
         </div>
       )}
 
       {assignment && (
         <>
           <div className={`p-4 rounded shadow text-sm ${assignment.eod_signed ? 'bg-green-50 border border-green-200' : 'bg-white'}`}>
-            <div className="font-semibold">Assignment ID: {assignment.id}</div>
-            <div>Status: {assignment.status}</div>
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">Assignment ID: {assignment.id}</div>
+              <span className="text-xs font-semibold px-2 py-1 rounded bg-slate-100 text-slate-700">
+                {status}
+              </span>
+            </div>
+            <div>Date: {assignment.assignment_date}</div>
             {assignment.eod_signed && (
               <div className="text-green-700 font-semibold text-xs mt-1">✓ Locked & Signed</div>
             )}
@@ -405,7 +611,7 @@ function CustodianEOD({
           )}
 
           <h3 className="font-semibold">Route Sites</h3>
-          <div className={assignment.eod_signed ? 'opacity-75 pointer-events-none' : ''}>
+          <div className={!isEditable ? 'opacity-75 pointer-events-none' : ''}>
             {routeSites.map((rs: any, idx: number) => (
               <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
                 {idx + 1}. {formatSite(rs.site)}
@@ -414,15 +620,151 @@ function CustodianEOD({
           </div>
 
           <h3 className="font-semibold">Tasks Summary</h3>
-          <div className={`grid grid-cols-2 gap-3 ${assignment.eod_signed ? 'opacity-75 pointer-events-none' : ''}`}>
+          <div className={`grid grid-cols-2 gap-3 ${!isEditable ? 'opacity-75 pointer-events-none' : ''}`}>
             <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
             <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
             <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
             <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
           </div>
 
+          <div className="mt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold">EOD Report</h3>
+              <button
+                onClick={() => window.print()}
+                className="btn-secondary text-xs print:hidden"
+              >
+                🖨️ Print / PDF
+              </button>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-4 text-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Cash Picked</span>
+                <span className="font-semibold text-slate-900">
+                  ₹{totalPicked.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Cash Loaded</span>
+                <span className="font-semibold text-slate-900">
+                  ₹{totalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Cash in Hand (Expected 0)</span>
+                <span
+                  className={`px-2 py-1 rounded text-xs font-semibold ${
+                    closingUnbalanced
+                      ? "bg-amber-100 text-amber-900"
+                      : "bg-emerald-100 text-emerald-900"
+                  }`}
+                >
+                  ₹{cashInHand.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+
+            <Section title="Withdrawals / Cash Picked">
+              {cashPickups.length === 0 && (
+                <div className="text-xs text-slate-500">No pickups recorded.</div>
+              )}
+              {cashPickups.map((c: any, i: number) => (
+                <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
+                  <div className="font-medium">
+                    {c.bank_name || "Bank"} {c.branch && `– ${c.branch}`}
+                  </div>
+                  <div className="text-slate-500">
+                    Pickup Time: {formatIST(c.pickup_time)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {DENOM_ORDER.map((d) => (
+                      <div key={d}>₹{d} × {c[`denom_${d}`] || 0}</div>
+                    ))}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{denomTotal(c).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </Section>
+
+            <Section title="ATM Loads">
+              {atmLoads.length === 0 && (
+                <div className="text-xs text-slate-500">No loads recorded.</div>
+              )}
+              {atmLoads.map((a: any, i: number) => (
+                <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
+                  <div className="font-medium">{formatSite(a.site)}</div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {DENOM_ORDER.map((d) => (
+                      <div key={d}>₹{d} × {a[`denom_${d}`] || 0}</div>
+                    ))}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{denomTotal(a).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </Section>
+
+            <Section title="Inter-Site Transfers">
+              {transfers.length === 0 && (
+                <div className="text-xs text-slate-500">No transfers recorded.</div>
+              )}
+              {transfers.map((t: any, i: number) => (
+                <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
+                  <div className="font-medium">
+                    {t.transfer_metadata?.source_site_name || "Source"}
+                  </div>
+                  <div className="text-slate-600">
+                    Destinations: {t.transfer_metadata?.destinations?.length || 0}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{(t.transfer_metadata?.total_amount || 0).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </Section>
+
+            <Section title="Denomination Exchanges">
+              {exchanges.length === 0 && (
+                <div className="text-xs text-slate-500">No exchanges recorded.</div>
+              )}
+              {exchanges.map((e: any, i: number) => (
+                <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
+                  <div className="font-medium">
+                    {e.exchange_metadata?.from_bank_name || "From"} → {e.exchange_metadata?.to_bank_name || "To"}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{(e.exchange_metadata?.total_amount || 0).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </Section>
+
+            <Section title="Excess Cash">
+              {excessCash.length === 0 && (
+                <div className="text-xs text-slate-500">No excess recorded.</div>
+              )}
+              {excessCash.map((e: any, i: number) => (
+                <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
+                  <div className="font-medium">{formatSite(e.site)}</div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {DENOM_ORDER.map((d) => (
+                      <div key={d}>₹{d} × {e[`denom_${d}`] || 0}</div>
+                    ))}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{denomTotal(e).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </Section>
+          </div>
+
           {/* Submit EOD - Only show if not signed */}
-          {assignment.status === "open" && !assignment.eod_signed && (
+          {canSubmit && (
             <div className="pt-4">
               <button
                 onClick={onSubmit}
@@ -431,6 +773,13 @@ function CustodianEOD({
               >
                 {submitting ? "Submitting..." : "Submit End of Day Report"}
               </button>
+            </div>
+          )}
+
+          {!canSubmit && (
+            <div className="pt-4 text-xs text-slate-600">
+              {status === "submitted" && "EOD submitted. Awaiting admin approval."}
+              {status === "approved" && "EOD approved. Read-only."}
             </div>
           )}
 
@@ -587,33 +936,118 @@ function CustodianEOD({
 // --------------------------------------------------
 // Admin UI
 // --------------------------------------------------
-function AdminDashboard({ adminAssignments, issueSummary }: any) {
+function AdminDashboard({
+  adminAssignments,
+  issueSummary,
+  adminFromDate,
+  adminToDate,
+  adminStatus,
+  adminCustodian,
+  adminCustodians,
+  setAdminFromDate,
+  setAdminToDate,
+  setAdminStatus,
+  setAdminCustodian,
+}: any) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-primary">
-        Admin Overview
-      </h2>
+      <h2 className="text-lg font-semibold text-primary">Admin Overview</h2>
 
-      <h3 className="font-semibold">Today’s Assignments</h3>
-      {adminAssignments.map((a: any) => (
-        <div key={a.id} className="p-4 bg-white rounded shadow text-sm">
-          <div>Assignment ID: {a.id}</div>
-          <div>Custodian: {a.custodian?.full_name}</div>
-          <div>Status: {a.status}</div>
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-4">
+        <h3 className="text-sm font-semibold text-slate-700">EOD Filters</h3>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">From</label>
+            <input
+              type="date"
+              value={adminFromDate}
+              onChange={(e: any) => setAdminFromDate(e.target.value)}
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">To</label>
+            <input
+              type="date"
+              value={adminToDate}
+              onChange={(e: any) => setAdminToDate(e.target.value)}
+              className="input w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Status</label>
+            <select
+              value={adminStatus}
+              onChange={(e: any) => setAdminStatus(e.target.value)}
+              className="input w-full"
+            >
+              <option value="ALL">All</option>
+              <option value="open">Open</option>
+              <option value="submitted">Submitted</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Custodian</label>
+            <select
+              value={adminCustodian}
+              onChange={(e: any) => setAdminCustodian(e.target.value)}
+              className="input w-full"
+            >
+              <option value="ALL">All</option>
+              {adminCustodians.map((c: any) => (
+                <option key={c.id} value={c.id}>
+                  {c.full_name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-      ))}
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold">EOD Records</h3>
+          <span className="text-xs text-slate-500">
+            {adminAssignments.length} records
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          {adminAssignments.map((a: any) => (
+            <Link
+              key={a.id}
+              to={`/admin/approvals/${a.id}`}
+              className="block rounded-lg border border-slate-200 p-4 hover:bg-slate-50 transition"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    Assignment #{a.id}
+                  </div>
+                  <div className="text-xs text-slate-600">
+                    {a.assignment_date} • {a.custodian?.full_name || "Unknown"}
+                  </div>
+                </div>
+                <span className="text-xs font-semibold px-2 py-1 rounded bg-slate-100 text-slate-700">
+                  {a.status}
+                </span>
+              </div>
+            </Link>
+          ))}
+
+          {adminAssignments.length === 0 && (
+            <div className="text-sm text-slate-500">No EOD records found.</div>
+          )}
+        </div>
+      </div>
 
       <h3 className="font-semibold">Issue Summary</h3>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <SummaryBox label="New" value={issueSummary?.new} />
-        <SummaryBox
-          label="In Progress"
-          value={issueSummary?.inProgress}
-        />
-        <SummaryBox
-          label="Resolved"
-          value={issueSummary?.resolved}
-        />
+        <SummaryBox label="In Progress" value={issueSummary?.inProgress} />
+        <SummaryBox label="Resolved" value={issueSummary?.resolved} />
       </div>
     </div>
   );
@@ -627,6 +1061,15 @@ function SummaryBox({ label, value }: any) {
         {value || 0}
       </div>
       <div className="text-sm text-slate-600">{label}</div>
+    </div>
+  );
+}
+
+function Section({ title, children }: any) {
+  return (
+    <div className="space-y-2">
+      <h4 className="text-sm font-semibold text-slate-800">{title}</h4>
+      <div className="space-y-2">{children}</div>
     </div>
   );
 }

@@ -3,7 +3,7 @@ type Props = {
   onChange: (name: string, value: number) => void;
 };
 
-const DENOMS = [2000, 500, 200, 100];
+const DENOMS = [100, 200, 500, 2000];
 
 export function DenominationFields({ values, onChange }: Props) {
   const total = DENOMS.reduce(

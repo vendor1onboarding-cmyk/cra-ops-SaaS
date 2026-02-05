@@ -252,10 +252,10 @@ export default function DenominationPlan() {
                   {/* Use DenominationFields if imported, otherwise inline */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {[
-                      ["denom_2000", 2000],
-                      ["denom_500", 500],
-                      ["denom_200", 200],
                       ["denom_100", 100],
+                      ["denom_200", 200],
+                      ["denom_500", 500],
+                      ["denom_2000", 2000],
                     ].map(([key, label]) => (
                       <div key={key} className="form-group">
                         <label className="text-sm font-medium text-slate-700">

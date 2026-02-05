@@ -10,6 +10,7 @@ import {
 
 type SOASummaryRow = {
   soa_id: number;
+  assignment_id?: number;
   assignment_date: string;
   cash_picked: number;
   cash_loaded: number;
@@ -18,6 +19,7 @@ type SOASummaryRow = {
   travel_allowance: number;
   final_net_cash_position: number;
   posted_at: string;
+  status?: string;
   custodian_id?: string;
   full_name?: string;
 };
@@ -45,6 +47,9 @@ export default function StatementOfAccounts() {
   const [detailedRows, setDetailedRows] = useState<SOADetailedRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<
+    "ALL" | "open" | "submitted" | "approved" | "rejected"
+  >("ALL");
 
   // Initialize dates based on IST timezone
   // These are used for database queries (stored in DATE format, not timestamps)
@@ -52,6 +57,7 @@ export default function StatementOfAccounts() {
   const [toDate, setToDate] = useState(getISTDateString());
 
   const isAdmin = profile?.role === "admin" || profile?.role === "supervisor";
+  const showAllowance = isAdmin;
 
   useEffect(() => {
     if (!profile) return;
@@ -68,6 +74,7 @@ export default function StatementOfAccounts() {
           .select(
             isSummary
               ? `soa_id,
+                assignment_id,
                 assignment_date,
                 cash_picked,
                 cash_loaded,
@@ -110,9 +117,11 @@ export default function StatementOfAccounts() {
             setDetailedRows([]);
           }
         } else {
-          if (isAdmin && data && data.length > 0) {
+          let rows: any[] = data || [];
+
+          if (isAdmin && rows.length > 0) {
             const custodianIds = [
-              ...new Set(data.map((r: any) => r.custodian_id)),
+              ...new Set(rows.map((r: any) => r.custodian_id)),
             ];
             const { data: custodians } = await supabase
               .from("profiles")
@@ -123,22 +132,44 @@ export default function StatementOfAccounts() {
               (custodians || []).map((c: any) => [c.id, c.full_name])
             );
 
-            const processedData = data.map((row: any) => ({
+            rows = rows.map((row: any) => ({
               ...row,
               full_name: custodianMap.get(row.custodian_id) || "Unknown",
             }));
+          }
 
-            if (isSummary) {
-              setSummaryRows(processedData);
-            } else {
-              setDetailedRows(processedData);
+          if (isSummary && rows.length > 0) {
+            const assignmentIds = [
+              ...new Set(
+                rows.map((r: any) => r.assignment_id ?? r.soa_id).filter(Boolean)
+              ),
+            ];
+
+            if (assignmentIds.length > 0) {
+              const { data: assignments } = await supabase
+                .from("assignments")
+                .select("id, status")
+                .in("id", assignmentIds);
+
+              const statusMap = new Map(
+                (assignments || []).map((a: any) => [a.id, a.status])
+              );
+
+              rows = rows.map((row: any) => ({
+                ...row,
+                status: statusMap.get(row.assignment_id ?? row.soa_id),
+              }));
             }
+          }
+
+          if (statusFilter !== "ALL") {
+            rows = rows.filter((row: any) => row.status === statusFilter);
+          }
+
+          if (isSummary) {
+            setSummaryRows(rows);
           } else {
-            if (isSummary) {
-              setSummaryRows(data || []);
-            } else {
-              setDetailedRows(data || []);
-            }
+            setDetailedRows(rows);
           }
         }
       } catch (err) {
@@ -155,7 +186,7 @@ export default function StatementOfAccounts() {
     }
 
     loadSOA();
-  }, [profile, fromDate, toDate, isAdmin, viewMode]);
+  }, [profile, fromDate, toDate, isAdmin, viewMode, statusFilter]);
 
 
   const getClosingBalance = (row: SOADetailedRow) =>
@@ -177,6 +208,10 @@ export default function StatementOfAccounts() {
     );
   }, [summaryRows]);
 
+  const summaryTravelKmTotal = useMemo(() => {
+    return summaryRows.reduce((acc, r) => acc + (r.travel_km || 0), 0);
+  }, [summaryRows]);
+
   const detailedTotals = useMemo(() => {
     return detailedRows.reduce(
       (acc, r) => {
@@ -184,6 +219,7 @@ export default function StatementOfAccounts() {
         acc.withdrawals += r.total_withdrawals;
         acc.loads += r.total_loads;
         acc.allowance += r.travel_allowance;
+        acc.travelKm += r.travel_km || 0;
         acc.closing += getClosingBalance(r);
         return acc;
       },
@@ -192,6 +228,7 @@ export default function StatementOfAccounts() {
         withdrawals: 0,
         loads: 0,
         allowance: 0,
+        travelKm: 0,
         closing: 0,
       }
     );
@@ -209,23 +246,26 @@ export default function StatementOfAccounts() {
     const header = isSummary
       ? [
           "Date",
+          ...(isAdmin ? ["Custodian"] : []),
+          "Status",
           "Cash Picked",
           "Cash Loaded",
-          "Excess",
           "Travel KM",
-          "Allowance",
+          ...(showAllowance ? ["Allowance"] : []),
           "Final Net Position",
         ]
       : [
           "Date",
+          ...(isAdmin ? ["Custodian"] : []),
+          "Status",
           "Opening Balance",
           "Withdrawals",
           "Loads",
           "Exchanges",
           "Transfers",
-          "Excess",
           "Travel KM",
-          "Allowance",
+          ...(showAllowance ? ["Allowance"] : []),
+          "Excess",
           "Closing Balance",
         ];
 
@@ -236,11 +276,12 @@ export default function StatementOfAccounts() {
           const row = r as SOASummaryRow;
           return [
             row.assignment_date,
+            ...(isAdmin ? [row.full_name || "Unknown"] : []),
+            row.status || "-",
             row.cash_picked,
             row.cash_loaded,
-            row.excess_reported,
             row.travel_km,
-            row.travel_allowance,
+            ...(showAllowance ? [row.travel_allowance] : []),
             row.final_net_cash_position,
           ].join(",");
         }
@@ -248,14 +289,16 @@ export default function StatementOfAccounts() {
         const row = r as SOADetailedRow;
         return [
           row.assignment_date,
+          ...(isAdmin ? [row.full_name || "Unknown"] : []),
+          row.status || "-",
           row.opening_balance,
           row.total_withdrawals,
           row.total_loads,
           row.exchange_count,
           row.transfer_count,
-          row.excess_reported,
           row.travel_km,
-          row.travel_allowance,
+          ...(showAllowance ? [row.travel_allowance] : []),
+          row.excess_reported,
           getClosingBalance(row),
         ].join(",");
       }),
@@ -351,6 +394,32 @@ export default function StatementOfAccounts() {
               />
             </div>
 
+            <div className="w-full sm:w-auto">
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Status
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) =>
+                  setStatusFilter(
+                    e.target.value as
+                      | "ALL"
+                      | "open"
+                      | "submitted"
+                      | "approved"
+                      | "rejected"
+                  )
+                }
+                className="input w-full"
+              >
+                <option value="ALL">All</option>
+                <option value="open">Open</option>
+                <option value="submitted">Submitted</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+
             <div className="flex gap-2 w-full sm:w-auto">
                 <div className="flex rounded-lg border border-slate-200 overflow-hidden">
                   <button
@@ -426,12 +495,23 @@ export default function StatementOfAccounts() {
               subtext="₹"
               color="green"
             />
-            <KPI
-              label="Travel Allowance"
-              value={summaryTotals.allowance}
-              subtext="₹"
-              color="amber"
-            />
+            {showAllowance ? (
+              <KPI
+                label="Travel Allowance"
+                value={summaryTotals.allowance}
+                subtext="₹"
+                color="amber"
+              />
+            ) : (
+              <KPI
+                label="Travel KM"
+                value={summaryRows.reduce(
+                  (sum, r) => sum + (r.travel_km || 0),
+                  0
+                )}
+                color="amber"
+              />
+            )}
             <KPI
               label="Net Position"
               value={summaryTotals.net}
@@ -502,278 +582,504 @@ export default function StatementOfAccounts() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
               {viewMode === "summary" ? (
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-100 border-b border-slate-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Date
-                      </th>
-                      {isAdmin && (
-                        <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                          Custodian
-                        </th>
-                      )}
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Picked
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Loaded
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Excess
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        KM
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Allowance
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Final Net
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {summaryRows.map((r, idx) => (
-                      <tr
-                        key={idx}
-                        className="hover:bg-slate-50 transition-colors"
-                      >
-                        <td className="px-4 py-3 text-slate-900">
-                          {formatISTDate(r.assignment_date, "short")}
-                        </td>
-                        {isAdmin && (
-                          <td className="px-4 py-3 text-slate-700">
-                            <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
-                              {r.full_name || "Unknown"}
+                <>
+                  <div className="sm:hidden p-4 space-y-3">
+                    {summaryRows.map((r, idx) => {
+                      const netUnbalanced =
+                        Math.abs(r.final_net_cash_position) >= 0.01;
+                      return (
+                        <div
+                          key={idx}
+                          className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-slate-900">
+                              {formatISTDate(r.assignment_date, "short")}
+                            </div>
+                            <span className="text-xs font-semibold px-2 py-1 rounded bg-slate-100 text-slate-700">
+                              {r.status || "unknown"}
                             </span>
+                          </div>
+                          {isAdmin && (
+                            <div className="text-xs text-slate-600 mt-1">
+                              Custodian: {r.full_name || "Unknown"}
+                            </div>
+                          )}
+                          <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                              <p className="text-slate-500">Picked</p>
+                              <p className="font-semibold text-slate-900">
+                                ₹{r.cash_picked.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Loaded</p>
+                              <p className="font-semibold text-slate-900">
+                                ₹{r.cash_loaded.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM</p>
+                              <p className="font-semibold text-slate-900">
+                                {r.travel_km}
+                              </p>
+                            </div>
+                            {showAllowance && (
+                              <div>
+                                <p className="text-slate-500">Allowance</p>
+                                <p className="font-semibold text-slate-900">
+                                  ₹{r.travel_allowance.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="mt-3 flex items-center justify-between text-xs">
+                            <span className="text-slate-600">
+                              Final Net (Expected 0)
+                            </span>
+                            <span
+                              className={`px-2 py-1 rounded font-semibold ${
+                                netUnbalanced
+                                  ? "bg-amber-100 text-amber-900"
+                                  : "bg-emerald-100 text-emerald-900"
+                              }`}
+                            >
+                              ₹{r.final_net_cash_position.toLocaleString(
+                                "en-IN",
+                                { minimumFractionDigits: 2 }
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-100 border-b border-slate-200">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                            Date
+                          </th>
+                          <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                            Status
+                          </th>
+                          {isAdmin && (
+                            <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                              Custodian
+                            </th>
+                          )}
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Picked
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Loaded
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            KM
+                          </th>
+                          {showAllowance && (
+                            <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                              Allowance
+                            </th>
+                          )}
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Final Net
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {summaryRows.map((r, idx) => {
+                          const netUnbalanced =
+                            Math.abs(r.final_net_cash_position) >= 0.01;
+                          return (
+                            <tr
+                              key={idx}
+                              className="hover:bg-slate-50 transition-colors"
+                            >
+                              <td className="px-4 py-3 text-slate-900">
+                                {formatISTDate(r.assignment_date, "short")}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
+                                  {r.status || "unknown"}
+                                </span>
+                              </td>
+                              {isAdmin && (
+                                <td className="px-4 py-3 text-slate-700">
+                                  <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
+                                    {r.full_name || "Unknown"}
+                                  </span>
+                                </td>
+                              )}
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.cash_picked.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.cash_loaded.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.travel_km}
+                              </td>
+                              {showAllowance && (
+                                <td className="px-4 py-3 text-right text-slate-900">
+                                  {r.travel_allowance.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </td>
+                              )}
+                              <td className="px-4 py-3 text-right">
+                                <span
+                                  className={`inline-block rounded px-2 py-1 font-semibold text-xs ${
+                                    netUnbalanced
+                                      ? "bg-amber-100 text-amber-900"
+                                      : "bg-emerald-100 text-emerald-900"
+                                  }`}
+                                >
+                                  {r.final_net_cash_position.toLocaleString(
+                                    "en-IN",
+                                    { minimumFractionDigits: 2 }
+                                  )}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-slate-50 border-t border-slate-200">
+                        <tr>
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            Total ({summaryRows.length} records)
                           </td>
-                        )}
-                        <td className="px-4 py-3 text-right text-slate-900">
-                          {r.cash_picked.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-900">
-                          {r.cash_loaded.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-900">
-                          <span
-                            className={
-                              r.excess_reported > 0
-                                ? "text-red-600 font-semibold"
-                                : ""
-                            }
-                          >
-                            {r.excess_reported.toLocaleString("en-IN", {
+                          <td></td>
+                          {isAdmin && <td></td>}
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {summaryTotals.cashPicked.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                             })}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-900">
-                          {r.travel_km}
-                        </td>
-                        <td className="px-4 py-3 text-right text-slate-900">
-                          {r.travel_allowance.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className="inline-block bg-indigo-100 text-indigo-900 rounded px-2 py-1 font-semibold text-xs">
-                            {r.final_net_cash_position.toLocaleString("en-IN", {
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {summaryTotals.cashLoaded.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                             })}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  {/* Table Footer Summary */}
-                  <tfoot className="bg-slate-50 border-t border-slate-200">
-                    <tr>
-                      <td className="px-4 py-3 font-semibold text-slate-900">
-                        Total ({summaryRows.length} records)
-                      </td>
-                      {isAdmin && <td></td>}
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {summaryTotals.cashPicked.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {summaryTotals.cashLoaded.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td colSpan={2}></td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {summaryTotals.allowance.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
-                        {summaryTotals.net.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {summaryTravelKmTotal.toLocaleString("en-IN")}
+                          </td>
+                          {showAllowance && (
+                            <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                              {summaryTotals.allowance.toLocaleString(
+                                "en-IN",
+                                { minimumFractionDigits: 2 }
+                              )}
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
+                            {summaryTotals.net.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </>
               ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-100 border-b border-slate-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                        Date
-                      </th>
-                      {isAdmin && (
-                        <th className="px-4 py-3 text-left font-semibold text-slate-700">
-                          Custodian
-                        </th>
-                      )}
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Opening
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Withdrawals
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Loads
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Exchanges
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Transfers
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Allowance
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Excess
-                      </th>
-                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Closing
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
+                <>
+                  <div className="sm:hidden p-4 space-y-3">
                     {detailedRows.map((r, idx) => {
                       const closing = getClosingBalance(r);
                       const balanced = Math.abs(closing) < 0.01;
                       return (
-                        <tr
+                        <div
                           key={idx}
-                          className="hover:bg-slate-50 transition-colors"
+                          className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
                         >
-                          <td className="px-4 py-3 text-slate-900">
-                            {formatISTDate(r.assignment_date, "short")}
-                          </td>
-                          {isAdmin && (
-                            <td className="px-4 py-3 text-slate-700">
-                              <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
-                                {r.full_name || "Unknown"}
-                              </span>
-                            </td>
-                          )}
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            {r.opening_balance.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                            })}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            {r.total_withdrawals.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                            })}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            {r.total_loads.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                            })}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            {r.exchange_count}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            {r.transfer_count}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            {r.travel_allowance.toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                            })}
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-900">
-                            <span
-                              className={
-                                r.excess_reported > 0
-                                  ? "text-red-600 font-semibold"
-                                  : ""
-                              }
-                            >
-                              {r.excess_reported.toLocaleString("en-IN", {
-                                minimumFractionDigits: 2,
-                              })}
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-slate-900">
+                              {formatISTDate(r.assignment_date, "short")}
+                            </div>
+                            <span className="text-xs font-semibold px-2 py-1 rounded bg-slate-100 text-slate-700">
+                              {r.status || "unknown"}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-right">
+                          </div>
+                          {isAdmin && (
+                            <div className="text-xs text-slate-600 mt-1">
+                              Custodian: {r.full_name || "Unknown"}
+                            </div>
+                          )}
+                          <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                              <p className="text-slate-500">Opening</p>
+                              <p className="font-semibold text-slate-900">
+                                ₹{r.opening_balance.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Withdrawals</p>
+                              <p className="font-semibold text-slate-900">
+                                ₹{r.total_withdrawals.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Loads</p>
+                              <p className="font-semibold text-slate-900">
+                                ₹{r.total_loads.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Exchanges</p>
+                              <p className="font-semibold text-slate-900">
+                                {r.exchange_count}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Transfers</p>
+                              <p className="font-semibold text-slate-900">
+                                {r.transfer_count}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">KM</p>
+                              <p className="font-semibold text-slate-900">
+                                {r.travel_km}
+                              </p>
+                            </div>
+                            {showAllowance && (
+                              <div>
+                                <p className="text-slate-500">Allowance</p>
+                                <p className="font-semibold text-slate-900">
+                                  ₹{r.travel_allowance.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </p>
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-slate-500">Excess</p>
+                              <p className="font-semibold text-slate-900">
+                                ₹{r.excess_reported.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between text-xs">
+                            <span className="text-slate-600">Closing</span>
                             <span
-                              className={`inline-block rounded px-2 py-1 font-semibold text-xs ${
+                              className={`px-2 py-1 rounded font-semibold ${
                                 balanced
                                   ? "bg-emerald-100 text-emerald-900"
                                   : "bg-amber-100 text-amber-900"
                               }`}
                             >
-                              {closing.toLocaleString("en-IN", {
+                              ₹{closing.toLocaleString("en-IN", {
                                 minimumFractionDigits: 2,
                               })}
                             </span>
-                          </td>
-                        </tr>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                  <tfoot className="bg-slate-50 border-t border-slate-200">
-                    <tr>
-                      <td className="px-4 py-3 font-semibold text-slate-900">
-                        Total ({detailedRows.length} records)
-                      </td>
-                      {isAdmin && <td></td>}
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {detailedTotals.opening.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
+                  </div>
+
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-100 border-b border-slate-200">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                            Date
+                          </th>
+                          <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                            Status
+                          </th>
+                          {isAdmin && (
+                            <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                              Custodian
+                            </th>
+                          )}
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Opening
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Withdrawals
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Loads
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Exchanges
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Transfers
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            KM
+                          </th>
+                          {showAllowance && (
+                            <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                              Allowance
+                            </th>
+                          )}
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Excess
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Closing
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {detailedRows.map((r, idx) => {
+                          const closing = getClosingBalance(r);
+                          const balanced = Math.abs(closing) < 0.01;
+                          return (
+                            <tr
+                              key={idx}
+                              className="hover:bg-slate-50 transition-colors"
+                            >
+                              <td className="px-4 py-3 text-slate-900">
+                                {formatISTDate(r.assignment_date, "short")}
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">
+                                <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
+                                  {r.status || "unknown"}
+                                </span>
+                              </td>
+                              {isAdmin && (
+                                <td className="px-4 py-3 text-slate-700">
+                                  <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
+                                    {r.full_name || "Unknown"}
+                                  </span>
+                                </td>
+                              )}
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.opening_balance.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.total_withdrawals.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.total_loads.toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.exchange_count}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.transfer_count}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                {r.travel_km}
+                              </td>
+                              {showAllowance && (
+                                <td className="px-4 py-3 text-right text-slate-900">
+                                  {r.travel_allowance.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </td>
+                              )}
+                              <td className="px-4 py-3 text-right text-slate-900">
+                                <span
+                                  className={
+                                    r.excess_reported > 0
+                                      ? "text-red-600 font-semibold"
+                                      : ""
+                                  }
+                                >
+                                  {r.excess_reported.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <span
+                                  className={`inline-block rounded px-2 py-1 font-semibold text-xs ${
+                                    balanced
+                                      ? "bg-emerald-100 text-emerald-900"
+                                      : "bg-amber-100 text-amber-900"
+                                  }`}
+                                >
+                                  {closing.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </span>
+                              </td>
+                            </tr>
+                          );
                         })}
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {detailedTotals.withdrawals.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {detailedTotals.loads.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td colSpan={2}></td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                        {detailedTotals.allowance.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                      <td></td>
-                      <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
-                        {detailedTotals.closing.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+                      </tbody>
+                      <tfoot className="bg-slate-50 border-t border-slate-200">
+                        <tr>
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            Total ({detailedRows.length} records)
+                          </td>
+                          <td></td>
+                          {isAdmin && <td></td>}
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {detailedTotals.opening.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {detailedTotals.withdrawals.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {detailedTotals.loads.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td colSpan={2}></td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                            {detailedTotals.travelKm.toLocaleString("en-IN")}
+                          </td>
+                          {showAllowance && (
+                            <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                              {detailedTotals.allowance.toLocaleString(
+                                "en-IN",
+                                { minimumFractionDigits: 2 }
+                              )}
+                            </td>
+                          )}
+                          <td></td>
+                          <td className="px-4 py-3 text-right font-semibold text-indigo-900 bg-indigo-100 rounded">
+                            {detailedTotals.closing.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </>
               )}
-            </div>
+            </>
           )}
         </div>
 
