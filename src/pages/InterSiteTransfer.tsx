@@ -5,6 +5,7 @@ import { DenominationFields } from "../components/DenominationFields";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
+import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 const GPS_RADIUS_METERS = 100;
 
@@ -487,6 +488,19 @@ export default function InterSiteTransfer() {
         return;
       }
 
+      try {
+        if (assignmentId && profile?.id) {
+          await travelLogService.triggerCheckpoint({
+            assignmentId,
+            custodianId: profile.id,
+            vehicleType: "bike",
+            context: TravelContext.MANUAL,
+          });
+        }
+      } catch (err) {
+        console.warn("[InterSiteTransfer] Travel log trigger failed:", err);
+      }
+
       setSuccess("Inter-site transfer recorded successfully.");
       setSubmitLocked(true);
       setConfirmMessage(
@@ -657,10 +671,8 @@ export default function InterSiteTransfer() {
                     <p>Loading availability…</p>
                   ) : (
                     <p>
-                      ₹100×{availableSource.denom_100}, ₹200×
-                      {availableSource.denom_200}, ₹500×
-                      {availableSource.denom_500}, ₹2000×
-                      {availableSource.denom_2000}
+                      {availableSource.denom_100} × ₹100, {availableSource.denom_200} × ₹200,
+                      {availableSource.denom_500} × ₹500, {availableSource.denom_2000} × ₹2000
                     </p>
                   )}
                   {sourceExceedsAvailable && (

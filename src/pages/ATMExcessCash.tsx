@@ -4,6 +4,7 @@ import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
+import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 export default function ATMExcessCash() {
   const { profile } = useAuth();
@@ -125,6 +126,19 @@ export default function ATMExcessCash() {
       setError("Failed to save excess cash record.");
       setSaving(false);
       return;
+    }
+
+    try {
+      if (assignmentId && profile?.id) {
+        await travelLogService.triggerCheckpoint({
+          assignmentId,
+          custodianId: profile.id,
+          vehicleType: "bike",
+          context: TravelContext.MANUAL,
+        });
+      }
+    } catch (err) {
+      console.warn("[ATMExcessCash] Travel log trigger failed:", err);
     }
 
     setSaving(false);

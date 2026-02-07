@@ -105,7 +105,6 @@ export default function ATMReplenishment() {
 
   // Travel log integration (optional, non-blocking)
   const [captureTravelLog, setCaptureTravelLog] = useState(true);
-  const [loadCount, setLoadCount] = useState(0);
 
   /* ---------------- Load assignment & sites ---------------- */
 
@@ -307,12 +306,49 @@ export default function ATMReplenishment() {
         totalLoads.denom_2000 += l.denom_2000 || 0;
       });
 
-      // Calculate available = pickups - loads
+      // Apply denomination exchanges (net effect on cash-in-hand mix)
+      const { data: exchanges, error: exchangeError } = await supabase
+        .from("soa_adjustments")
+        .select("exchange_metadata")
+        .eq("assignment_id", assignmentId)
+        .eq("adjustment_type", "EXCHANGE");
+
+      if (exchangeError) {
+        console.warn("[ATMLoad] Failed to fetch exchanges:", exchangeError);
+      }
+
+      const exchangeDelta = (exchanges || []).reduce(
+        (acc: typeof totalPickups, row: any) => {
+          const from = row?.exchange_metadata?.from_denominations || {};
+          const to = row?.exchange_metadata?.to_denominations || {};
+
+          acc.denom_100 += (to.denom_100 || 0) - (from.denom_100 || 0);
+          acc.denom_200 += (to.denom_200 || 0) - (from.denom_200 || 0);
+          acc.denom_500 += (to.denom_500 || 0) - (from.denom_500 || 0);
+          acc.denom_2000 += (to.denom_2000 || 0) - (from.denom_2000 || 0);
+          return acc;
+        },
+        { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 }
+      );
+
+      // Calculate available = pickups - loads + exchangeDelta
       const available = {
-        denom_100: Math.max(0, totalPickups.denom_100 - totalLoads.denom_100),
-        denom_200: Math.max(0, totalPickups.denom_200 - totalLoads.denom_200),
-        denom_500: Math.max(0, totalPickups.denom_500 - totalLoads.denom_500),
-        denom_2000: Math.max(0, totalPickups.denom_2000 - totalLoads.denom_2000),
+        denom_100: Math.max(
+          0,
+          totalPickups.denom_100 - totalLoads.denom_100 + exchangeDelta.denom_100
+        ),
+        denom_200: Math.max(
+          0,
+          totalPickups.denom_200 - totalLoads.denom_200 + exchangeDelta.denom_200
+        ),
+        denom_500: Math.max(
+          0,
+          totalPickups.denom_500 - totalLoads.denom_500 + exchangeDelta.denom_500
+        ),
+        denom_2000: Math.max(
+          0,
+          totalPickups.denom_2000 - totalLoads.denom_2000 + exchangeDelta.denom_2000
+        ),
       };
 
       const totalAvailable =
@@ -522,45 +558,12 @@ export default function ATMReplenishment() {
     // This runs AFTER ATM load is saved, so it never blocks the primary flow
     if (captureTravelLog) {
       try {
-        // Check current travel context and active travel
-        const currentContext = travelLogService.getTravelContext();
-        const hasActiveTravel = await travelLogService.hasActiveTravel(profile!.id);
-        
-        // Determine if we can proceed with ATM travel:
-        // - If no active travel → YES (start new ATM travel)
-        // - If active travel with ATM context → YES (chain to next site)
-        // - If active travel without ATM context → NO (manual travel is active)
-        const isATMTravel = currentContext === TravelContext.ATM;
-        const canProceed = !hasActiveTravel || isATMTravel;
-        
-        if (!canProceed) {
-          console.log("[ATMLoad] Manual travel detected, skipping ATM travel triggers");
-        } else {
-          const isFirstLoad = loadCount === 0 && !hasActiveTravel;
-          
-          if (isFirstLoad) {
-            // First site with no active travel: start ATM travel
-            await travelLogService.startTravel({
-              assignmentId: assignmentId,
-              custodianId: profile!.id,
-              vehicleType: "bike", // default, can be made configurable
-              context: TravelContext.ATM,
-            });
-            console.log("[ATMLoad] Started ATM-initiated travel");
-          } else if (hasActiveTravel && isATMTravel) {
-            // Subsequent sites with active ATM travel: chain
-            await travelLogService.endAndStartTravel(profile!.id, {
-              assignmentId: assignmentId,
-              custodianId: profile!.id,
-              vehicleType: "bike",
-              context: TravelContext.ATM,
-            });
-            console.log("[ATMLoad] Chained ATM travel to next site");
-          }
-
-          // Increment load count only when we successfully trigger travel
-          setLoadCount((prev) => prev + 1);
-        }
+        await travelLogService.triggerCheckpoint({
+          assignmentId: assignmentId,
+          custodianId: profile!.id,
+          vehicleType: "bike",
+          context: TravelContext.ATM,
+        });
       } catch (err) {
         // Silent failure - travel log errors never affect ATM load
         console.warn("[ATMLoad] Travel log trigger failed (non-critical):", err);
@@ -704,8 +707,8 @@ export default function ATMReplenishment() {
                     ✓ Available Cash (Enterprise Control)
                   </p>
                   <p className="text-xs text-slate-600 mt-1">
-                    Maximum cash you can load today based on pickups and
-                    previous loads.
+                    Maximum cash you can load today based on pickups, exchanges,
+                    and previous loads.
                   </p>
                 </div>
                 <span className="text-xs font-semibold text-indigo-900 bg-indigo-100 px-2 py-1 rounded\">
@@ -962,7 +965,7 @@ export default function ATMReplenishment() {
                     key={d.key}
                     className="flex justify-between text-slate-600"
                   >
-                    <span>₹{d.value} × {d.count}</span>
+                    <span>{d.count} × ₹{d.value}</span>
                     <span className="font-medium">
                       ₹{d.amount.toLocaleString("en-IN")}
                     </span>

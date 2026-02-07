@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";
+import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 interface BankAccount {
   id: string;
@@ -42,6 +43,18 @@ export default function CashPickup() {
   const [confirmMessage, setConfirmMessage] = useState("");
   const [banksLoading, setBanksLoading] = useState(false);
   const [banksError, setBanksError] = useState<string | null>(null);
+
+  const [plannedDenoms, setPlannedDenoms] = useState<
+    | {
+        denom_100: number;
+        denom_200: number;
+        denom_500: number;
+        denom_2000: number;
+      }
+    | null
+  >(null);
+  const [plannedLoading, setPlannedLoading] = useState(false);
+  const [plannedError, setPlannedError] = useState<string | null>(null);
 
   const today = getISTDateString();
 
@@ -109,6 +122,52 @@ export default function CashPickup() {
   const selectedBank = bankAccounts.find((b) => b.id === selectedBankId);
 
   // --------------------------------------------------
+  // Load planned bank denominations (for comparison)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!assignmentId || !selectedBankId) {
+      setPlannedDenoms(null);
+      setPlannedError(null);
+      return;
+    }
+
+    async function loadPlannedDenoms() {
+      setPlannedLoading(true);
+      setPlannedError(null);
+
+      const { data, error } = await supabase
+        .from("bank_denomination_plans")
+        .select("denom_2000, denom_500, denom_200, denom_100")
+        .eq("assignment_id", assignmentId)
+        .eq("bank_account_id", selectedBankId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn("[CashPickup] Failed to load bank plan:", error);
+        setPlannedError("Failed to load planned denominations");
+        setPlannedDenoms(null);
+        setPlannedLoading(false);
+        return;
+      }
+
+      if (data) {
+        setPlannedDenoms({
+          denom_100: data.denom_100 || 0,
+          denom_200: data.denom_200 || 0,
+          denom_500: data.denom_500 || 0,
+          denom_2000: data.denom_2000 || 0,
+        });
+      } else {
+        setPlannedDenoms(null);
+      }
+
+      setPlannedLoading(false);
+    }
+
+    loadPlannedDenoms();
+  }, [assignmentId, selectedBankId]);
+
+  // --------------------------------------------------
   // Calculate totals
   // --------------------------------------------------
   const totalAmount =
@@ -118,6 +177,13 @@ export default function CashPickup() {
     form.denom_100 * 100;
 
   const variance = totalAmount - expectedAmount;
+
+  const plannedTotal = plannedDenoms
+    ? plannedDenoms.denom_2000 * 2000 +
+      plannedDenoms.denom_500 * 500 +
+      plannedDenoms.denom_200 * 200 +
+      plannedDenoms.denom_100 * 100
+    : 0;
 
   // --------------------------------------------------
   // Save (UPSERT – one pickup per bank per day)
@@ -171,6 +237,18 @@ export default function CashPickup() {
       console.error(error);
       setMessage("Failed to save cash pickup");
     } else {
+      try {
+        if (assignmentId && profile?.id) {
+          await travelLogService.triggerCheckpoint({
+            assignmentId,
+            custodianId: profile.id,
+            vehicleType: "bike",
+            context: TravelContext.MANUAL,
+          });
+        }
+      } catch (err) {
+        console.warn("[CashPickup] Travel log trigger failed:", err);
+      }
       setSubmitLocked(true);
       setConfirmMessage(
         `Cash pickup saved successfully for ${selectedBank?.bank_name || "bank"}.`
@@ -325,6 +403,56 @@ export default function CashPickup() {
                   Denomination Details
                 </h3>
               </div>
+
+              {plannedLoading ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs text-slate-600">
+                  Loading planned denominations...
+                </div>
+              ) : plannedError ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-xs text-amber-800">
+                  ⚠️ {plannedError}
+                </div>
+              ) : plannedDenoms ? (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-indigo-700 font-semibold">
+                        Planned Denominations (Bank)
+                      </p>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Compare plan vs actual pickup while entering values.
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-indigo-900 bg-indigo-100 px-2 py-1 rounded">
+                      ₹{plannedTotal.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      ["denom_100", 100],
+                      ["denom_200", 200],
+                      ["denom_500", 500],
+                      ["denom_2000", 2000],
+                    ].map(([key, value]) => (
+                      <div
+                        key={key}
+                        className="rounded-md border border-indigo-200 bg-white px-3 py-2"
+                      >
+                        <div className="text-xs text-slate-500">₹{value}</div>
+                        <div className="text-sm font-semibold text-indigo-900">
+                          {(plannedDenoms as any)[key] || 0}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          ₹{(((plannedDenoms as any)[key] || 0) * value).toLocaleString(
+                            "en-IN"
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[

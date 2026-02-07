@@ -160,7 +160,7 @@ loadTravelKPI();
       supabase.from("denomination_plans").select("*").eq("assignment_id", assign.id),
       supabase
         .from("soa_adjustments")
-        .select("id, adjustment_type")
+        .select("id, adjustment_type, exchange_metadata")
         .eq("assignment_id", assign.id)
         .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"]),
     ]);
@@ -181,7 +181,7 @@ loadTravelKPI();
     );
 
     computeCash(cps.data || [], ls.data || []);
-    computeDenoms(cps.data || [], ls.data || []);
+    computeDenoms(cps.data || [], ls.data || [], ops.data || []);
     computeLoadedBySite(rs.data || [], ls.data || [], dp.data || []);
 
     setLoading(false);
@@ -202,15 +202,31 @@ loadTravelKPI();
     });
   }
 
-  function computeDenoms(pickups: any[], loads: any[]) {
+  function computeDenoms(pickups: any[], loads: any[], exchanges: any[]) {
     const picked: any = {};
     const loaded: any = {};
     const inHand: any = {};
+    const exchangeNet: any = {};
+
+    DENOMS.forEach(d => {
+      exchangeNet[d] = 0;
+    });
+
+    (exchanges || []).forEach((row: any) => {
+      if (row.adjustment_type !== "EXCHANGE") return;
+      const from = row.exchange_metadata?.from_denominations || {};
+      const to = row.exchange_metadata?.to_denominations || {};
+
+      DENOMS.forEach(d => {
+        const key = `denom_${d}`;
+        exchangeNet[d] += (to[key] || 0) - (from[key] || 0);
+      });
+    });
 
     DENOMS.forEach(d => {
       picked[d] = pickups.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0);
       loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
-      inHand[d] = picked[d] - loaded[d];
+      inHand[d] = picked[d] - loaded[d] + exchangeNet[d];
     });
 
     setDenomSummary({ picked, loaded, inHand });

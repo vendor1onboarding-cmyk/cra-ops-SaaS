@@ -3,6 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
+import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 /* ================= CONFIG ================= */
 const GEO_MODE: "OFF" | "SOFT" = "SOFT";
@@ -189,6 +190,18 @@ export default function ATMCashAdjustment() {
     if (error) {
       setError("Failed to save ATM Cash Adjustment.");
     } else {
+      try {
+        if (assignmentId && profile?.id) {
+          await travelLogService.triggerCheckpoint({
+            assignmentId,
+            custodianId: profile.id,
+            vehicleType: "bike",
+            context: TravelContext.MANUAL,
+          });
+        }
+      } catch (err) {
+        console.warn("[ATMCashAdjustment] Travel log trigger failed:", err);
+      }
       alert("ATM Cash Adjustment saved successfully.");
     }
 

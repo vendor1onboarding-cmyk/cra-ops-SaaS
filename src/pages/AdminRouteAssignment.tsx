@@ -54,8 +54,10 @@ export default function AdminRouteAssignment() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [autoAssignNotice, setAutoAssignNotice] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmTitle, setConfirmTitle] = useState("");
   const [confirmMessage, setConfirmMessage] = useState("");
@@ -66,56 +68,55 @@ export default function AdminRouteAssignment() {
   // --------------------------------------------------
   // Load base data (ADMIN ONLY)
   // --------------------------------------------------
+  async function loadData() {
+    setLoading(true);
+
+    // Assignments (exclude rejected)
+    const { data: assignmentsData } = await supabase
+      .from("assignments")
+      .select("id, assignment_date, status, custodian_id")
+      .not("status", "eq", "rejected")
+      .order("assignment_date", { ascending: false });
+
+    // Custodians
+    const { data: custodianProfiles } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("role", "custodian");
+
+    // Sites (⚠️ include address)
+    const { data: sitesData } = await supabase
+      .from("sites")
+      .select("id, site_code, atm_id, bank_name, address, city")
+      .order("site_code");
+
+    // Build district list
+    const uniqueDistricts = Array.from(
+      new Set((sitesData || []).map(s => s.city).filter(Boolean))
+    );
+
+    // Map custodian name
+    const custodianMap = new Map(
+      custodianProfiles?.map(c => [c.id, c.full_name]) || []
+    );
+
+    const mergedAssignments =
+      assignmentsData?.map(a => ({
+        ...a,
+        custodian: {
+          full_name: custodianMap.get(a.custodian_id) || "Custodian",
+        },
+      })) || [];
+
+    setAssignments(mergedAssignments);
+    setCustodians(custodianProfiles || []);
+    setSites(sitesData || []);
+    setDistricts(uniqueDistricts);
+    setLoading(false);
+  }
+
   useEffect(() => {
     if (!profile || profile.role !== "admin") return;
-
-    async function loadData() {
-      setLoading(true);
-
-      // Assignments (exclude rejected)
-      const { data: assignmentsData } = await supabase
-        .from("assignments")
-        .select("id, assignment_date, status, custodian_id")
-        .not("status", "eq", "rejected")
-        .order("assignment_date", { ascending: false });
-
-      // Custodians
-      const { data: custodianProfiles } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .eq("role", "custodian");
-
-      // Sites (⚠️ include address)
-      const { data: sitesData } = await supabase
-        .from("sites")
-        .select("id, site_code, atm_id, bank_name, address, city")
-        .order("site_code");
-
-      // Build district list
-      const uniqueDistricts = Array.from(
-        new Set((sitesData || []).map(s => s.city).filter(Boolean))
-      );
-
-      // Map custodian name
-      const custodianMap = new Map(
-        custodianProfiles?.map(c => [c.id, c.full_name]) || []
-      );
-
-      const mergedAssignments =
-        assignmentsData?.map(a => ({
-          ...a,
-          custodian: {
-            full_name: custodianMap.get(a.custodian_id) || "Custodian",
-          },
-        })) || [];
-
-      setAssignments(mergedAssignments);
-      setCustodians(custodianProfiles || []);
-      setSites(sitesData || []);
-      setDistricts(uniqueDistricts);
-      setLoading(false);
-    }
-
     loadData();
   }, [profile]);
 
@@ -138,11 +139,15 @@ export default function AdminRouteAssignment() {
     loadRoute();
   }, [selectedAssignment]);
 
+  useEffect(() => {
+    setAutoAssignNotice(null);
+  }, [selectedAssignment, selectedDistrict]);
+
   // --------------------------------------------------
   // Create Assignment (Option B – unchanged)
   // --------------------------------------------------
   async function createAssignment() {
-    if (submitLocked) return;
+    if (submitLocked || creating) return;
     if (!selectedCustodian || !assignmentDate) {
       setMessage("Select custodian and date");
       return;
@@ -159,6 +164,9 @@ export default function AdminRouteAssignment() {
       return;
     }
 
+    setCreating(true);
+    setMessage(null);
+
     const { error } = await supabase.from("assignments").insert({
       custodian_id: selectedCustodian,
       assignment_date: assignmentDate,
@@ -167,8 +175,14 @@ export default function AdminRouteAssignment() {
     });
 
     if (error) {
-      setMessage("Failed to create assignment");
+      const msg = error.message || "Failed to create assignment";
+      if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
+        setMessage("Assignment already exists for this custodian and date");
+      } else {
+        setMessage("Failed to create assignment");
+      }
     } else {
+      await loadData();
       setMessage("Assignment created successfully");
       setSubmitLocked(true);
       const custodianLabel = custodians.find(
@@ -181,6 +195,8 @@ export default function AdminRouteAssignment() {
       setConfirmAction("create");
       setShowConfirm(true);
     }
+
+    setCreating(false);
   }
 
   // --------------------------------------------------
@@ -213,6 +229,7 @@ export default function AdminRouteAssignment() {
 
     setSaving(true);
     setMessage(null);
+    setAutoAssignNotice(null);
 
     await supabase
       .from("route_sites")
@@ -270,11 +287,6 @@ export default function AdminRouteAssignment() {
       setMessage(error.message);
     } else {
       setMessage("Route auto-assigned by district");
-      setSubmitLocked(true);
-      setConfirmTitle("Route Assigned");
-      setConfirmMessage("Route auto-assigned by district.");
-      setConfirmAction("route");
-      setShowConfirm(true);
 
       const { data } = await supabase
         .from("route_sites")
@@ -283,6 +295,10 @@ export default function AdminRouteAssignment() {
         .order("sequence_no");
 
       setSelectedSites(data?.map(r => r.site_id) || []);
+      const assignedCount = data?.length || 0;
+      setAutoAssignNotice(
+        `Auto-assigned ${assignedCount} site${assignedCount === 1 ? "" : "s"} for ${selectedDistrict}. You can adjust and click Save Route.`
+      );
     }
 
     setSaving(false);
@@ -327,11 +343,12 @@ export default function AdminRouteAssignment() {
               />
 
               <button
+                type="button"
                 onClick={createAssignment}
-                disabled={submitLocked}
+                disabled={submitLocked || creating}
                 className="bg-primary text-white px-4 py-2 rounded text-sm disabled:opacity-50"
               >
-                Create Assignment
+                {creating ? "Creating..." : "Create Assignment"}
               </button>
             </div>
 
@@ -381,12 +398,19 @@ export default function AdminRouteAssignment() {
                   </select>
 
                   <button
+                    type="button"
                     onClick={autoAssignByDistrict}
                     disabled={saving}
                     className="bg-slate-700 text-white px-4 py-2 rounded text-sm"
                   >
                     Auto Assign Route
                   </button>
+
+                  {autoAssignNotice && (
+                    <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+                      {autoAssignNotice}
+                    </div>
+                  )}
                 </div>
 
                 {/* Manual Assign */}
@@ -407,6 +431,7 @@ export default function AdminRouteAssignment() {
                 </div>
 
                 <button
+                  type="button"
                   disabled={saving || submitLocked}
                   onClick={saveRoute}
                   className="bg-primary text-white px-4 py-2 rounded disabled:opacity-50"

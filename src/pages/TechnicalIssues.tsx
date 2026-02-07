@@ -5,6 +5,7 @@ import { AppLayout } from "../components/Layout";
 import FileUpload from "../components/FileUpload";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";
+import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 type SiteOption = {
   site_id: number;
@@ -147,6 +148,18 @@ export default function TechnicalIssues() {
       console.error(error);
       setMessage("Failed to report issue");
     } else {
+      try {
+        if (assignmentId && profile?.id) {
+          await travelLogService.triggerCheckpoint({
+            assignmentId,
+            custodianId: profile.id,
+            vehicleType: "bike",
+            context: TravelContext.MANUAL,
+          });
+        }
+      } catch (err) {
+        console.warn("[TechnicalIssues] Travel log trigger failed:", err);
+      }
       setSubmitLocked(true);
       setMessage("Issue reported successfully");
       const siteLabel = sites.find((s) => s.site_id === selectedSite)

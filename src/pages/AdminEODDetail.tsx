@@ -249,7 +249,7 @@ export default function AdminEODDetail() {
 
         <div className="grid grid-cols-2 gap-2 text-xs mt-2">
           {DENOM_ORDER.map((d) => (
-            <div key={d}>₹{d} × {c[`denom_${d}`] || 0}</div>
+            <div key={d}>{c[`denom_${d}`] || 0} × ₹{d}</div>
           ))}
         </div>
 
@@ -280,7 +280,7 @@ export default function AdminEODDetail() {
 
               <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                 {DENOM_ORDER.map((d) => (
-                  <div key={d}>₹{d} × {a[`denom_${d}`] || 0}</div>
+                  <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
                 ))}
               </div>
 
@@ -341,7 +341,7 @@ export default function AdminEODDetail() {
               <div className="font-medium">{formatSite(e.site)}</div>
               <div className="grid grid-cols-2 gap-2 mt-2">
                 {DENOM_ORDER.map((d) => (
-                  <div key={d}>₹{d} × {e[`denom_${d}`] || 0}</div>
+                  <div key={d}>{e[`denom_${d}`] || 0} × ₹{d}</div>
                 ))}
               </div>
               <div className="mt-2 font-semibold">

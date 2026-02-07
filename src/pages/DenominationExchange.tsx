@@ -5,6 +5,7 @@ import { DenominationFields } from "../components/DenominationFields";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
+import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 type Denoms = {
   denom_100: number;
@@ -60,6 +61,11 @@ export default function DenominationExchange() {
 
   const [fromDenoms, setFromDenoms] = useState<Denoms>(EMPTY_DENOMS);
   const [toDenoms, setToDenoms] = useState<Denoms>(EMPTY_DENOMS);
+
+  const [availableFromDenoms, setAvailableFromDenoms] = useState<Denoms | null>(null);
+  const [availableFromTotal, setAvailableFromTotal] = useState(0);
+  const [availableFromLoading, setAvailableFromLoading] = useState(false);
+  const [availableFromError, setAvailableFromError] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [submitLocked, setSubmitLocked] = useState(false);
@@ -166,6 +172,52 @@ export default function DenominationExchange() {
   const selectedFromBank = bankAccounts.find((b) => b.id === fromBankId);
   const selectedToBank = bankAccounts.find((b) => b.id === toBankId);
 
+  useEffect(() => {
+    if (!assignmentId || !selectedFromBank?.bank_name) {
+      setAvailableFromDenoms(null);
+      setAvailableFromTotal(0);
+      setAvailableFromError(null);
+      return;
+    }
+
+    async function loadAvailableFromBank() {
+      setAvailableFromLoading(true);
+      setAvailableFromError(null);
+
+      const { data, error: pickupError } = await supabase
+        .from("cash_pickups")
+        .select("denom_2000, denom_500, denom_200, denom_100")
+        .eq("assignment_id", assignmentId)
+        .eq("bank_name", selectedFromBank.bank_name);
+
+      if (pickupError) {
+        console.warn("Failed to load bank pickups:", pickupError);
+        setAvailableFromDenoms(null);
+        setAvailableFromTotal(0);
+        setAvailableFromError("Unable to load picked denominations for this bank.");
+        setAvailableFromLoading(false);
+        return;
+      }
+
+      const totals = (data || []).reduce(
+        (acc: Denoms, row: any) => {
+          acc.denom_100 += row.denom_100 || 0;
+          acc.denom_200 += row.denom_200 || 0;
+          acc.denom_500 += row.denom_500 || 0;
+          acc.denom_2000 += row.denom_2000 || 0;
+          return acc;
+        },
+        { ...EMPTY_DENOMS }
+      );
+
+      setAvailableFromDenoms(totals);
+      setAvailableFromTotal(denomTotal(totals));
+      setAvailableFromLoading(false);
+    }
+
+    loadAvailableFromBank();
+  }, [assignmentId, selectedFromBank?.bank_name]);
+
   const canSubmit =
     !saving &&
     !submitLocked &&
@@ -173,7 +225,6 @@ export default function DenominationExchange() {
     soaId &&
     fromBankId &&
     toBankId &&
-    fromBankId !== toBankId &&
     reason.trim().length > 0 &&
     fromTotal > 0 &&
     fromTotal === toTotal;
@@ -219,6 +270,19 @@ export default function DenominationExchange() {
         setError(insertError.message || "Failed to record exchange.");
         setSaving(false);
         return;
+      }
+
+      try {
+        if (assignmentId && profile?.id) {
+          await travelLogService.triggerCheckpoint({
+            assignmentId,
+            custodianId: profile.id,
+            vehicleType: "bike",
+            context: TravelContext.MANUAL,
+          });
+        }
+      } catch (err) {
+        console.warn("[DenominationExchange] Travel log trigger failed:", err);
       }
 
       setSubmitLocked(true);
@@ -380,6 +444,54 @@ export default function DenominationExchange() {
                 ₹{fromTotal.toLocaleString("en-IN")}
               </span>
             </div>
+            {availableFromLoading ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
+                Loading picked denominations...
+              </div>
+            ) : availableFromError ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                ⚠️ {availableFromError}
+              </div>
+            ) : availableFromDenoms ? (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-indigo-700 font-semibold">
+                      Picked From Bank (Today)
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Use this as a reference while entering the exchange.
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-indigo-900 bg-indigo-100 px-2 py-1 rounded">
+                    ₹{availableFromTotal.toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    ["denom_100", 100],
+                    ["denom_200", 200],
+                    ["denom_500", 500],
+                    ["denom_2000", 2000],
+                  ].map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="rounded-md border border-indigo-200 bg-white px-3 py-2"
+                    >
+                      <div className="text-xs text-slate-500">₹{value}</div>
+                      <div className="text-sm font-semibold text-indigo-900">
+                        {(availableFromDenoms as any)[key] || 0}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        ₹{(((availableFromDenoms as any)[key] || 0) * value).toLocaleString(
+                          "en-IN"
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <DenominationFields
               values={fromDenoms}
               onChange={(name, value) =>
@@ -424,8 +536,6 @@ export default function DenominationExchange() {
             >
               {fromTotal === 0
                 ? "Enter denominations to proceed"
-                : fromBankId === toBankId
-                ? "From and To banks must differ"
                 : fromTotal === toTotal
                 ? "Balanced exchange"
                 : "Totals must match"}

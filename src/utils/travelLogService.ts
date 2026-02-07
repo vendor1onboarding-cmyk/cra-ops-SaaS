@@ -328,6 +328,27 @@ class TravelLogService {
       return null;
     }
   }
+
+  /**
+   * Trigger a travel checkpoint: start if none active, otherwise chain
+   * SAFE: Returns new travel ID or null on failure
+   */
+  async triggerCheckpoint(
+    options: TravelLogServiceOptions
+  ): Promise<number | null> {
+    try {
+      const hasActive = await this.hasActiveTravel(options.custodianId);
+
+      if (!hasActive) {
+        return await this.startTravel(options);
+      }
+
+      return await this.endAndStartTravel(options.custodianId, options);
+    } catch (error) {
+      console.warn("[TravelLog] Trigger checkpoint failed:", error);
+      return null;
+    }
+  }
 }
 
 // Export singleton instance

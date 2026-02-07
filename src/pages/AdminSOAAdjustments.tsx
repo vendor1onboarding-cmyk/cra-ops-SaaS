@@ -219,7 +219,7 @@ export default function AdminSOAAdjustments() {
     return entries
       .map(([key, count]) => {
         const denom = key.replace("denom_", "");
-        return `₹${denom}×${count}`;
+        return `${count} × ₹${denom}`;
       })
       .join(", ");
   }
