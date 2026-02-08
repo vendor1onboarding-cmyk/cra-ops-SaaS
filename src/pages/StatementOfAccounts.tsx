@@ -14,6 +14,8 @@ type SOASummaryRow = {
   assignment_date: string;
   cash_picked: number;
   cash_loaded: number;
+  bank_loaded?: number;
+  internal_transferred?: number;
   excess_reported: number;
   travel_km: number;
   travel_allowance: number;
@@ -45,6 +47,7 @@ export default function StatementOfAccounts() {
   const [viewMode, setViewMode] = useState<"summary" | "detailed">("summary");
   const [summaryRows, setSummaryRows] = useState<SOASummaryRow[]>([]);
   const [detailedRows, setDetailedRows] = useState<SOADetailedRow[]>([]);
+  const [loadSourceData, setLoadSourceData] = useState<Map<number, { bank: number; internal: number }>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<
@@ -116,6 +119,30 @@ export default function StatementOfAccounts() {
 
         const { data, error: queryError } = await query;
 
+        // Load source breakdown data for summary view
+        if (isSummary && data && data.length > 0) {
+          const assignmentIds = [...new Set(data.map((r: any) => r.assignment_id).filter(Boolean))];
+          
+          if (assignmentIds.length > 0) {
+            const { data: sourceData } = await supabase
+              .from("v_atm_load_sources")
+              .select("assignment_id, bank_total_amount, internal_total_amount")
+              .in("assignment_id", assignmentIds);
+
+            if (sourceData) {
+              const sourceMap = new Map<number, { bank: number; internal: number }>();
+              sourceData.forEach((s: any) => {
+                const existing = sourceMap.get(s.assignment_id) || { bank: 0, internal: 0 };
+                sourceMap.set(s.assignment_id, {
+                  bank: existing.bank + (s.bank_total_amount || 0),
+                  internal: existing.internal + (s.internal_total_amount || 0),
+                });
+              });
+              setLoadSourceData(sourceMap);
+            }
+          }
+        }
+
         if (queryError) {
           setError("Failed to load SOA records. Please try again.");
           console.error("SOA Query Error:", queryError);
@@ -163,10 +190,15 @@ export default function StatementOfAccounts() {
                 (assignments || []).map((a: any) => [a.id, a.status])
               );
 
-              rows = rows.map((row: any) => ({
-                ...row,
-                status: statusMap.get(row.assignment_id ?? row.soa_id),
-              }));
+              rows = rows.map((row: any) => {
+                const sources = loadSourceData.get(row.assignment_id ?? row.soa_id);
+                return {
+                  ...row,
+                  status: statusMap.get(row.assignment_id ?? row.soa_id),
+                  bank_loaded: sources?.bank ?? row.cash_loaded,
+                  internal_transferred: sources?.internal ?? 0,
+                };
+              });
             }
           }
 
@@ -222,11 +254,13 @@ export default function StatementOfAccounts() {
       (acc, r) => {
         acc.cashPicked += r.cash_picked;
         acc.cashLoaded += r.cash_loaded;
+        acc.bankLoaded += r.bank_loaded ?? r.cash_loaded;
+        acc.internalTransferred += r.internal_transferred ?? 0;
         acc.allowance += r.travel_allowance;
         acc.net += r.final_net_cash_position;
         return acc;
       },
-      { cashPicked: 0, cashLoaded: 0, allowance: 0, net: 0 }
+      { cashPicked: 0, cashLoaded: 0, bankLoaded: 0, internalTransferred: 0, allowance: 0, net: 0 }
     );
   }, [summaryRows]);
 
@@ -271,7 +305,8 @@ export default function StatementOfAccounts() {
           ...(isAdmin ? ["Custodian"] : []),
           "Status",
           "Cash Picked",
-          "Cash Loaded",
+          "Bank Loaded",
+          "Internal Transferred",
           "Travel KM",
           ...(showAllowance ? ["Allowance"] : []),
           "Final Net Position",
@@ -301,7 +336,8 @@ export default function StatementOfAccounts() {
             ...(isAdmin ? [row.full_name || "Unknown"] : []),
             row.status || "-",
             row.cash_picked,
-            row.cash_loaded,
+            row.bank_loaded ?? row.cash_loaded,
+            row.internal_transferred ?? 0,
             row.travel_km,
             ...(showAllowance ? [row.travel_allowance] : []),
             row.final_net_cash_position,
@@ -522,9 +558,26 @@ export default function StatementOfAccounts() {
           )}
         </div>
 
+        {/* ===== Load Source Breakdown Info ===== */}
+        {!loading && viewMode === "summary" && summaryTotals.internalTransferred > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 print:hidden">
+            <h3 className="text-sm font-semibold text-blue-900 mb-2">
+              💡 Cash Load Breakdown
+            </h3>
+            <div className="text-xs text-blue-800 space-y-1">
+              <p className="font-medium">Total Cash Loaded: ₹{summaryTotals.cashLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+              <p className="ml-4">├─ From Bank: ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-green-700">(included in SOA)</span></p>
+              <p className="ml-4">└─ Internal Transfers: ₹{summaryTotals.internalTransferred.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-slate-700">(neutral - already accounted)</span></p>
+            </div>
+            <p className="text-xs text-blue-700 mt-2 italic">
+              Internal ATM transfers do not affect vendor reconciliation. They represent cash moved between sites.
+            </p>
+          </div>
+        )}
+
         {/* ===== KPI Section ===== */}
         {!loading && viewMode === "summary" && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
             <KPI
               label="Total Picked"
               value={summaryTotals.cashPicked}
@@ -532,10 +585,16 @@ export default function StatementOfAccounts() {
               color="blue"
             />
             <KPI
-              label="Total Loaded"
-              value={summaryTotals.cashLoaded}
+              label="Loaded (Bank)"
+              value={summaryTotals.bankLoaded}
               subtext="₹"
               color="green"
+            />
+            <KPI
+              label="Internal Transfers"
+              value={summaryTotals.internalTransferred}
+              subtext="₹"
+              color="slate"
             />
             {showAllowance ? (
               <KPI
@@ -659,13 +718,23 @@ export default function StatementOfAccounts() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-slate-500">Loaded</p>
-                              <p className="font-semibold text-slate-900">
-                                ₹{r.cash_loaded.toLocaleString("en-IN", {
+                              <p className="text-slate-500">Bank Loaded</p>
+                              <p className="font-semibold text-green-700">
+                                ₹{(r.bank_loaded ?? r.cash_loaded).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
                               </p>
                             </div>
+                            {(r.internal_transferred ?? 0) > 0 && (
+                              <div className="col-span-2">
+                                <p className="text-slate-500">Internal Transfers</p>
+                                <p className="font-semibold text-slate-700">
+                                  ₹{r.internal_transferred!.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </p>
+                              </div>
+                            )}
                             <div>
                               <p className="text-slate-500">KM</p>
                               <p className="font-semibold text-slate-900">
@@ -724,7 +793,10 @@ export default function StatementOfAccounts() {
                             Picked
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                            Loaded
+                            Bank Loaded
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            Internal
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
                             KM
@@ -768,10 +840,21 @@ export default function StatementOfAccounts() {
                                   minimumFractionDigits: 2,
                                 })}
                               </td>
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                {r.cash_loaded.toLocaleString("en-IN", {
+                              <td className="px-4 py-3 text-right text-green-700 font-medium">
+                                {(r.bank_loaded ?? r.cash_loaded).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                {(r.internal_transferred ?? 0) > 0 ? (
+                                  <span className="text-slate-700 bg-slate-100 px-2 py-1 rounded text-xs font-medium">
+                                    {r.internal_transferred!.toLocaleString("en-IN", {
+                                      minimumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-right text-slate-900">
                                 {r.travel_km}
@@ -813,8 +896,13 @@ export default function StatementOfAccounts() {
                               minimumFractionDigits: 2,
                             })}
                           </td>
-                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                            {summaryTotals.cashLoaded.toLocaleString("en-IN", {
+                          <td className="px-4 py-3 text-right font-semibold text-green-700">
+                            {summaryTotals.bankLoaded.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-700">
+                            {summaryTotals.internalTransferred.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                             })}
                           </td>
