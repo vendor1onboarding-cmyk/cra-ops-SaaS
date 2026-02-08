@@ -123,4 +123,4 @@ Date,Custodian,Status,Cash Picked,Bank Loaded,Internal Transferred,Travel KM,All
 - `SOA_LOAD_SOURCE_SPLIT_IMPLEMENTATION.md` - Full guide
 
 ## Version
-**v1.0** - February 8, 2025
+**v1.0** - February 8, 2026
