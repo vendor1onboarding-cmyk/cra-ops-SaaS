@@ -155,75 +155,125 @@ export default function ATMExcessCash() {
 
   return (
     <AppLayout>
-      <div className="max-w-xl mx-auto space-y-4">
-        <h2 className="text-xl font-semibold text-primary">
-          ATM Excess Cash Entry
-        </h2>
-
+      <div className="max-w-2xl mx-auto space-y-5">
         <div>
-          <label className="text-sm">ATM Site</label>
-          <select
-            className="w-full border rounded px-2 py-1 text-sm"
-            value={siteId ?? ""}
-            onChange={(e) => setSiteId(Number(e.target.value))}
-          >
-            <option value="">-- Select ATM --</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.bank_name} – {s.address}
-              </option>
+          <h2 className="text-2xl font-bold text-primary mb-1">
+            ATM Excess Cash Entry
+          </h2>
+          <p className="text-sm text-slate-600">
+            Record excess cash left after ATM loading with receipt proof
+          </p>
+        </div>
+
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              ATM Site <span className="text-red-500">*</span>
+            </label>
+            <select
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              value={siteId ?? ""}
+              onChange={(e) => setSiteId(Number(e.target.value))}
+            >
+              <option value="">-- Select ATM --</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.bank_name} – {s.address}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800 mb-2">
+              Excess Denominations
+            </h3>
+            <p className="text-xs text-slate-500">
+              Enter the count of excess notes for each denomination.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {(["100", "200", "500", "2000"] as const).map((d) => (
+              <div key={d} className="form-group">
+                <label className="text-sm font-medium text-slate-700">
+                  ₹{d} Excess Notes
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={(denoms as any)[`denom_${d}`]}
+                  onChange={(e) =>
+                    setDenoms({
+                      ...denoms,
+                      [`denom_${d}`]: Number(e.target.value),
+                    })
+                  }
+                  placeholder="0"
+                />
+              </div>
             ))}
-          </select>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          {(["100", "200", "500", "2000"] as const).map((d) => (
-            <div key={d}>
-              <label className="text-sm">₹{d} Excess Notes</label>
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              ATM Receipt <span className="text-red-500">*</span>
+            </label>
+            <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center">
               <input
-                type="number"
-                min={0}
-                className="w-full border rounded px-2 py-1 text-sm"
-                value={(denoms as any)[`denom_${d}`]}
-                onChange={(e) =>
-                  setDenoms({
-                    ...denoms,
-                    [`denom_${d}`]: Number(e.target.value),
-                  })
-                }
+                type="file"
+                accept="image/*"
+                onChange={(e) => setReceipt(e.target.files?.[0] || null)}
+                className="hidden"
+                id="excess-receipt"
               />
+              <label htmlFor="excess-receipt" className="cursor-pointer block">
+                <div className="text-3xl mb-2">🧾</div>
+                <p className="text-sm font-medium text-slate-700">
+                  {receipt ? receipt.name : "Click to upload ATM receipt"}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  PNG, JPG up to 10MB
+                </p>
+              </label>
             </div>
-          ))}
+          </div>
         </div>
 
-        <div>
-          <label className="text-sm">ATM Receipt (Required)</label>
-          <input
-            type="file"
-            accept="image/*"
-            className="w-full text-sm"
-            onChange={(e) => setReceipt(e.target.files?.[0] || null)}
-          />
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Remarks
+            </label>
+            <textarea
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px]"
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="Add any notes about the excess cash..."
+            />
+          </div>
         </div>
 
-        <div>
-          <label className="text-sm">Remarks</label>
-          <textarea
-            className="w-full border rounded px-2 py-1 text-sm"
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-          />
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-lg text-sm">
+            ⚠️ {error}
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving || submitLocked}
+            className="flex-1 bg-green-600 text-white py-2.5 rounded-lg font-semibold hover:bg-green-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            {saving ? "Saving…" : "Save Excess Cash Record"}
+          </button>
         </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <button
-          onClick={handleSave}
-          disabled={saving || submitLocked}
-          className="w-full py-2 bg-green-600 text-white rounded text-sm"
-        >
-          {saving ? "Saving…" : "Save Excess Cash Record"}
-        </button>
       </div>
 
       <ConfirmationModal

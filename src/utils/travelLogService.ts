@@ -278,6 +278,128 @@ class TravelLogService {
   }
 
   /**
+   * End travel using a provided GPS end location
+   * SAFE: Returns false on any failure without throwing
+   */
+  async endTravelAtCoordinates(
+    custodianId: string,
+    endGps: GPSCoordinates,
+    options?: { odometerEnd?: string; allowZeroDistance?: boolean }
+  ): Promise<boolean> {
+    try {
+      const { data: activeTravel } = await supabase
+        .from("travel_logs")
+        .select("*")
+        .eq("custodian_id", custodianId)
+        .eq("status", "in_progress")
+        .order("start_time", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!activeTravel) {
+        console.warn("[TravelLog] No active travel to end");
+        return false;
+      }
+
+      const { distance: km, method, accuracy } = await calculateDistanceWithFallback(
+        activeTravel.gps_start_lat,
+        activeTravel.gps_start_lng,
+        endGps.lat,
+        endGps.lng
+      );
+
+      console.log(
+        `[TravelLog] Distance calculated: ${km.toFixed(2)} km (method: ${method}, accuracy: ${accuracy})`
+      );
+
+      let finalKm = km;
+      if (
+        km < 0.05 &&
+        activeTravel.odometer_start &&
+        options?.odometerEnd
+      ) {
+        finalKm = Number(options.odometerEnd) - Number(activeTravel.odometer_start);
+        console.log(`[TravelLog] Using odometer distance: ${finalKm.toFixed(2)} km`);
+      }
+
+      if (finalKm < 0.05 && !options?.allowZeroDistance) {
+        console.warn("[TravelLog] Distance too small, not ending travel");
+        return false;
+      }
+
+      const allowance = Math.max(0, finalKm) * (activeTravel.rate_per_km || 0);
+      const nowUTC = new Date().toISOString();
+
+      const { error } = await supabase
+        .from("travel_logs")
+        .update({
+          end_time: nowUTC,
+          gps_end_lat: endGps.lat,
+          gps_end_lng: endGps.lng,
+          odometer_end: options?.odometerEnd || null,
+          km_covered: Math.max(0, finalKm),
+          allowance_amount: allowance,
+          status: "completed",
+        })
+        .eq("id", activeTravel.id);
+
+      if (error) {
+        console.warn("[TravelLog] Failed to update travel end:", error);
+        return false;
+      }
+
+      this.setTravelContext(null);
+
+      console.log("[TravelLog] Travel ended successfully:", activeTravel.id);
+      return true;
+    } catch (error) {
+      console.warn("[TravelLog] End travel failed:", error);
+      return false;
+    }
+  }
+
+  /**
+   * End active travel using the start-of-day GPS as the end location
+   * SAFE: Returns false on any failure without throwing
+   */
+  async endTravelToStartOfDay(
+    assignmentId: number,
+    custodianId: string
+  ): Promise<boolean> {
+    try {
+      const { data: firstTravel } = await supabase
+        .from("travel_logs")
+        .select("gps_start_lat, gps_start_lng")
+        .eq("assignment_id", assignmentId)
+        .eq("custodian_id", custodianId)
+        .order("start_time", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        !firstTravel ||
+        typeof firstTravel.gps_start_lat !== "number" ||
+        typeof firstTravel.gps_start_lng !== "number"
+      ) {
+        console.warn("[TravelLog] Start-of-day GPS not available");
+        return false;
+      }
+
+      return await this.endTravelAtCoordinates(
+        custodianId,
+        {
+          lat: firstTravel.gps_start_lat,
+          lng: firstTravel.gps_start_lng,
+        },
+        { allowZeroDistance: true }
+      );
+    } catch (error) {
+      console.warn("[TravelLog] End travel to start-of-day failed:", error);
+      return false;
+    }
+  }
+
+  /**
    * Calculate distance in kilometers using Haversine formula
    * @deprecated Use roadDistance.ts calculateDistanceWithFallback instead
    * Kept for backward compatibility and reference

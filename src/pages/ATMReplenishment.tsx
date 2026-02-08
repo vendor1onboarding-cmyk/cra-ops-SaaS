@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
@@ -102,9 +102,19 @@ export default function ATMReplenishment() {
   const [error, setError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState("");
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   // Travel log integration (optional, non-blocking)
   const [captureTravelLog, setCaptureTravelLog] = useState(true);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   /* ---------------- Load assignment & sites ---------------- */
 
@@ -554,16 +564,59 @@ export default function ATMReplenishment() {
       return;
     }
 
+    let isLastSiteLoad = false;
+    if (captureTravelLog && sites.length > 0) {
+      try {
+        const { data: loads, error: loadError } = await supabase
+          .from("atm_replenishments")
+          .select("site_id")
+          .eq("assignment_id", assignmentId);
+
+        if (loadError) {
+          console.warn("[ATMLoad] Failed to check last site:", loadError);
+        } else {
+          const uniqueSiteIds = new Set((loads || []).map((l: any) => l.site_id));
+          isLastSiteLoad = uniqueSiteIds.size >= sites.length;
+        }
+      } catch (err) {
+        console.warn("[ATMLoad] Error checking last site:", err);
+      }
+    }
+
     // TRAVEL LOG INTEGRATION (SAFE, NON-BLOCKING)
     // This runs AFTER ATM load is saved, so it never blocks the primary flow
     if (captureTravelLog) {
       try {
-        await travelLogService.triggerCheckpoint({
-          assignmentId: assignmentId,
-          custodianId: profile!.id,
-          vehicleType: "bike",
-          context: TravelContext.ATM,
-        });
+        const isAtmContext = travelLogService.getTravelContext() === TravelContext.ATM;
+
+        if (isLastSiteLoad && isAtmContext) {
+          const ended = await travelLogService.endTravelToStartOfDay(
+            assignmentId,
+            profile!.id
+          );
+          if (ended) {
+            const siteLabel = site
+              ? `${site.bank_name}${site.address ? `, ${site.address}` : ""}`
+              : "last site";
+            setToastMessage(
+              `Travel ended automatically after ${siteLabel}. ` +
+                "End location set to the start-of-day point."
+            );
+            if (toastTimerRef.current) {
+              window.clearTimeout(toastTimerRef.current);
+            }
+            toastTimerRef.current = window.setTimeout(() => {
+              setToastMessage(null);
+            }, 3500);
+          }
+        } else {
+          await travelLogService.triggerCheckpoint({
+            assignmentId: assignmentId,
+            custodianId: profile!.id,
+            vehicleType: "bike",
+            context: TravelContext.ATM,
+          });
+        }
       } catch (err) {
         // Silent failure - travel log errors never affect ATM load
         console.warn("[ATMLoad] Travel log trigger failed (non-critical):", err);
@@ -582,6 +635,11 @@ export default function ATMReplenishment() {
 
   return (
     <AppLayout>
+      {toastMessage && (
+        <div className="fixed top-4 right-4 z-50 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 shadow-lg">
+          {toastMessage}
+        </div>
+      )}
       <div className="max-w-2xl mx-auto space-y-5">
         <div>
           <h2 className="text-2xl font-bold text-primary mb-1">ATM Load</h2>
