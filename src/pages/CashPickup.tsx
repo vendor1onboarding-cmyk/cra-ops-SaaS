@@ -5,6 +5,7 @@ import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
+import { ATMSiteSelector } from "../components/ATMSiteSelector";
 
 interface BankAccount {
   id: string;
@@ -18,6 +19,13 @@ interface BankAccount {
   branch_address: string | null;
 }
 
+interface SiteDenoms {
+  denom_100: number;
+  denom_200: number;
+  denom_500: number;
+  denom_2000: number;
+}
+
 interface ATMSite {
   id: number;
   bank_name: string;
@@ -26,22 +34,10 @@ interface ATMSite {
   longitude: number | null;
 }
 
-interface InternalSource {
-  siteId: number;
-  siteName: string;
-  denoms: {
-    denom_100: number;
-    denom_200: number;
-    denom_500: number;
-    denom_2000: number;
-  };
-  totalAmount: number;
-  availableDenoms: {
-    denom_100: number;
-    denom_200: number;
-    denom_500: number;
-    denom_2000: number;
-  };
+interface SelectedSite {
+  site: ATMSite;
+  denoms: SiteDenoms;
+  available: SiteDenoms;
 }
 
 type SourceMode = "bank-only" | "bank-and-atm";
@@ -53,6 +49,8 @@ export default function CashPickup() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [selectedBankId, setSelectedBankId] = useState<string>("");
   const [expectedAmount, setExpectedAmount] = useState<number>(0);
+  const [sourceMode, setSourceMode] = useState<SourceMode>("bank-only");
+  const [selectedATMSites, setSelectedATMSites] = useState<SelectedSite[]>([]);
 
   const [form, setForm] = useState({
     denom_2000: 0,
@@ -63,12 +61,6 @@ export default function CashPickup() {
     denom_20: 0,
     denom_10: 0,
   });
-
-  // Multi-source enhancement
-  const [sourceMode, setSourceMode] = useState<SourceMode>("bank-only");
-  const [atmSites, setAtmSites] = useState<ATMSite[]>([]);
-  const [internalSources, setInternalSources] = useState<InternalSource[]>([]);
-  const [loadingAtmSites, setLoadingAtmSites] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [submitLocked, setSubmitLocked] = useState(false);
@@ -204,11 +196,23 @@ export default function CashPickup() {
   // --------------------------------------------------
   // Calculate totals
   // --------------------------------------------------
-  const totalAmount =
+  const bankAmount =
     form.denom_2000 * 2000 +
     form.denom_500 * 500 +
     form.denom_200 * 200 +
     form.denom_100 * 100;
+
+  const internalAmount = selectedATMSites.reduce((total, site) => {
+    return (
+      total +
+      site.denoms.denom_100 * 100 +
+      site.denoms.denom_200 * 200 +
+      site.denoms.denom_500 * 500 +
+      site.denoms.denom_2000 * 2000
+    );
+  }, 0);
+
+  const totalAmount = sourceMode === "bank-only" ? bankAmount : bankAmount + internalAmount;
 
   const variance = totalAmount - expectedAmount;
 
@@ -225,6 +229,8 @@ export default function CashPickup() {
   function resetForm() {
     setSelectedBankId("");
     setExpectedAmount(0);
+    setSourceMode("bank-only");
+    setSelectedATMSites([]);
     setForm({
       denom_2000: 0,
       denom_500: 0,
@@ -249,6 +255,31 @@ export default function CashPickup() {
 
     const bankName = selectedBank?.bank_name || "";
 
+    // Construct internal_source_metadata for bank-and-atm mode
+    let internalSourceMetadata = null;
+    if (sourceMode === "bank-and-atm" && selectedATMSites.length > 0) {
+      const sources = selectedATMSites.map((selected) => ({
+        site_id: selected.site.id,
+        site_name: selected.site.bank_name,
+        denominations: {
+          denom_100: selected.denoms.denom_100,
+          denom_200: selected.denoms.denom_200,
+          denom_500: selected.denoms.denom_500,
+          denom_2000: selected.denoms.denom_2000,
+        },
+        total_amount:
+          selected.denoms.denom_100 * 100 +
+          selected.denoms.denom_200 * 200 +
+          selected.denoms.denom_500 * 500 +
+          selected.denoms.denom_2000 * 2000,
+      }));
+
+      internalSourceMetadata = {
+        sources,
+        total_internal_amount: internalAmount,
+      };
+    }
+
     const { error } = await supabase
       .from("cash_pickups")
       .upsert(
@@ -260,6 +291,7 @@ export default function CashPickup() {
           expected_amount: expectedAmount,
           total_amount: totalAmount,
           variance,
+          internal_source_metadata: internalSourceMetadata,
           ...form,
         },
         {
@@ -429,13 +461,58 @@ export default function CashPickup() {
                   placeholder="0"
                 />
               </div>
+
+              {/* Source Mode Selection */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Cash Pickup Source
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSourceMode("bank-only");
+                      setSelectedATMSites([]);
+                    }}
+                    className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+                      sourceMode === "bank-only"
+                        ? "bg-primary text-white border-primary"
+                        : "bg-white text-slate-700 border-slate-300 hover:border-primary"
+                    }`}
+                  >
+                    Bank Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSourceMode("bank-and-atm")}
+                    className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+                      sourceMode === "bank-and-atm"
+                        ? "bg-primary text-white border-primary"
+                        : "bg-white text-slate-700 border-slate-300 hover:border-primary"
+                    }`}
+                  >
+                    Bank + Internal ATM
+                  </button>
+                </div>
+                {sourceMode === "bank-and-atm" && (
+                  <p className="text-xs text-slate-600 mt-2">
+                    💡 You can pick up cash from both bank and internal ATM sites
+                  </p>
+                )}
+              </div>
             </div>
 
+            {/* Bank Denomination Details */}
             <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
               <div>
-                <h3 className="text-lg font-semibold text-slate-800 mb-4">
-                  Denomination Details
+                <h3 className="text-lg font-semibold text-slate-800 mb-1">
+                  {sourceMode === "bank-and-atm" ? "Bank Cash Pickup" : "Denomination Details"}
                 </h3>
+                {sourceMode === "bank-and-atm" && (
+                  <p className="text-xs text-slate-600">
+                    Enter cash collected from the bank below
+                  </p>
+                )}
               </div>
 
               {plannedLoading ? (
@@ -478,7 +555,7 @@ export default function CashPickup() {
                           {(plannedDenoms as any)[key] || 0}
                         </div>
                         <div className="text-xs text-slate-500">
-                          ₹{(((plannedDenoms as any)[key] || 0) * value).toLocaleString(
+                          ₹{(((plannedDenoms as any)[key] || 0) * Number(value)).toLocaleString(
                             "en-IN"
                           )}
                         </div>
@@ -519,9 +596,11 @@ export default function CashPickup() {
               {/* Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <span className="text-xs text-slate-600">Total Amount</span>
+                  <span className="text-xs text-slate-600">
+                    {sourceMode === "bank-and-atm" ? "Bank Amount" : "Total Amount"}
+                  </span>
                   <div className="text-xl font-bold text-primary">
-                    ₹{totalAmount.toLocaleString()}
+                    ₹{bankAmount.toLocaleString("en-IN")}
                   </div>
                 </div>
 
@@ -534,11 +613,93 @@ export default function CashPickup() {
                   <div className={`text-xl font-bold ${
                     variance === 0 ? "text-green-600" : "text-red-600"
                   }`}>
-                    ₹{variance.toLocaleString()}
+                    ₹{variance.toLocaleString("en-IN")}
                   </div>
                 </div>
               </div>
             </div>
+
+            {/* Internal ATM Sites Selector */}
+            {sourceMode === "bank-and-atm" && assignmentId && (
+              <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800 mb-1">
+                    Internal ATM Cash Pickup
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Select ATM sites to transfer cash from (optional)
+                  </p>
+                </div>
+
+                <ATMSiteSelector
+                  assignmentId={assignmentId}
+                  selectedSites={selectedATMSites}
+                  onChange={setSelectedATMSites}
+                />
+              </div>
+            )}
+
+            {/* Combined Total Summary (for bank-and-atm mode) */}
+            {sourceMode === "bank-and-atm" && (
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-300 rounded-lg p-5 space-y-4">
+                <h3 className="text-lg font-semibold text-indigo-900 mb-3">
+                  💰 Combined Cash Pickup Summary
+                </h3>
+
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-700">Bank Cash:</span>
+                    <span className="font-semibold text-slate-900">
+                      ₹{bankAmount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-700">Internal ATM Cash:</span>
+                    <span className="font-semibold text-slate-900">
+                      ₹{internalAmount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+
+                  <div className="border-t border-indigo-300 my-2"></div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-bold text-indigo-900">Grand Total:</span>
+                    <span className="text-2xl font-bold text-indigo-900">
+                      ₹{totalAmount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedATMSites.length > 0 && (
+                  <div className="bg-white bg-opacity-70 rounded-md p-3 mt-3">
+                    <div className="text-xs font-semibold text-slate-700 mb-2">
+                      Internal Sources ({selectedATMSites.length}):
+                    </div>
+                    <div className="space-y-1">
+                      {selectedATMSites.map((site) => {
+                        const siteTotal =
+                          site.denoms.denom_100 * 100 +
+                          site.denoms.denom_200 * 200 +
+                          site.denoms.denom_500 * 500 +
+                          site.denoms.denom_2000 * 2000;
+                        return (
+                          <div
+                            key={site.site.id}
+                            className="flex justify-between text-xs text-slate-600"
+                          >
+                            <span>• {site.site.bank_name}</span>
+                            <span className="font-medium">
+                              ₹{siteTotal.toLocaleString("en-IN")}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row gap-3">
               <button
