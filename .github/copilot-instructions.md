@@ -13,7 +13,7 @@ This file gives focused, actionable guidance for AI coding agents working in thi
 
 ## SOA data flow (core feature)
 - Statement of Accounts page: `src/pages/StatementOfAccounts.tsx` queries `v_soa_effective` with date range filters; custodian filter is `eq("custodian_id", profile.id)`.
-- Admin adjustments page: `src/pages/AdminSOAAdjustments.tsx` inserts into `soa_adjustments` with `adjustment_type` of CREDIT/DEBIT and `adjustment_amount` as `Math.abs(parsedAmount)`.
+- Admin adjustments page: `src/pages/AdminSOAAdjustments.tsx` is read-only and shows operational adjustments (EXCHANGE/INTER_SITE_TRANSFER), with an optional legacy CREDIT/DEBIT view for audit only.
 
 ## UI and formatting conventions
 - Currency is shown in Indian format with `₹` and 2 decimals (e.g., `toLocaleString("en-IN")`).

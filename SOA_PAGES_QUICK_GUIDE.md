@@ -58,12 +58,10 @@
 ✅ Preview adjustment before submitting
 ✅ See impact on final net position
 
-### When to Make Adjustments
-- Cash count discrepancies
-- Bank reconciliation corrections
-- Receipt errors
-- System data corrections
-- Compliance adjustments
+### When to Review Adjustments
+- Audit operational movements (exchanges, transfers)
+- Investigate reconciliation mismatches
+- Validate transfer metadata
 
 ---
 
@@ -79,39 +77,14 @@
    - Custodian name
 ```
 
-### Step 2: Enter Adjustment Details
+### Step 2: Review Operational History
 ```
-Amount: 
-  - Positive (+500) = Add cash
-  - Negative (-250) = Reduce cash
+Filter by type:
+  - Exchange
+  - Inter-site Transfer
+- Optional: Include legacy Credit/Debit (read-only)
 
-Reason: (REQUIRED)
-  - Explain why the adjustment is needed
-  - Be specific and detailed
-  - Helps with audit trail
-
-Reference: (OPTIONAL)
-  - Invoice number, Check number, etc.
-  - Any supporting documentation ID
-```
-
-### Step 3: Review Preview
-```
-Click "Show Preview" to see:
-- Current Net Position
-- Adjustment Amount
-- New Resulting Position
-- Impact visualization
-```
-
-### Step 4: Submit
-```
-Click "Post Adjustment"
-- System validates all fields
-- Adjustment is recorded
-- Creates audit trail
-- Success notification shown
-- Page auto-refreshes
+Open any record to review metadata
 ```
 
 ---
@@ -119,10 +92,8 @@ Click "Post Adjustment"
 ## 📊 Key Features
 
 ### Data Validation ✅
-- Amount cannot be zero
-- Reason cannot be empty
-- Amount must be valid number
-- Character counter on reason field
+- Operational adjustments are system-generated
+- Legacy credit/debit are read-only for audit
 
 ### Error Messages 📢
 - Clear error descriptions
@@ -132,9 +103,7 @@ Click "Post Adjustment"
 
 ### Loading & Feedback 🔄
 - Spinner during load
-- "Processing..." while submitting
-- Success message after submission
-- Auto-reload after 2 seconds
+- Clear empty states when no adjustments exist
 
 ### Responsive Design 📱
 - Works on desktop (full view)
@@ -158,8 +127,8 @@ All amounts shown in Indian format:
 - Adjustable: Click date fields
 
 ### Table Columns (Admin View)
-| Date | Custodian | Picked | Loaded | Adjusted | Excess | KM | Allowance | Final Net |
-|------|-----------|--------|--------|----------|--------|----|-----------|-----------| 
+| Date | Custodian | Picked | Loaded | Excess | KM | Allowance | Final Net |
+|------|-----------|--------|--------|--------|----|-----------|-----------|
 
 ---
 
@@ -190,36 +159,31 @@ All amounts shown in Indian format:
 - **Cause**: No record selected before adjustment
 - **Solution**: Click dropdown and select a record
 
-### "Enter a valid adjustment amount"
-- **Cause**: Amount is zero, empty, or invalid
-- **Solution**: Enter non-zero number (+500 or -250)
+### "No adjustments found"
+- **Cause**: No operational records match filters
+- **Solution**: Clear filters or select a different assignment
 
-### "Reason is mandatory"
-- **Cause**: Reason field is empty
-- **Solution**: Type explanation in reason field
-
-### "Failed to post SOA adjustment"
+### "Unable to load adjustments"
 - **Cause**: Database or network issue
-- **Solution**: Check values, retry, contact support if persists
+- **Solution**: Refresh and try again, contact support if persists
 
 ---
 
 ## 🔐 Security & Audit
 
 ### What Gets Recorded
-- Who made the adjustment (Admin ID)
-- When it was made (timestamp)
-- What amount and type (CREDIT/DEBIT)
-- Reason for adjustment (audit trail)
-- Reference number if provided
+- Exchange and inter-site transfer metadata
+- Assignment and custodian references
+- Timestamps and creator
+- Legacy credit/debit for historical audit only
 
 ### Access Control
 - Custodians: See only own records
-- Admins: See all records + can make adjustments
+- Admins: See all records + review operational adjustments
 - Non-admins: Cannot access adjustment page
 
 ### Data Integrity
-- Adjustment amount stored separately
+- Operational adjustments are non-financial and net-neutral
 - Original values never deleted
 - All changes tracked with user ID
 - Complete audit trail maintained
@@ -244,11 +208,9 @@ All amounts shown in Indian format:
 - Verify currency symbol (₹)
 - Refresh page
 
-### Adjustment Not Posted
-- Review all error messages
-- Ensure all required fields filled
-- Check character limits
-- Retry submission
+### No Adjustments Displayed
+- Clear filters and refresh
+- Verify the assignment has exchanges/transfers
 
 ---
 
@@ -263,7 +225,6 @@ All amounts shown in Indian format:
 
 ### For Admins
 ✅ Review flagged records promptly
-✅ Document all adjustments with reasons
 ✅ Use reference numbers for tracking
 ✅ Audit SOA adjustments weekly
 ✅ Keep audit trail clean and clear

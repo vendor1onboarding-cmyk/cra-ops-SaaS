@@ -82,7 +82,7 @@ ORDER BY assignment_date DESC;
 - **assignment_date**: Date of assignment
 - **cash_picked**: Amount picked from location
 - **cash_loaded**: Amount loaded into vehicle
-- **cash_adjusted**: Amount adjusted by admin
+- **cash_adjusted**: Deprecated (no longer used for SOA net)
 - **excess_reported**: Excess cash reported
 - **final_net_cash_position**: Net cash after adjustments
 - **custodian_id**: Reference to custodian
@@ -92,7 +92,7 @@ ORDER BY assignment_date DESC;
 
 ## ✏️ HOW TO EDIT SOA RECORDS
 
-### Add Adjustment
+### Add Operational Adjustment
 ```sql
 INSERT INTO soa_adjustments (
   soa_id,
@@ -108,9 +108,9 @@ INSERT INTO soa_adjustments (
   'soa-uuid',
   'assignment-uuid',
   'custodian-uuid',
-  'CREDIT',
-  1000.00,
-  'Correction for overcounting',
+  'EXCHANGE',
+  0,
+  'Denomination exchange',
   'EMAIL-REF-123',
   'admin-uuid',
   NOW()
@@ -118,10 +118,11 @@ INSERT INTO soa_adjustments (
 ```
 
 ### Adjustment Fields
-- **adjustment_type**: CREDIT or DEBIT
-- **adjustment_amount**: Positive number (sign determines CREDIT/DEBIT)
+- **adjustment_type**: EXCHANGE or INTER_SITE_TRANSFER (operational)
+- **adjustment_amount**: 0 for operational adjustments
 - **reason**: Why adjustment was made (required)
 - **reference**: Email, ticket, or memo number (optional)
+- **legacy**: CREDIT/DEBIT are historical only and not used for SOA net
 
 ---
 
@@ -220,12 +221,12 @@ if (profile.role === "admin" || profile.role === "supervisor") {
 - difference: picked - loaded
 
 #### Adjustments
-- cash_adjusted: Admin adjustments
+- cash_adjusted: Deprecated (no net impact)
 - excess_reported: Excess cash reported
-- manual_adjustments: Previous adjustments
+- operational_adjustments: Exchanges/transfers (metadata only)
 
 #### Final Calculation
-- final_net_cash_position: Calculated position after all adjustments
+- final_net_cash_position: Calculated position after cash picked and loaded
 
 #### Travel
 - travel_km: Kilometers traveled
@@ -253,7 +254,7 @@ WHERE custodian_id = 'custodian-id'
 ORDER BY assignment_date DESC;
 ```
 
-### View SOA with adjustments
+### View SOA with operational adjustments
 ```sql
 SELECT 
   soa.soa_id,
@@ -261,9 +262,9 @@ SELECT
   soa.final_net_cash_position,
   COUNT(adj.id) as adjustment_count,
   SUM(CASE 
-    WHEN adj.adjustment_type = 'CREDIT' THEN adj.adjustment_amount
-    WHEN adj.adjustment_type = 'DEBIT' THEN -adj.adjustment_amount
-  END) as total_adjustments
+    WHEN adj.adjustment_type IN ('EXCHANGE', 'INTER_SITE_TRANSFER') THEN 1
+    ELSE 0
+  END) as operational_count
 FROM v_soa_effective soa
 LEFT JOIN soa_adjustments adj ON soa.soa_id = adj.soa_id
 WHERE soa.assignment_date >= CURRENT_DATE - INTERVAL '3 months'
@@ -410,10 +411,10 @@ A: No, filtered by `custodian_id = current_user_id`
 A: No, only admins/supervisors can edit
 
 **Q: What happens when I make an adjustment?**  
-A: Added to soa_adjustments table with audit trail
+A: Operational records are added to soa_adjustments with full audit trail
 
 **Q: Can I undo an adjustment?**  
-A: No, but you can create opposite adjustment (DEBIT if CREDIT)
+A: Operational records are immutable; add a correcting record if needed
 
 **Q: How long is adjustment history kept?**  
 A: Indefinitely - full audit trail maintained

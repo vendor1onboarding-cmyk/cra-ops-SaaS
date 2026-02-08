@@ -4,7 +4,6 @@ import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import {
   formatISTDate,
-  formatIST,
   formatISTAudit,
 } from "../utils/time";
 
@@ -21,7 +20,7 @@ type Adjustment = {
   id: number;
   assignment_id: number;
   custodian_id: string;
-  adjustment_type: "EXCHANGE" | "INTER_SITE_TRANSFER";
+  adjustment_type: "EXCHANGE" | "INTER_SITE_TRANSFER" | "CREDIT" | "DEBIT";
   adjustment_amount: number;
   reason: string;
   reference?: string | null;
@@ -45,9 +44,10 @@ export default function AdminSOAAdjustments() {
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [adjustmentsLoading, setAdjustmentsLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useState<
-    "ALL" | "EXCHANGE" | "INTER_SITE_TRANSFER"
+    "ALL" | "EXCHANGE" | "INTER_SITE_TRANSFER" | "CREDIT" | "DEBIT"
   >("ALL");
   const [onlySelectedAssignment, setOnlySelectedAssignment] = useState(false);
+  const [includeLegacyAdjustments, setIncludeLegacyAdjustments] = useState(false);
 
   // =========================
   // ROLE GUARD + LOAD SOA
@@ -136,7 +136,12 @@ export default function AdminSOAAdjustments() {
       if (typeFilter !== "ALL") {
         query = query.eq("adjustment_type", typeFilter);
       } else {
-        query = query.in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"]);
+        query = query.in(
+          "adjustment_type",
+          includeLegacyAdjustments
+            ? ["EXCHANGE", "INTER_SITE_TRANSFER", "CREDIT", "DEBIT"]
+            : ["EXCHANGE", "INTER_SITE_TRANSFER"]
+        );
       }
 
       if (onlySelectedAssignment && selectedSOA) {
@@ -188,7 +193,7 @@ export default function AdminSOAAdjustments() {
     } finally {
       setAdjustmentsLoading(false);
     }
-  }, [onlySelectedAssignment, profile, selectedSOA, typeFilter]);
+  }, [includeLegacyAdjustments, onlySelectedAssignment, profile, selectedSOA, typeFilter]);
 
   useEffect(() => {
     loadSOA();
@@ -202,6 +207,14 @@ export default function AdminSOAAdjustments() {
     Adjustment["adjustment_type"],
     { label: string; badge: string }
   > = {
+    CREDIT: {
+      label: "Credit (Legacy)",
+      badge: "bg-slate-100 text-slate-700",
+    },
+    DEBIT: {
+      label: "Debit (Legacy)",
+      badge: "bg-slate-100 text-slate-700",
+    },
     EXCHANGE: {
       label: "Exchange",
       badge: "bg-amber-100 text-amber-800",
@@ -266,6 +279,11 @@ export default function AdminSOAAdjustments() {
           <p className="text-sm text-slate-600">
             Review exchanges and inter-site transfers logged against SOA
           </p>
+        </div>
+
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          Cash adjustments (CREDIT/DEBIT) are deprecated and do not affect SOA net.
+          This view shows operational records only.
         </div>
 
         {/* ===== ERROR MESSAGE ===== */}
@@ -378,15 +396,35 @@ export default function AdminSOAAdjustments() {
                   setTypeFilter(
                     e.target.value as
                       | "ALL"
+                      | "CREDIT"
+                      | "DEBIT"
                       | "EXCHANGE"
                       | "INTER_SITE_TRANSFER"
                   )
                 }
               >
                 <option value="ALL">All Types</option>
+                {includeLegacyAdjustments && (
+                  <>
+                    <option value="CREDIT">Credit (Legacy)</option>
+                    <option value="DEBIT">Debit (Legacy)</option>
+                  </>
+                )}
                 <option value="EXCHANGE">Exchange</option>
                 <option value="INTER_SITE_TRANSFER">Inter-site Transfer</option>
               </select>
+
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={includeLegacyAdjustments}
+                  onChange={(e) => {
+                    setIncludeLegacyAdjustments(e.target.checked);
+                    setTypeFilter("ALL");
+                  }}
+                />
+                Include legacy credit/debit (read-only)
+              </label>
 
               <label className="flex items-center gap-2 text-xs text-slate-600">
                 <input
@@ -451,6 +489,13 @@ export default function AdminSOAAdjustments() {
                     <div className="text-sm text-slate-700">
                       {adj.reason}
                     </div>
+
+                    {(adj.adjustment_type === "CREDIT" ||
+                      adj.adjustment_type === "DEBIT") && (
+                      <div className="text-xs text-slate-500">
+                        Legacy record (no impact on SOA net)
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap gap-2 text-xs text-slate-500">
                       <span>Assignment #{adj.assignment_id}</span>

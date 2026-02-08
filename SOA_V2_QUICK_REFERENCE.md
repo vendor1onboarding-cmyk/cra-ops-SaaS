@@ -14,7 +14,8 @@
 - ✅ **Enhanced SOA View** - Professional accounting presentation with detailed breakdown
 
 ### For Admins
-- ✅ **Adjustment History** - Filter by type (CREDIT, DEBIT, EXCHANGE, TRANSFER)
+- ✅ **Adjustment History** - Filter by type (EXCHANGE, TRANSFER)
+- ✅ **Legacy Audit** - Optional view for historical CREDIT/DEBIT
 - ✅ **Metadata Viewing** - See denomination details in exchanges and transfers
 - ✅ **Reconciliation Tools** - Easily identify unbalanced accounts
 
@@ -47,29 +48,20 @@
 
 ## 🔄 ADJUSTMENT TYPES
 
-### 1. CREDIT (Financial)
-**Purpose**: Add cash to custodian's account  
-**Net Impact**: **INCREASES** closing balance  
-**Example**: Correction for missing pickup  
-**UI Color**: 🟢 Green
-
-### 2. DEBIT (Financial)
-**Purpose**: Deduct cash from custodian's account  
-**Net Impact**: **DECREASES** closing balance  
-**Example**: Correction for duplicate entry  
-**UI Color**: 🔴 Red
-
-### 3. EXCHANGE (Operational)
+### 1. EXCHANGE (Operational)
 **Purpose**: Record denomination reshaping  
 **Net Impact**: **NEUTRAL** (₹0)  
 **Example**: ₹2000×5 → ₹500×20  
 **UI Color**: 🟡 Yellow
 
-### 4. INTER_SITE_TRANSFER (Operational)
+### 2. INTER_SITE_TRANSFER (Operational)
 **Purpose**: Record cash movement between ATMs  
 **Net Impact**: **NEUTRAL** (₹0)  
 **Example**: Site 1 → Site 2 (₹5,000)  
 **UI Color**: 🔵 Blue
+
+### Legacy (Read-Only)
+**CREDIT / DEBIT**: Historical entries retained for audit only; no SOA net impact.
 
 ---
 
@@ -135,7 +127,8 @@
 1. Navigate to **SOA Adjustments** (admin menu)
 2. Scroll to **Recent Adjustments** section
 3. Filter by type:
-   - [All] [Credits] [Debits] [Exchanges] [Transfers]
+   - [All] [Exchanges] [Transfers]
+   - Optional: Include legacy Credit/Debit (read-only)
 4. Click "Show Exchange Details" to see denominations
 5. Verify metadata is complete
 
@@ -154,7 +147,7 @@
    - Check withdrawals vs loads
    - Verify adjustments
    - Review operations
-5. Use manual adjustment if needed
+5. Verify operational records and close the day
 
 **Result**: Balanced accounts
 
@@ -165,14 +158,11 @@
 ```
 Opening Balance (Previous day closing)
 + Bank Withdrawals (cash_pickups)
-+ Manual Credits
-+ Travel Allowance
 - ATM Loads (atm_replenishments)
-- Manual Debits
 = Closing Balance (MUST BE ₹0 at EOD)
 ```
 
-**Note**: Exchanges and Transfers do NOT affect this calculation
+**Note**: Exchanges and transfers do NOT affect this calculation. Travel allowance is settled separately.
 
 ---
 
@@ -183,9 +173,8 @@ Opening Balance (Previous day closing)
 **Situation**: Need to reshape existing ATM cash
 
 **Steps**:
-1. Record ATM withdrawal (negative, using ATM Excess/Adjustment)
-2. Record exchange (ATM → Bank → denominations changed)
-3. Record ATM load (new denominations)
+1. Record exchange (ATM → Bank → denominations changed)
+2. Record ATM load (new denominations)
 
 **Net Effect**: ₹0 (balanced)
 
@@ -270,10 +259,9 @@ Opening Balance (Previous day closing)
 - ✅ Reason field required
 - ✅ Both sites exist in today's assignment
 
-### Manual Adjustment
-- ✅ Amount ≠ 0 (non-zero)
-- ✅ Reason field required (min 10 characters)
-- ✅ Reference field optional
+### Legacy Adjustment (Read-Only)
+- ✅ Visible only when legacy audit toggle is enabled
+- ✅ Does not affect SOA net
 
 ---
 
@@ -282,7 +270,7 @@ Opening Balance (Previous day closing)
 ### SOA Display
 
 **Green** 🟢
-- Inflows (withdrawals, credits, allowance)
+- Inflows (withdrawals)
 - Balanced closing balance (₹0)
 
 **Yellow** 🟡
@@ -290,7 +278,7 @@ Opening Balance (Previous day closing)
 - Neutral impact indicators
 
 **Red** 🔴
-- Outflows (ATM loads, debits)
+- Outflows (ATM loads)
 - Unreconciled closing balance (≠ ₹0)
 
 **Blue** 🔵

@@ -99,37 +99,8 @@ Load SOA List
     ↓
 User Interaction
     ├─ Select SOA from dropdown
-    ├─ Enter amount (validate: not zero)
-    ├─ Enter reason (validate: not empty)
-    └─ Optional: Add reference
-    ↓
-Real-time Validation
-    ├─ Amount valid? (number, not zero)
-    ├─ Reason valid? (not empty)
-    ├─ Can submit? (SOA + valid amount + valid reason)
-    └─ Update UI: Enable/disable button
-    ↓
-Preview (Optional)
-    ├─ Show current net position
-    ├─ Show adjustment amount
-    ├─ Calculate: new net position
-    ├─ Show reason & reference
-    └─ Color-code credit (green) vs debit (red)
-    ↓
-Submit Adjustment
-    ├─ Insert to soa_adjustments table
-    ├─ Fields:
-    │   ├─ soa_id
-    │   ├─ assignment_id
-    │   ├─ custodian_id
-    │   ├─ adjustment_type (CREDIT or DEBIT)
-    │   ├─ adjustment_amount (always positive)
-    │   ├─ reason
-    │   ├─ reference (nullable)
-    │   └─ created_by (current user id)
-    ├─ Success? → Show success message
-    ├─ Error? → Show error message
-    └─ Reload → Refresh page
+    ├─ Review adjustment history (EXCHANGE, INTER_SITE_TRANSFER)
+    └─ Optionally include legacy CREDIT/DEBIT (read-only audit)
 ```
 
 ---
@@ -147,7 +118,6 @@ supabase
     assignment_date,
     cash_picked,
     cash_loaded,
-    cash_adjusted,
     excess_reported,
     travel_km,
     travel_allowance,
@@ -182,19 +152,24 @@ supabase
   `)
   .order("assignment_date", { ascending: false })
 
-// Insert adjustment record
+// Load adjustment history (operational only, legacy optional)
 supabase
   .from("soa_adjustments")
-  .insert({
-    soa_id: selectedSOA.id,
-    assignment_id: selectedSOA.assignment_id,
-    custodian_id: selectedSOA.custodian_id,
-    adjustment_type: parsedAmount >= 0 ? "CREDIT" : "DEBIT",
-    adjustment_amount: Math.abs(parsedAmount),
-    reason: reason.trim(),
-    reference: reference.trim() || null,
-    created_by: profile?.id,
-  })
+  .select(`
+    id,
+    assignment_id,
+    custodian_id,
+    adjustment_type,
+    adjustment_amount,
+    reason,
+    reference,
+    created_at,
+    created_by,
+    exchange_metadata,
+    transfer_metadata
+  `)
+  .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"])
+  .order("created_at", { ascending: false })
 ```
 
 ---
@@ -253,45 +228,14 @@ const previewNetPosition = useMemo(() => {...}, ...);  // Calculate new position
 
 ## ✅ Validation Rules
 
-### Amount Validation
+### Filter Validation
 ```typescript
-// Valid: Non-zero number
-const isValidAmount = 
-  amount !== "" &&              // Not empty
-  !isNaN(parsedAmount) &&       // Is a number
-  parsedAmount !== 0;           // Not zero
+// Valid: Type filter matches allowed values
+const allowedTypes = ["ALL", "EXCHANGE", "INTER_SITE_TRANSFER", "CREDIT", "DEBIT"];
+const isValidType = allowedTypes.includes(typeFilter);
 
-// Examples
-✓ "500" or "500.50"  (CREDIT)
-✓ "-250" or "-250.50" (DEBIT)
-✗ "0"                (Invalid)
-✗ ""                 (Invalid)
-✗ "abc"              (Invalid)
-```
-
-### Reason Validation
-```typescript
-// Valid: At least 1 character
-const isValidReason = reason.trim().length > 0;
-
-// Examples
-✓ "Cash count discrepancy"
-✓ "Bank reconciliation"
-✗ ""
-✗ "   " (spaces only)
-```
-
-### Submit Validation
-```typescript
-// Can submit only if ALL conditions met
-const canSubmit = 
-  selectedSOA &&       // SOA selected
-  isValidAmount &&     // Amount valid
-  isValidReason &&     // Reason valid
-  !loading;            // Not already submitting
-
-// Disabled states
-Button disabled = !canSubmit
+// Legacy visibility
+// CREDIT/DEBIT are only shown when includeLegacyAdjustments === true
 ```
 
 ---

@@ -201,8 +201,8 @@ transfer_metadata    JSONB DEFAULT NULL
 
 | Type | Purpose | Net Impact | Example | Color |
 |------|---------|------------|---------|-------|
-| **CREDIT** | Add cash | Increases (+) | Missing pickup correction | 🟢 Green |
-| **DEBIT** | Deduct cash | Decreases (-) | Duplicate entry correction | 🔴 Red |
+| **CREDIT** | Legacy audit only | No SOA net impact | Historical correction | ⚪ Slate |
+| **DEBIT** | Legacy audit only | No SOA net impact | Historical correction | ⚪ Slate |
 | **EXCHANGE** | Reshape denominations | Neutral (₹0) | ₹2000×5 → ₹500×20 | 🟡 Yellow |
 | **INTER_SITE_TRANSFER** | Move cash between ATMs | Neutral (₹0) | Site 1 → Site 2 | 🔵 Blue |
 
@@ -260,7 +260,6 @@ transfer_metadata    JSONB DEFAULT NULL
 ├───────────────────────────────────────────┤
 │ 💰 INFLOWS (+)                            │
 │   Bank Withdrawals        +₹50,000.00    │
-│   Manual Credits          +₹ 0.00        │
 │   Travel Allowance        +₹   500.00    │
 ├───────────────────────────────────────────┤
 │ ⚙️ OPERATIONS (Neutral)                   │
@@ -269,7 +268,6 @@ transfer_metadata    JSONB DEFAULT NULL
 ├───────────────────────────────────────────┤
 │ 📤 OUTFLOWS (-)                           │
 │   ATM Loads               -₹50,000.00    │
-│   Manual Debits           -₹ 0.00        │
 ├───────────────────────────────────────────┤
 │ ⚠️ EXCESS (Separate)                      │
 │   Reported                 ₹   200.00    │

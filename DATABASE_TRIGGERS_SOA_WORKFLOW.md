@@ -131,9 +131,9 @@ INSERT INTO travel_tracking (
 
 ---
 
-### Step 5: Admin Makes Adjustment
+### Step 5: Admin Records Operational Adjustment
 
-When admin corrects a discrepancy:
+When admin records an operational adjustment (exchange or transfer):
 
 ```sql
 INSERT INTO soa_adjustments (
@@ -149,36 +149,24 @@ INSERT INTO soa_adjustments (
   'assignment-id',
   'assignment-id',
   'custodian-id',
-  'CREDIT',
-  1000.00,
-  'Correction for overcounting',
+  'EXCHANGE',
+  0,
+  'Denomination exchange',
   'EMAIL-REF-123',
   'admin-id'
 );
 ```
 
 **Trigger Actions**:
-- ✅ Validate adjustment_amount > 0
-- ✅ Validate adjustment_type IN ('CREDIT', 'DEBIT')
+- ✅ Validate adjustment_type IN ('EXCHANGE', 'INTER_SITE_TRANSFER')
 - ✅ Validate reason is not empty
 - ✅ Set created_by = current_user
 - ✅ Set created_at = NOW()
-- ✅ Update v_soa_effective (cash_adjusted column)
-- ✅ Recalculate final_net_cash_position
+- ✅ Operational adjustment is stored for audit
+- ✅ No impact on SOA net position
 
-**Calculation** (CREDIT):
-```
-position_before = 2000.00
-adjustment = +1000.00 (CREDIT)
-position_after = 2000.00 + 1000.00 = 3000.00
-```
-
-**Calculation** (DEBIT):
-```
-position_before = 2000.00
-adjustment = -1000.00 (DEBIT)
-position_after = 2000.00 - 1000.00 = 1000.00
-```
+**Note**:
+Legacy CREDIT/DEBIT records are historical only and are excluded from SOA net.
 
 ---
 

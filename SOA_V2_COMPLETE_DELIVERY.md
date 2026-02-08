@@ -112,8 +112,8 @@ idx_soa_adjustments_assignment_type
 
 | Type | Symbol | Net Impact | Color | Example |
 |------|--------|------------|-------|---------|
-| **CREDIT** | + | Increases balance | 🟢 Green | Missing pickup correction |
-| **DEBIT** | - | Decreases balance | 🔴 Red | Duplicate entry correction |
+| **CREDIT** | + | Legacy (no SOA net) | ⚪ Slate | Historical correction |
+| **DEBIT** | - | Legacy (no SOA net) | ⚪ Slate | Historical correction |
 | **EXCHANGE** | ⇄ | Neutral (₹0) | 🟡 Yellow | ₹2000×5 → ₹500×20 |
 | **INTER_SITE_TRANSFER** | → | Neutral (₹0) | 🔵 Blue | Site 1 → Site 2 |
 
@@ -141,14 +141,12 @@ idx_soa_adjustments_assignment_type
 Opening Balance (Previous closing)
 ├─ INFLOWS (+)
 │  ├─ Bank Withdrawals
-│  ├─ Manual Credits
 │  └─ Travel Allowance
 ├─ OPERATIONS (Neutral)
 │  ├─ Exchanges (count + details)
 │  └─ Transfers (count + details)
 ├─ OUTFLOWS (-)
 │  ├─ ATM Loads
-│  └─ Manual Debits
 ├─ EXCESS (Separate)
 │  └─ Reported (not in cash-in-hand)
 └─ Closing Balance (Should be ₹0)
