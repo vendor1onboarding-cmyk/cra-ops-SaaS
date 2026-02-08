@@ -79,7 +79,7 @@ export default function ATMReplenishment() {
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
 
-  // Available cash tracking
+  // Available cash tracking - split by source
   const [availableCash, setAvailableCash] = useState<{
     denom_100: number;
     denom_200: number;
@@ -87,6 +87,20 @@ export default function ATMReplenishment() {
     denom_2000: number;
   }>({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
   const [availableTotalAmount, setAvailableTotalAmount] = useState(0);
+  const [availableBankCash, setAvailableBankCash] = useState<{
+    denom_100: number;
+    denom_200: number;
+    denom_500: number;
+    denom_2000: number;
+  }>({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
+  const [availableBankTotal, setAvailableBankTotal] = useState(0);
+  const [availableInternalCash, setAvailableInternalCash] = useState<{
+    denom_100: number;
+    denom_200: number;
+    denom_500: number;
+    denom_2000: number;
+  }>({ denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 });
+  const [availableInternalTotal, setAvailableInternalTotal] = useState(0);
   const [cashLoadingError, setCashLoadingError] = useState<string | null>(null);
   const [cashLoading, setCashLoading] = useState(false);
 
@@ -260,10 +274,10 @@ export default function ATMReplenishment() {
     setCashLoadingError(null);
 
     try {
-      // Get today's cash pickups for this custodian
+      // Get today's cash pickups for this custodian (with internal_source_metadata)
       const { data: pickups, error: pickupError } = await supabase
         .from("cash_pickups")
-        .select("denom_2000, denom_500, denom_200, denom_100")
+        .select("denom_2000, denom_500, denom_200, denom_100, internal_source_metadata")
         .eq("assignment_id", assignmentId);
 
       if (pickupError) {
@@ -273,8 +287,15 @@ export default function ATMReplenishment() {
         return;
       }
 
-      // Sum up all pickups for today
-      const totalPickups = {
+      // Split pickups into bank-sourced and internal-sourced
+      const bankPickups = {
+        denom_100: 0,
+        denom_200: 0,
+        denom_500: 0,
+        denom_2000: 0,
+      };
+
+      const internalPickups = {
         denom_100: 0,
         denom_200: 0,
         denom_500: 0,
@@ -282,16 +303,28 @@ export default function ATMReplenishment() {
       };
 
       (pickups || []).forEach((p: any) => {
-        totalPickups.denom_100 += p.denom_100 || 0;
-        totalPickups.denom_200 += p.denom_200 || 0;
-        totalPickups.denom_500 += p.denom_500 || 0;
-        totalPickups.denom_2000 += p.denom_2000 || 0;
+        // Main denominations are bank-sourced
+        bankPickups.denom_100 += p.denom_100 || 0;
+        bankPickups.denom_200 += p.denom_200 || 0;
+        bankPickups.denom_500 += p.denom_500 || 0;
+        bankPickups.denom_2000 += p.denom_2000 || 0;
+
+        // Internal source metadata contains cash from internal ATM pickups
+        if (p.internal_source_metadata?.sources) {
+          p.internal_source_metadata.sources.forEach((source: any) => {
+            const denoms = source.denominations || {};
+            internalPickups.denom_100 += denoms.denom_100 || 0;
+            internalPickups.denom_200 += denoms.denom_200 || 0;
+            internalPickups.denom_500 += denoms.denom_500 || 0;
+            internalPickups.denom_2000 += denoms.denom_2000 || 0;
+          });
+        }
       });
 
-      // Get all previous ATM loads for this assignment (sum them up)
+      // Get all previous ATM loads for this assignment (with source_breakdown)
       const { data: loads, error: loadError } = await supabase
         .from("atm_replenishments")
-        .select("denom_2000, denom_500, denom_200, denom_100")
+        .select("denom_2000, denom_500, denom_200, denom_100, source_breakdown")
         .eq("assignment_id", assignmentId);
 
       if (loadError) {
@@ -301,8 +334,15 @@ export default function ATMReplenishment() {
         return;
       }
 
-      // Sum up all previous loads
-      const totalLoads = {
+      // Sum up bank-sourced and internal-sourced loads separately
+      const bankLoads = {
+        denom_100: 0,
+        denom_200: 0,
+        denom_500: 0,
+        denom_2000: 0,
+      };
+
+      const internalLoads = {
         denom_100: 0,
         denom_200: 0,
         denom_500: 0,
@@ -310,13 +350,30 @@ export default function ATMReplenishment() {
       };
 
       (loads || []).forEach((l: any) => {
-        totalLoads.denom_100 += l.denom_100 || 0;
-        totalLoads.denom_200 += l.denom_200 || 0;
-        totalLoads.denom_500 += l.denom_500 || 0;
-        totalLoads.denom_2000 += l.denom_2000 || 0;
+        if (l.source_breakdown) {
+          // Load has source breakdown - split accordingly
+          const bankSource = l.source_breakdown.bank_source || {};
+          const internalSource = l.source_breakdown.internal_source || {};
+
+          bankLoads.denom_100 += bankSource.denom_100 || 0;
+          bankLoads.denom_200 += bankSource.denom_200 || 0;
+          bankLoads.denom_500 += bankSource.denom_500 || 0;
+          bankLoads.denom_2000 += bankSource.denom_2000 || 0;
+
+          internalLoads.denom_100 += internalSource.denom_100 || 0;
+          internalLoads.denom_200 += internalSource.denom_200 || 0;
+          internalLoads.denom_500 += internalSource.denom_500 || 0;
+          internalLoads.denom_2000 += internalSource.denom_2000 || 0;
+        } else {
+          // No source breakdown - all bank-sourced (backward compatibility)
+          bankLoads.denom_100 += l.denom_100 || 0;
+          bankLoads.denom_200 += l.denom_200 || 0;
+          bankLoads.denom_500 += l.denom_500 || 0;
+          bankLoads.denom_2000 += l.denom_2000 || 0;
+        }
       });
 
-      // Apply denomination exchanges (net effect on cash-in-hand mix)
+      // Apply denomination exchanges (only affects bank cash)
       const { data: exchanges, error: exchangeError } = await supabase
         .from("soa_adjustments")
         .select("exchange_metadata")
@@ -328,7 +385,7 @@ export default function ATMReplenishment() {
       }
 
       const exchangeDelta = (exchanges || []).reduce(
-        (acc: typeof totalPickups, row: any) => {
+        (acc: typeof bankPickups, row: any) => {
           const from = row?.exchange_metadata?.from_denominations || {};
           const to = row?.exchange_metadata?.to_denominations || {};
 
@@ -341,34 +398,62 @@ export default function ATMReplenishment() {
         { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 }
       );
 
-      // Calculate available = pickups - loads + exchangeDelta
-      const available = {
+      // Calculate available bank cash = bank pickups - bank loads + exchanges
+      const availableBank = {
         denom_100: Math.max(
           0,
-          totalPickups.denom_100 - totalLoads.denom_100 + exchangeDelta.denom_100
+          bankPickups.denom_100 - bankLoads.denom_100 + exchangeDelta.denom_100
         ),
         denom_200: Math.max(
           0,
-          totalPickups.denom_200 - totalLoads.denom_200 + exchangeDelta.denom_200
+          bankPickups.denom_200 - bankLoads.denom_200 + exchangeDelta.denom_200
         ),
         denom_500: Math.max(
           0,
-          totalPickups.denom_500 - totalLoads.denom_500 + exchangeDelta.denom_500
+          bankPickups.denom_500 - bankLoads.denom_500 + exchangeDelta.denom_500
         ),
         denom_2000: Math.max(
           0,
-          totalPickups.denom_2000 - totalLoads.denom_2000 + exchangeDelta.denom_2000
+          bankPickups.denom_2000 - bankLoads.denom_2000 + exchangeDelta.denom_2000
         ),
       };
 
-      const totalAvailable =
-        available.denom_100 * 100 +
-        available.denom_200 * 200 +
-        available.denom_500 * 500 +
-        available.denom_2000 * 2000;
+      // Calculate available internal cash = internal pickups - internal loads
+      const availableInternal = {
+        denom_100: Math.max(0, internalPickups.denom_100 - internalLoads.denom_100),
+        denom_200: Math.max(0, internalPickups.denom_200 - internalLoads.denom_200),
+        denom_500: Math.max(0, internalPickups.denom_500 - internalLoads.denom_500),
+        denom_2000: Math.max(0, internalPickups.denom_2000 - internalLoads.denom_2000),
+      };
+
+      // Total available = bank + internal
+      const available = {
+        denom_100: availableBank.denom_100 + availableInternal.denom_100,
+        denom_200: availableBank.denom_200 + availableInternal.denom_200,
+        denom_500: availableBank.denom_500 + availableInternal.denom_500,
+        denom_2000: availableBank.denom_2000 + availableInternal.denom_2000,
+      };
+
+      const totalAvailableBank =
+        availableBank.denom_100 * 100 +
+        availableBank.denom_200 * 200 +
+        availableBank.denom_500 * 500 +
+        availableBank.denom_2000 * 2000;
+
+      const totalAvailableInternal =
+        availableInternal.denom_100 * 100 +
+        availableInternal.denom_200 * 200 +
+        availableInternal.denom_500 * 500 +
+        availableInternal.denom_2000 * 2000;
+
+      const totalAvailable = totalAvailableBank + totalAvailableInternal;
 
       setAvailableCash(available);
       setAvailableTotalAmount(totalAvailable);
+      setAvailableBankCash(availableBank);
+      setAvailableBankTotal(totalAvailableBank);
+      setAvailableInternalCash(availableInternal);
+      setAvailableInternalTotal(totalAvailableInternal);
     } catch (err) {
       console.error("[ATMLoad] Error loading available cash:", err);
       setCashLoadingError("Failed to load cash availability");
@@ -474,6 +559,61 @@ export default function ATMReplenishment() {
 
   /* ---------------- Save ---------------- */
 
+  // Calculate source breakdown for ATM load (bank vs internal sources)
+  function calculateSourceBreakdown(loadDenoms: typeof denoms) {
+    const bankSource = {
+      denom_100: 0,
+      denom_200: 0,
+      denom_500: 0,
+      denom_2000: 0,
+      total_amount: 0,
+    };
+
+    const internalSource = {
+      denom_100: 0,
+      denom_200: 0,
+      denom_500: 0,
+      denom_2000: 0,
+      total_amount: 0,
+    };
+
+    // For each denomination, use bank source first, then internal
+    Object.entries(DENOM_VALUES).forEach(([key, value]) => {
+      const requiredCount = loadDenoms[key as keyof typeof loadDenoms];
+      const availableBank = availableBankCash[key as keyof typeof availableBankCash];
+      const availableInternal = availableInternalCash[key as keyof typeof availableInternalCash];
+
+      // Use bank source first (up to available)
+      const fromBank = Math.min(requiredCount, availableBank);
+      bankSource[key as keyof typeof bankSource] = fromBank;
+
+      // Use internal source for the remainder
+      const fromInternal = requiredCount - fromBank;
+      internalSource[key as keyof typeof internalSource] = fromInternal;
+    });
+
+    // Calculate totals
+    bankSource.total_amount =
+      bankSource.denom_100 * 100 +
+      bankSource.denom_200 * 200 +
+      bankSource.denom_500 * 500 +
+      bankSource.denom_2000 * 2000;
+
+    internalSource.total_amount =
+      internalSource.denom_100 * 100 +
+      internalSource.denom_200 * 200 +
+      internalSource.denom_500 * 500 +
+      internalSource.denom_2000 * 2000;
+
+    const combinedTotal = bankSource.total_amount + internalSource.total_amount;
+
+    return {
+      bank_source: bankSource,
+      internal_source: internalSource,
+      combined_total: combinedTotal,
+    };
+  }
+
   function resetForm() {
     setSiteId(null);
     setTimeIn(null);
@@ -543,6 +683,9 @@ export default function ATMReplenishment() {
       photoPath = path;
     }
 
+    // Calculate source breakdown (bank vs internal ATM sources)
+    const sourceBreakdown = calculateSourceBreakdown(denoms);
+
     const { error } = await supabase.from("atm_replenishments").insert({
       assignment_id: assignmentId,
       site_id: siteId,
@@ -556,6 +699,7 @@ export default function ATMReplenishment() {
       geo_status: gpsStatus,
       photo_required: gpsStatus !== "verified",
       photo_url: photoPath,
+      source_breakdown: sourceBreakdown,
     });
 
     if (error) {
@@ -769,9 +913,27 @@ export default function ATMReplenishment() {
                     and previous loads.
                   </p>
                 </div>
-                <span className="text-xs font-semibold text-indigo-900 bg-indigo-100 px-2 py-1 rounded\">
+                <span className="text-xs font-semibold text-indigo-900 bg-indigo-100 px-2 py-1 rounded">
                   ₹{availableTotalAmount.toLocaleString("en-IN")}
                 </span>
+              </div>
+
+              {/* Source breakdown */}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-2">
+                  <div className="text-blue-700 font-semibold">From Bank</div>
+                  <div className="text-blue-900 font-bold">
+                    ₹{availableBankTotal.toLocaleString("en-IN")}
+                  </div>
+                  <div className="text-blue-600 text-xs">For SOA</div>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                  <div className="text-green-700 font-semibold">From Internal ATM</div>
+                  <div className="text-green-900 font-bold">
+                    ₹{availableInternalTotal.toLocaleString("en-IN")}
+                  </div>
+                  <div className="text-green-600 text-xs">Not for SOA</div>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
