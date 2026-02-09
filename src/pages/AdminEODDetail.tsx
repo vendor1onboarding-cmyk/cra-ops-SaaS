@@ -219,14 +219,6 @@ export default function AdminEODDetail() {
           </div>
         </Section>
 
-        <Section title="Route Sites">
-          {data.routeSites.map((r: any) => (
-            <div key={r.sequence_no}>
-              {r.sequence_no}. {formatSite(r.site)}
-            </div>
-          ))}
-        </Section>
-
           <Section title="Cash Pickups (Detailed)">
         {data.cashPickups.map((c: any, i: number) => {
     const total =
@@ -277,6 +269,7 @@ export default function AdminEODDetail() {
           {data.atmLoads.map((a: any, i: number) => (
             <div key={i} className="border rounded p-3 mb-2">
               <div className="font-medium">{formatSite(a.site)}</div>
+              <div className="text-xs text-slate-600">Load Time: {formatIST(a.time_in || a.load_time)}</div>
 
               <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                 {DENOM_ORDER.map((d) => (

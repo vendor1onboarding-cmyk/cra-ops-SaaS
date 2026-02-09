@@ -13,6 +13,8 @@ interface BankAccount {
   branch_phone: string | null;
   branch_email: string | null;
   branch_address: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   is_active: boolean;
   created_at: string;
   created_by: string;
@@ -27,6 +29,8 @@ interface FormData {
   branch_phone: string;
   branch_email: string;
   branch_address: string;
+  latitude: string;
+  longitude: string;
   is_active: boolean;
 }
 
@@ -55,6 +59,8 @@ export default function BankAccountOnboarding() {
     branch_phone: "",
     branch_email: "",
     branch_address: "",
+    latitude: "",
+    longitude: "",
     is_active: true,
   });
 
@@ -173,6 +179,8 @@ export default function BankAccountOnboarding() {
         branch_phone: form.branch_phone.trim() || null,
         branch_email: form.branch_email.trim() || null,
         branch_address: form.branch_address.trim() || null,
+        latitude: form.latitude ? Number(form.latitude) : null,
+        longitude: form.longitude ? Number(form.longitude) : null,
         is_active: form.is_active,
         created_by: profile.id,
       });
@@ -208,6 +216,8 @@ export default function BankAccountOnboarding() {
       branch_phone: "",
       branch_email: "",
       branch_address: "",
+      latitude: "",
+      longitude: "",
       is_active: true,
     });
     setErrors({});
@@ -522,6 +532,38 @@ export default function BankAccountOnboarding() {
                   rows={3}
                   className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
+              </div>
+
+              {/* GPS Coordinates */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Latitude
+                  </label>
+                  <input
+                    type="number"
+                    value={form.latitude}
+                    onChange={(e) =>
+                      setForm({ ...form, latitude: e.target.value })
+                    }
+                    placeholder="e.g., 8.7642"
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Longitude
+                  </label>
+                  <input
+                    type="number"
+                    value={form.longitude}
+                    onChange={(e) =>
+                      setForm({ ...form, longitude: e.target.value })
+                    }
+                    placeholder="e.g., 78.1348"
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
               </div>
 
               {/* Is Active */}

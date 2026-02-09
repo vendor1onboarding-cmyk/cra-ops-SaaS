@@ -132,7 +132,7 @@ SELECT
     ar.id,
     ar.assignment_id,
     ar.site_id,
-    ar.custodian_id,
+    a.custodian_id,
     ar.time_in,
     
     -- Total load (all denominations)
@@ -191,7 +191,8 @@ SELECT
         0
     ) AS internal_total_amount
     
-FROM atm_replenishments ar;
+FROM atm_replenishments ar
+LEFT JOIN assignments a ON a.id = ar.assignment_id;
 
 COMMENT ON VIEW v_atm_load_sources IS 
 'Helper view to separate bank-sourced vs internal ATM-sourced loads.
