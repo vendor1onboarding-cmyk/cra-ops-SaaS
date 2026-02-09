@@ -14,8 +14,10 @@ type SOASummaryRow = {
   assignment_date: string;
   cash_picked: number;
   cash_loaded: number;
+  bank_picked?: number;
+  internal_picked?: number;
   bank_loaded?: number;
-  internal_transferred?: number;
+  internal_loaded?: number;
   excess_reported: number;
   travel_km: number;
   travel_allowance: number;
@@ -85,6 +87,10 @@ export default function StatementOfAccounts() {
                 assignment_date,
                 cash_picked,
                 cash_loaded,
+                bank_picked,
+                internal_picked,
+                bank_loaded,
+                internal_loaded,
                 excess_reported,
                 travel_km,
                 travel_allowance,
@@ -192,11 +198,17 @@ export default function StatementOfAccounts() {
 
               rows = rows.map((row: any) => {
                 const sources = loadSourceData.get(row.assignment_id ?? row.soa_id);
+                const bankPicked = row.bank_picked ?? row.cash_picked;
+                const internalPicked = row.internal_picked ?? 0;
+                const bankLoaded = row.bank_loaded ?? sources?.bank ?? row.cash_loaded;
+                const internalLoaded = row.internal_loaded ?? sources?.internal ?? 0;
                 return {
                   ...row,
                   status: statusMap.get(row.assignment_id ?? row.soa_id),
-                  bank_loaded: sources?.bank ?? row.cash_loaded,
-                  internal_transferred: sources?.internal ?? 0,
+                  bank_picked: bankPicked,
+                  internal_picked: internalPicked,
+                  bank_loaded: bankLoaded,
+                  internal_loaded: internalLoaded,
                 };
               });
             }
@@ -248,19 +260,29 @@ export default function StatementOfAccounts() {
   const getClosingBalance = (row: SOADetailedRow) =>
     row.opening_balance - row.total_loads;
 
+  const getFinalNet = (row: SOASummaryRow) => {
+    const bankPicked = row.bank_picked ?? row.cash_picked;
+    const internalPicked = row.internal_picked ?? 0;
+    const bankLoaded = row.bank_loaded ?? row.cash_loaded;
+    const internalLoaded = row.internal_loaded ?? 0;
+    return bankPicked + internalPicked - bankLoaded - internalLoaded;
+  };
+
   // Calculate totals
   const summaryTotals = useMemo(() => {
     return summaryRows.reduce(
       (acc, r) => {
         acc.cashPicked += r.cash_picked;
         acc.cashLoaded += r.cash_loaded;
+        acc.bankPicked += r.bank_picked ?? r.cash_picked;
+        acc.internalPicked += r.internal_picked ?? 0;
         acc.bankLoaded += r.bank_loaded ?? r.cash_loaded;
-        acc.internalTransferred += r.internal_transferred ?? 0;
+        acc.internalLoaded += r.internal_loaded ?? 0;
         acc.allowance += r.travel_allowance;
-        acc.net += r.final_net_cash_position;
+        acc.net += getFinalNet(r);
         return acc;
       },
-      { cashPicked: 0, cashLoaded: 0, bankLoaded: 0, internalTransferred: 0, allowance: 0, net: 0 }
+      { cashPicked: 0, cashLoaded: 0, bankPicked: 0, internalPicked: 0, bankLoaded: 0, internalLoaded: 0, allowance: 0, net: 0 }
     );
   }, [summaryRows]);
 
@@ -304,9 +326,10 @@ export default function StatementOfAccounts() {
           "Date",
           ...(isAdmin ? ["Custodian"] : []),
           "Status",
-          "Cash Picked",
+          "Bank Picked",
+          "ATM Picked",
           "Bank Loaded",
-          "Internal Transferred",
+          "ATM Loaded",
           "Travel KM",
           ...(showAllowance ? ["Allowance"] : []),
           "Final Net Position",
@@ -335,12 +358,13 @@ export default function StatementOfAccounts() {
             row.assignment_date,
             ...(isAdmin ? [row.full_name || "Unknown"] : []),
             row.status || "-",
-            row.cash_picked,
+            row.bank_picked ?? row.cash_picked,
+            row.internal_picked ?? 0,
             row.bank_loaded ?? row.cash_loaded,
-            row.internal_transferred ?? 0,
+            row.internal_loaded ?? 0,
             row.travel_km,
             ...(showAllowance ? [row.travel_allowance] : []),
-            row.final_net_cash_position,
+            getFinalNet(row),
           ].join(",");
         }
 
@@ -559,7 +583,7 @@ export default function StatementOfAccounts() {
         </div>
 
         {/* ===== Load Source Breakdown Info ===== */}
-        {!loading && viewMode === "summary" && summaryTotals.internalTransferred > 0 && (
+        {!loading && viewMode === "summary" && summaryTotals.internalLoaded > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 print:hidden">
             <h3 className="text-sm font-semibold text-blue-900 mb-2">
               💡 Cash Load Breakdown
@@ -567,7 +591,7 @@ export default function StatementOfAccounts() {
             <div className="text-xs text-blue-800 space-y-1">
               <p className="font-medium">Total Cash Loaded: ₹{summaryTotals.cashLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
               <p className="ml-4">├─ From Bank: ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-green-700">(included in SOA)</span></p>
-              <p className="ml-4">└─ Internal Transfers: ₹{summaryTotals.internalTransferred.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-slate-700">(neutral - already accounted)</span></p>
+              <p className="ml-4">└─ Internal Transfers: ₹{summaryTotals.internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-slate-700">(neutral - already accounted)</span></p>
             </div>
             <p className="text-xs text-blue-700 mt-2 italic">
               Internal ATM transfers do not affect vendor reconciliation. They represent cash moved between sites.
@@ -577,22 +601,28 @@ export default function StatementOfAccounts() {
 
         {/* ===== KPI Section ===== */}
         {!loading && viewMode === "summary" && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 sm:gap-4">
             <KPI
-              label="Total Picked"
-              value={summaryTotals.cashPicked}
+              label="Bank Picked"
+              value={summaryTotals.bankPicked}
               subtext="₹"
               color="blue"
             />
             <KPI
-              label="Loaded (Bank)"
+              label="ATM Picked"
+              value={summaryTotals.internalPicked}
+              subtext="₹"
+              color="slate"
+            />
+            <KPI
+              label="Bank Loaded"
               value={summaryTotals.bankLoaded}
               subtext="₹"
               color="green"
             />
             <KPI
-              label="Internal Transfers"
-              value={summaryTotals.internalTransferred}
+              label="ATM Loaded"
+              value={summaryTotals.internalLoaded}
               subtext="₹"
               color="slate"
             />
@@ -689,7 +719,7 @@ export default function StatementOfAccounts() {
                   <div className="sm:hidden p-4 space-y-3">
                     {summaryRows.map((r, idx) => {
                       const netUnbalanced =
-                        Math.abs(r.final_net_cash_position) >= 0.01;
+                        Math.abs(getFinalNet(r)) >= 0.01;
                       return (
                         <div
                           key={idx}
@@ -710,9 +740,17 @@ export default function StatementOfAccounts() {
                           )}
                           <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
                             <div>
-                              <p className="text-slate-500">Picked</p>
+                              <p className="text-slate-500">Bank Picked</p>
                               <p className="font-semibold text-slate-900">
-                                ₹{r.cash_picked.toLocaleString("en-IN", {
+                                ₹{(r.bank_picked ?? r.cash_picked).toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">ATM Picked</p>
+                              <p className="font-semibold text-slate-900">
+                                ₹{(r.internal_picked ?? 0).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
                               </p>
@@ -725,16 +763,14 @@ export default function StatementOfAccounts() {
                                 })}
                               </p>
                             </div>
-                            {(r.internal_transferred ?? 0) > 0 && (
-                              <div className="col-span-2">
-                                <p className="text-slate-500">Internal Transfers</p>
-                                <p className="font-semibold text-slate-700">
-                                  ₹{r.internal_transferred!.toLocaleString("en-IN", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </p>
-                              </div>
-                            )}
+                            <div>
+                              <p className="text-slate-500">ATM Loaded</p>
+                              <p className="font-semibold text-slate-700">
+                                ₹{(r.internal_loaded ?? 0).toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            </div>
                             <div>
                               <p className="text-slate-500">KM</p>
                               <p className="font-semibold text-slate-900">
@@ -763,7 +799,7 @@ export default function StatementOfAccounts() {
                                   : "bg-emerald-100 text-emerald-900"
                               }`}
                             >
-                              ₹{r.final_net_cash_position.toLocaleString(
+                              ₹{getFinalNet(r).toLocaleString(
                                 "en-IN",
                                 { minimumFractionDigits: 2 }
                               )}
@@ -790,13 +826,16 @@ export default function StatementOfAccounts() {
                             </th>
                           )}
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                            Picked
+                            Bank Picked
+                          </th>
+                          <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                            ATM Picked
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
                             Bank Loaded
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                            Internal
+                            ATM Loaded
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
                             KM
@@ -814,7 +853,7 @@ export default function StatementOfAccounts() {
                       <tbody className="divide-y divide-slate-200">
                         {summaryRows.map((r, idx) => {
                           const netUnbalanced =
-                            Math.abs(r.final_net_cash_position) >= 0.01;
+                            Math.abs(getFinalNet(r)) >= 0.01;
                           return (
                             <tr
                               key={idx}
@@ -836,7 +875,12 @@ export default function StatementOfAccounts() {
                                 </td>
                               )}
                               <td className="px-4 py-3 text-right text-slate-900">
-                                {r.cash_picked.toLocaleString("en-IN", {
+                                {(r.bank_picked ?? r.cash_picked).toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td className="px-4 py-3 text-right text-slate-700 font-medium">
+                                {(r.internal_picked ?? 0).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
                               </td>
@@ -845,16 +889,12 @@ export default function StatementOfAccounts() {
                                   minimumFractionDigits: 2,
                                 })}
                               </td>
-                              <td className="px-4 py-3 text-right">
-                                {(r.internal_transferred ?? 0) > 0 ? (
-                                  <span className="text-slate-700 bg-slate-100 px-2 py-1 rounded text-xs font-medium">
-                                    {r.internal_transferred!.toLocaleString("en-IN", {
+                              <td className="px-4 py-3 text-right text-slate-700">
+                                {(r.internal_loaded ?? 0) > 0
+                                  ? (r.internal_loaded ?? 0).toLocaleString("en-IN", {
                                       minimumFractionDigits: 2,
-                                    })}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-400">-</span>
-                                )}
+                                    })
+                                  : "-"}
                               </td>
                               <td className="px-4 py-3 text-right text-slate-900">
                                 {r.travel_km}
@@ -874,7 +914,7 @@ export default function StatementOfAccounts() {
                                       : "bg-emerald-100 text-emerald-900"
                                   }`}
                                 >
-                                  {r.final_net_cash_position.toLocaleString(
+                                  {getFinalNet(r).toLocaleString(
                                     "en-IN",
                                     { minimumFractionDigits: 2 }
                                   )}
@@ -892,7 +932,12 @@ export default function StatementOfAccounts() {
                           <td></td>
                           {isAdmin && <td></td>}
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                            {summaryTotals.cashPicked.toLocaleString("en-IN", {
+                            {summaryTotals.bankPicked.toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-700">
+                            {summaryTotals.internalPicked.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                             })}
                           </td>
@@ -902,7 +947,7 @@ export default function StatementOfAccounts() {
                             })}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-700">
-                            {summaryTotals.internalTransferred.toLocaleString("en-IN", {
+                            {summaryTotals.internalLoaded.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                             })}
                           </td>

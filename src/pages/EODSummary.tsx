@@ -408,16 +408,86 @@ function CustodianEOD({
     (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
   );
 
-  const totalPicked = cashPickups.reduce(
-    (sum: number, row: any) => sum + denomTotal(row),
-    0
-  );
-  const totalLoaded = atmLoads.reduce(
-    (sum: number, row: any) => sum + denomTotal(row),
-    0
-  );
+  const sumPickupDenoms = (row: any) => denomTotal(row);
+
+  const extractInternalSources = (pickup: any) =>
+    pickup?.internal_source_metadata?.sources || [];
+
+  const bankPicked = cashPickups.reduce((sum: number, row: any) => {
+    const source = row.pickup_source || "BANK";
+    if (source === "ATM_INTERNAL") return sum;
+    return sum + sumPickupDenoms(row);
+  }, 0);
+
+  const internalPickedFromRows = cashPickups.reduce((sum: number, row: any) => {
+    const source = row.pickup_source || "BANK";
+    if (source !== "ATM_INTERNAL") return sum;
+    return sum + sumPickupDenoms(row);
+  }, 0);
+
+  const internalPickedFromMeta = cashPickups.reduce((sum: number, row: any) => {
+    const metaSources = extractInternalSources(row);
+    if (!metaSources.length) return sum;
+    const metaTotal = metaSources.reduce(
+      (acc: number, s: any) => acc + Number(s.total_amount || 0),
+      0
+    );
+    return sum + metaTotal;
+  }, 0);
+
+  const internalPicked = internalPickedFromRows + internalPickedFromMeta;
+
+  const bankLoaded = atmLoads.reduce((sum: number, row: any) => {
+    if (row.source_breakdown?.bank_source) {
+      return sum + Number(row.source_breakdown?.bank_source?.total_amount || 0);
+    }
+    return sum + denomTotal(row);
+  }, 0);
+
+  const internalLoaded = atmLoads.reduce((sum: number, row: any) => {
+    if (row.source_breakdown?.internal_source) {
+      return sum + Number(row.source_breakdown?.internal_source?.total_amount || 0);
+    }
+    return sum;
+  }, 0);
+
+  // Bank cash drives EOD net position; internal transfers are neutralized.
+  const totalPicked = bankPicked;
+  const totalLoaded = bankLoaded;
+  const netInternalTransfer = internalPicked - internalLoaded;
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
+
+  const siteMap = new Map(
+    (routeSites || []).map((r: any) => [r.site_id, r.site])
+  );
+
+  const bankPickupRows = cashPickups.filter(
+    (row: any) => (row.pickup_source || "BANK") !== "ATM_INTERNAL"
+  );
+
+  const atmPickupRows = cashPickups.filter(
+    (row: any) => (row.pickup_source || "BANK") === "ATM_INTERNAL"
+  );
+
+  const internalPickupSources = bankPickupRows.flatMap((row: any) => {
+    const sources = extractInternalSources(row);
+    return sources.map((s: any) => ({
+      site: siteMap.get(s.site_id) || { bank_name: s.site_name || "ATM", address: "Internal Source" },
+      denoms: {
+        denom_100: Number(s.denominations?.denom_100 || 0),
+        denom_200: Number(s.denominations?.denom_200 || 0),
+        denom_500: Number(s.denominations?.denom_500 || 0),
+        denom_2000: Number(s.denominations?.denom_2000 || 0),
+      },
+      total_amount: Number(s.total_amount || 0),
+      pickup_time: row.pickup_time,
+    }));
+  });
+
+  const internalLoadRows = atmLoads.filter(
+    (row: any) => Number(row.source_breakdown?.internal_source?.total_amount || 0) > 0
+  );
 
   const status = assignment?.status || "open";
   const isEditable = status === "open" || status === "rejected";
@@ -544,6 +614,27 @@ function CustodianEOD({
 
   return (
     <div className="space-y-6">
+      {/* PRINT HEADER */}
+      <div className="print-only mb-4 border-b pb-3">
+        <div className="flex justify-between items-start">
+          <div className="flex items-center gap-3">
+            <img src="/bank-logo.png" alt="Bank Logo" className="h-10 w-auto" />
+            <div>
+              <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
+              <p className="text-xs text-slate-600">
+                End of Day Cash Operations Summary
+              </p>
+            </div>
+          </div>
+          <div className="text-right text-xs">
+            <p className="font-semibold">EOD Report</p>
+            <p>Date: {assignment?.assignment_date}</p>
+            {assignment?.custodian_id && (
+              <p>Custodian: {assignment?.custodian_id}</p>
+            )}
+          </div>
+        </div>
+      </div>
       <div className="space-y-2">
         <h2 className="text-lg font-semibold text-primary">
           End of Day Summary
@@ -610,15 +701,6 @@ function CustodianEOD({
             </div>
           )}
 
-          <h3 className="font-semibold">Route Sites</h3>
-          <div className={!isEditable ? 'opacity-75 pointer-events-none' : ''}>
-            {routeSites.map((rs: any, idx: number) => (
-              <div key={rs.id} className="p-3 bg-white rounded shadow text-sm">
-                {idx + 1}. {formatSite(rs.site)}
-              </div>
-            ))}
-          </div>
-
           <h3 className="font-semibold">Tasks Summary</h3>
           <div className={`grid grid-cols-2 gap-3 ${!isEditable ? 'opacity-75 pointer-events-none' : ''}`}>
             <SummaryBox label="Denomination Plans" value={taskSummary?.denomCount} />
@@ -630,29 +712,47 @@ function CustodianEOD({
           <div className="mt-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold">EOD Report</h3>
-              <button
-                onClick={() => window.print()}
-                className="btn-secondary text-xs print:hidden"
-              >
-                🖨️ Print / PDF
-              </button>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-lg p-4 text-sm space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-slate-600">Cash Picked</span>
+                <span className="text-slate-600">Bank Cash Picked</span>
                 <span className="font-semibold text-slate-900">
-                  ₹{totalPicked.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  ₹{bankPicked.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-600">Cash Loaded</span>
+                <span className="text-slate-600">Bank Cash Loaded</span>
                 <span className="font-semibold text-slate-900">
-                  ₹{totalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  ₹{bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-600">Cash in Hand (Expected 0)</span>
+                <span className="text-slate-600">ATM Cash Picked (Internal Credit)</span>
+                <span className="font-semibold text-slate-900">
+                  ₹{internalPicked.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">ATM Cash Loaded (Internal Debit)</span>
+                <span className="font-semibold text-slate-900">
+                  ₹{internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Internal Transfer Net (Expected 0)</span>
+                <span
+                  className={`px-2 py-1 rounded text-xs font-semibold ${
+                    Math.abs(netInternalTransfer) >= 0.01
+                      ? "bg-amber-100 text-amber-900"
+                      : "bg-emerald-100 text-emerald-900"
+                  }`}
+                >
+                  ₹{netInternalTransfer.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Cash in Hand (Bank Net)</span>
                 <span
                   className={`px-2 py-1 rounded text-xs font-semibold ${
                     closingUnbalanced
@@ -665,11 +765,11 @@ function CustodianEOD({
               </div>
             </div>
 
-            <Section title="Withdrawals / Cash Picked">
-              {cashPickups.length === 0 && (
-                <div className="text-xs text-slate-500">No pickups recorded.</div>
+            <Section title="Bank Cash Picked">
+              {bankPickupRows.length === 0 && (
+                <div className="text-xs text-slate-500">No bank pickups recorded.</div>
               )}
-              {cashPickups.map((c: any, i: number) => (
+              {bankPickupRows.map((c: any, i: number) => (
                 <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
                   <div className="font-medium">
                     {c.bank_name || "Bank"} {c.branch && `– ${c.branch}`}
@@ -689,6 +789,50 @@ function CustodianEOD({
               ))}
             </Section>
 
+            <Section title="ATM Cash Picked (Internal)">
+              {atmPickupRows.length === 0 && internalPickupSources.length === 0 && (
+                <div className="text-xs text-slate-500">No internal pickups recorded.</div>
+              )}
+
+              {atmPickupRows.map((c: any, i: number) => (
+                <div key={`atm-${i}`} className="border rounded p-3 mb-3 bg-white text-xs">
+                  <div className="font-medium">
+                    {formatSite(siteMap.get(c.source_site_id) || c.site)}
+                  </div>
+                  <div className="text-slate-500">
+                    Pickup Time: {formatIST(c.pickup_time)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {DENOM_ORDER.map((d) => (
+                      <div key={d}>{c[`denom_${d}`] || 0} × ₹{d}</div>
+                    ))}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{denomTotal(c).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+
+              {internalPickupSources.map((s: any, i: number) => (
+                <div key={`meta-${i}`} className="border rounded p-3 mb-3 bg-white text-xs">
+                  <div className="font-medium">{formatSite(s.site)}</div>
+                  {s.pickup_time && (
+                    <div className="text-slate-500">
+                      Pickup Time: {formatIST(s.pickup_time)}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {DENOM_ORDER.map((d) => (
+                      <div key={d}>{s.denoms?.[`denom_${d}`] || 0} × ₹{d}</div>
+                    ))}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{(s.total_amount || 0).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </Section>
+
             <Section title="ATM Loads">
               {atmLoads.length === 0 && (
                 <div className="text-xs text-slate-500">No loads recorded.</div>
@@ -696,6 +840,12 @@ function CustodianEOD({
               {atmLoads.map((a: any, i: number) => (
                 <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
                   <div className="font-medium">{formatSite(a.site)}</div>
+                  <div className="text-slate-500">Load Time: {formatIST(a.time_in)}</div>
+                  {Number(a.source_breakdown?.internal_source?.total_amount || 0) > 0 && (
+                    <div className="text-[10px] text-amber-700 mt-1">
+                      Internal source used for this load
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     {DENOM_ORDER.map((d) => (
                       <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
@@ -706,6 +856,80 @@ function CustodianEOD({
                   </div>
                 </div>
               ))}
+            </Section>
+
+            <Section title="Internal Transfers (Neutral)">
+              {atmPickupRows.length === 0 && internalPickupSources.length === 0 && internalLoadRows.length === 0 && (
+                <div className="text-xs text-slate-500">No internal transfers recorded.</div>
+              )}
+
+              {(atmPickupRows.length > 0 || internalPickupSources.length > 0) && (
+                <div className="mb-4">
+                  <div className="text-xs font-semibold text-slate-600 mb-2">
+                    Source ATM → Internal Pool (Removal)
+                  </div>
+                  {atmPickupRows.map((c: any, i: number) => (
+                    <div key={`src-${i}`} className="border rounded p-3 mb-2 bg-white text-xs">
+                      <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
+                      <div className="font-medium">
+                        {formatSite(siteMap.get(c.source_site_id) || c.site)}
+                      </div>
+                      <div className="text-slate-500">Pickup Time: {formatIST(c.pickup_time)}</div>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        {DENOM_ORDER.map((d) => (
+                          <div key={d}>{c[`denom_${d}`] || 0} × ₹{d}</div>
+                        ))}
+                      </div>
+                      <div className="mt-2 font-semibold">
+                        Total: ₹{denomTotal(c).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+
+                  {internalPickupSources.map((s: any, i: number) => (
+                    <div key={`src-meta-${i}`} className="border rounded p-3 mb-2 bg-white text-xs">
+                      <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
+                      <div className="font-medium">{formatSite(s.site)}</div>
+                      {s.pickup_time && (
+                        <div className="text-slate-500">Pickup Time: {formatIST(s.pickup_time)}</div>
+                      )}
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        {DENOM_ORDER.map((d) => (
+                          <div key={d}>{s.denoms?.[`denom_${d}`] || 0} × ₹{d}</div>
+                        ))}
+                      </div>
+                      <div className="mt-2 font-semibold">
+                        Total: ₹{(s.total_amount || 0).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {internalLoadRows.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-2">
+                    Internal Pool → Destination ATM (Load)
+                  </div>
+                  {internalLoadRows.map((a: any, i: number) => (
+                    <div key={`dest-${i}`} className="border rounded p-3 mb-2 bg-white text-xs">
+                      <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
+                      <div className="font-medium">{formatSite(a.site)}</div>
+                      <div className="text-slate-500">Load Time: {formatIST(a.time_in)}</div>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        {DENOM_ORDER.map((d) => (
+                          <div key={d}>
+                            {a.source_breakdown?.internal_source?.[`denom_${d}`] || 0} × ₹{d}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 font-semibold">
+                        Total: ₹{Number(a.source_breakdown?.internal_source?.total_amount || 0).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Section>
 
             <Section title="Inter-Site Transfers">
@@ -789,8 +1013,22 @@ function CustodianEOD({
         </>
       )}
 
+      {/* PRINT SIGNATURE */}
+      {assignment?.eod_signature_url && (
+        <div className="print-only mt-8 border-t pt-4">
+          <div className="text-xs font-semibold text-slate-700 mb-2">
+            Custodian Signature
+          </div>
+          <img
+            src={assignment.eod_signature_url}
+            alt="EOD Signature"
+            className="h-24 w-auto"
+          />
+        </div>
+      )}
+
       {/* ✍️ DIGITAL SIGNATURE - READ ONLY (SIGNED) */}
-      {assignment?.status === "submitted" && assignment.eod_signed && (
+      {assignment?.eod_signed && (
         <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded shadow">
           <h3 className="font-semibold mb-2 text-green-800">✍️ Signed EOD</h3>
           <p className="text-xs text-slate-600 mb-4">
@@ -921,6 +1159,42 @@ function CustodianEOD({
           )}
         </div>
       )}
+
+      {/* Sticky Print/PDF Action */}
+      {assignment && (
+        <div className="fixed bottom-0 inset-x-0 z-50 bg-white border-t shadow-md print:hidden">
+          <div className="px-4 py-3">
+            <button
+              onClick={() => window.print()}
+              disabled={!assignment.eod_signed}
+              className={`w-full rounded-lg py-2 text-sm font-semibold transition ${
+                assignment.eod_signed
+                  ? "bg-primary text-white active:scale-95"
+                  : "bg-slate-200 text-slate-500 cursor-not-allowed"
+              }`}
+            >
+              {assignment.eod_signed ? "🖨️ Print / PDF" : "Print / PDF (Sign & Lock to enable)"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* PRINT FOOTER */}
+      <div className="print-only mt-10 pt-4 border-t text-xs text-slate-600">
+        <div className="flex justify-between">
+          <div>
+            <div className="font-semibold">Sruthi CRA Ops</div>
+            <div>Cash Replenishment & ATM Operations</div>
+          </div>
+          <div className="text-right">
+            <div>Generated: {new Date().toLocaleDateString("en-IN")}</div>
+            <div>Confidential – Internal Use Only</div>
+          </div>
+        </div>
+        <div className="mt-2 text-[10px] text-slate-500">
+          This EOD report is system-generated and digitally signed. Any discrepancy must be reported within the prescribed timeline.
+        </div>
+      </div>
 
       <ConfirmationModal
         open={showSignatureConfirm}

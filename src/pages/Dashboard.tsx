@@ -16,6 +16,24 @@ function denomValue(count: number, denom: number) {
   return count * denom;
 }
 
+function sumDenoms(row: any, denoms: number[]) {
+  return denoms.reduce((sum, d) => sum + (row?.[`denom_${d}`] || 0) * d, 0);
+}
+
+function emptyDenomMap() {
+  return { 100: 0, 200: 0, 500: 0, 2000: 0 } as Record<number, number>;
+}
+
+function extractInternalSourcesFromMetadata(pickup: any) {
+  const sources = pickup?.internal_source_metadata?.sources || [];
+  return sources.map((s: any) => ({
+    site_id: s.site_id,
+    site_name: s.site_name,
+    denominations: s.denominations || {},
+    total_amount: s.total_amount || 0,
+  }));
+}
+
 export default function Dashboard() {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -28,14 +46,16 @@ export default function Dashboard() {
   const [loads, setLoads] = useState<any[]>([]);
   const [pickups, setPickups] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
+  // Only loaded ATMs (remove pending logic)
+  const [loadedATMs, setLoadedATMs] = useState<any[]>([]);
 
   const [cashUtil, setCashUtil] = useState<any>(null);
   const [denomSummary, setDenomSummary] = useState<any>(null);
   const [loadedBySite, setLoadedBySite] = useState<any[]>([]);
   const [kpiOpen, setKpiOpen] = useState(true);
-  const [showPending, setShowPending] = useState(false);
   const [exchangeCount, setExchangeCount] = useState(0);
-  const [transferCount, setTransferCount] = useState(0);
+  const [internalTransferTotal, setInternalTransferTotal] = useState(0);
+  const [internalTransfers, setInternalTransfers] = useState<any[]>([]);
 const isSubmitted = assignment?.status === "submitted";
 const isRejected = assignment?.status === "rejected";
 const isApproved = assignment?.status === "approved";
@@ -112,7 +132,8 @@ loadTravelKPI();
     if (!assign) {
       setAssignment(null);
       setExchangeCount(0);
-      setTransferCount(0);
+      setInternalTransferTotal(0);
+      setInternalTransfers([]);
 
       // Fetch last assignment (fallback view)
       const { data: last } = await supabase
@@ -170,15 +191,54 @@ loadTravelKPI();
     setLoads(ls.data || []);
     setPickups(cps.data || []);
     setPlans(dp.data || []);
+    // Only ATMs that have been loaded (remove pending logic)
+    const loaded = (ls.data || []).map((l: any) => l.site_id);
+    setLoadedATMs(loaded);
 
     const operational = ops.data || [];
     setExchangeCount(
       operational.filter((o: any) => o.adjustment_type === "EXCHANGE").length
     );
-    setTransferCount(
-      operational.filter((o: any) => o.adjustment_type === "INTER_SITE_TRANSFER")
-        .length
+    const siteMap = new Map(
+      (rs.data || []).map((r: any) => [r.site_id, r.site])
     );
+
+    const derivedInternalTransfers: any[] = [];
+    (cps.data || []).forEach((p: any) => {
+      const source = p.pickup_source || "BANK";
+
+      if (source === "ATM_INTERNAL") {
+        const site = siteMap.get(p.source_site_id);
+        derivedInternalTransfers.push({
+          site: site || { bank_name: "ATM", address: "Internal Source" },
+          denoms: {
+            denom_100: p.denom_100 || 0,
+            denom_200: p.denom_200 || 0,
+            denom_500: p.denom_500 || 0,
+            denom_2000: p.denom_2000 || 0,
+          },
+          total_amount: sumDenoms(p, DENOMS),
+        });
+        return;
+      }
+
+      const metaSources = extractInternalSourcesFromMetadata(p);
+      metaSources.forEach((s: any) => {
+        const site = siteMap.get(s.site_id);
+        derivedInternalTransfers.push({
+          site: site || { bank_name: s.site_name || "ATM", address: "Internal Source" },
+          denoms: {
+            denom_100: Number(s.denominations?.denom_100 || 0),
+            denom_200: Number(s.denominations?.denom_200 || 0),
+            denom_500: Number(s.denominations?.denom_500 || 0),
+            denom_2000: Number(s.denominations?.denom_2000 || 0),
+          },
+          total_amount: Number(s.total_amount || 0),
+        });
+      });
+    });
+
+    setInternalTransfers(derivedInternalTransfers);
 
     computeCash(cps.data || [], ls.data || []);
     computeDenoms(cps.data || [], ls.data || [], ops.data || []);
@@ -188,13 +248,47 @@ loadTravelKPI();
   }
 
   function computeCash(pickups: any[], loads: any[]) {
-    const picked = pickups.reduce((s, p) => s + (p.total_amount || 0), 0);
-    const loaded = loads.reduce(
-      (s, l) =>
-        s + DENOMS.reduce((ds, d) => ds + (l[`denom_${d}`] || 0) * d, 0),
-      0
-    );
+    const bankPicked = pickups.reduce((sum, p) => {
+      const source = p.pickup_source || "BANK";
+      if (source === "ATM_INTERNAL") return sum;
+      return sum + sumDenoms(p, DENOMS);
+    }, 0);
 
+    const internalPickedRows = pickups.reduce((sum, p) => {
+      const source = p.pickup_source || "BANK";
+      if (source !== "ATM_INTERNAL") return sum;
+      return sum + sumDenoms(p, DENOMS);
+    }, 0);
+
+    const internalPickedMeta = pickups.reduce((sum, p) => {
+      const metaSources = extractInternalSourcesFromMetadata(p);
+      const metaTotal = metaSources.reduce(
+        (acc: number, s: any) => acc + Number(s.total_amount || 0),
+        0
+      );
+      return sum + metaTotal;
+    }, 0);
+
+    const bankLoaded = loads.reduce((sum, l) => {
+      if (l.source_breakdown?.bank_source) {
+        return sum + Number(l.source_breakdown?.bank_source?.total_amount || 0);
+      }
+      return sum + sumDenoms(l, DENOMS);
+    }, 0);
+
+    const internalLoaded = loads.reduce((sum, l) => {
+      if (l.source_breakdown?.internal_source) {
+        return sum + Number(l.source_breakdown?.internal_source?.total_amount || 0);
+      }
+      return sum;
+    }, 0);
+
+    const internalPickedTotal = internalPickedRows + internalPickedMeta;
+    const picked = bankPicked + internalPickedTotal;
+    const loaded = bankLoaded + internalLoaded;
+
+    // Avoid double counting: show the larger of picked vs loaded for transfer volume
+    setInternalTransferTotal(Math.max(internalPickedTotal, internalLoaded));
     setCashUtil({
       picked,
       loaded,
@@ -203,29 +297,58 @@ loadTravelKPI();
   }
 
   function computeDenoms(pickups: any[], loads: any[], exchanges: any[]) {
-    const picked: any = {};
-    const loaded: any = {};
-    const inHand: any = {};
-    const exchangeNet: any = {};
-
-    DENOMS.forEach(d => {
-      exchangeNet[d] = 0;
-    });
+    const picked: Record<number, number> = emptyDenomMap();
+    const loaded: Record<number, number> = emptyDenomMap();
+    const inHand: Record<number, number> = emptyDenomMap();
+    const exchangeNet: Record<number, number> = emptyDenomMap();
 
     (exchanges || []).forEach((row: any) => {
       if (row.adjustment_type !== "EXCHANGE") return;
       const from = row.exchange_metadata?.from_denominations || {};
       const to = row.exchange_metadata?.to_denominations || {};
 
-      DENOMS.forEach(d => {
+      DENOMS.forEach((d) => {
         const key = `denom_${d}`;
         exchangeNet[d] += (to[key] || 0) - (from[key] || 0);
       });
     });
 
-    DENOMS.forEach(d => {
-      picked[d] = pickups.reduce((s, p) => s + (p[`denom_${d}`] || 0), 0);
-      loaded[d] = loads.reduce((s, l) => s + (l[`denom_${d}`] || 0), 0);
+    pickups.forEach((p) => {
+      const source = p.pickup_source || "BANK";
+      DENOMS.forEach((d) => {
+        if (source === "ATM_INTERNAL") {
+          picked[d] += p[`denom_${d}`] || 0;
+          return;
+        }
+
+        picked[d] += p[`denom_${d}`] || 0;
+      });
+
+      const metaSources = extractInternalSourcesFromMetadata(p);
+      if (metaSources.length > 0) {
+        metaSources.forEach((s: any) => {
+          DENOMS.forEach((d) => {
+            picked[d] += Number(s.denominations?.[`denom_${d}`] || 0);
+          });
+        });
+      }
+    });
+
+    loads.forEach((l) => {
+      if (l.source_breakdown?.bank_source || l.source_breakdown?.internal_source) {
+        DENOMS.forEach((d) => {
+          loaded[d] += Number(l.source_breakdown?.bank_source?.[`denom_${d}`] || 0);
+          loaded[d] += Number(l.source_breakdown?.internal_source?.[`denom_${d}`] || 0);
+        });
+        return;
+      }
+
+      DENOMS.forEach((d) => {
+        loaded[d] += l[`denom_${d}`] || 0;
+      });
+    });
+
+    DENOMS.forEach((d) => {
       inHand[d] = picked[d] - loaded[d] + exchangeNet[d];
     });
 
@@ -276,14 +399,11 @@ loadTravelKPI();
     );
   }
 
+  // Only show loaded ATMs
   const loadedSiteIds = new Set(loads.map(l => l.site_id));
-  const pendingSites = routeSites.filter(r => !loadedSiteIds.has(r.site_id));
-  
-  // ATM completion calculation - based ONLY on actual loads, not plans
-const totalATMs = routeSites.length;
-const loadedATMs = loadedSiteIds.size;
-const completionPct =
-  totalATMs > 0 ? Math.round((loadedATMs / totalATMs) * 100) : 0;
+  const totalATMs = routeSites.length;
+  const loadedATMsCount = loadedSiteIds.size;
+  const completionPct = totalATMs > 0 ? Math.round((loadedATMsCount / totalATMs) * 100) : 0;
 
  function exportCSV() {
     if (!loadedBySite.length) return;
@@ -474,7 +594,10 @@ const completionPct =
                   highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
                 />
                 <Stat label="Exchanges" value={exchangeCount} />
-                <Stat label="Transfers" value={transferCount} />
+                <Stat
+                  label="Internal Transfers"
+                  value={`₹${internalTransferTotal.toLocaleString("en-IN")}`}
+                />
 				
 {profile?.role === "custodian" && (
   <>
@@ -576,63 +699,89 @@ const completionPct =
               </div>
             </div>
           )}
+
+          {internalTransfers.length > 0 && (
+            <div className="bg-white rounded shadow p-4">
+              <h3 className="font-semibold mb-3">
+                Internal ATM Transfers (Source)
+              </h3>
+
+              <div className="space-y-3">
+                {internalTransfers.map((t: any, idx: number) => (
+                  <div key={`${t.site?.id || idx}-${idx}`} className="border rounded p-3 text-sm">
+                    <div className="font-semibold text-slate-800">
+                      {formatSite(t.site)}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                      {DENOMS.map((d) => (
+                        <div key={d}>
+                          {t.denoms?.[`denom_${d}`] || 0} × ₹{d}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 text-xs font-semibold text-slate-700">
+                      Total: ₹{(t.total_amount || 0).toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 		  
-		  {/* MOBILE: Loaded ATMs – Denomination wise */}
+          {/* MOBILE: Loaded ATMs – Denomination wise (pending list removed) */}
 {loadedBySite.length > 0 && (
   <div className="sm:hidden bg-white rounded shadow p-4">
     <h3 className="font-semibold mb-3">
       Loaded ATMs – Denomination Details
     </h3>
-
     <div className="space-y-3">
-      {loadedBySite.map(row => (
-        <div
-          key={row.site_id}
-          className="border rounded-lg p-3 text-sm"
-        >
-          <div className="font-semibold mb-2 text-slate-800">
-            {formatSite(row.site)}
-          </div>
-
-          {/* Denomination rows */}
-          <div className="space-y-1">
-            {DENOMS.map(d => (
-              <div
-                key={d}
-                className="flex justify-between text-xs"
-              >
-                <span>₹{d}</span>
-                <span>
-                  {row.denoms[d] || 0} × ₹{d} = ₹
-                  {denomValue(row.denoms[d] || 0, d)}
-                </span>
+      {loadedBySite
+        .filter(row => loadedSiteIds.has(row.site_id))
+        .map(row => (
+          <div
+            key={row.site_id}
+            className="border rounded-lg p-3 text-sm"
+          >
+            <div className="font-semibold mb-2 text-slate-800">
+              {formatSite(row.site)}
+            </div>
+            {/* Denomination rows */}
+            <div className="space-y-1">
+              {DENOMS.map(d => (
+                <div
+                  key={d}
+                  className="flex justify-between text-xs"
+                >
+                  <span>₹{d}</span>
+                  <span>
+                    {row.denoms[d] || 0} × ₹{d} = ₹
+                    {denomValue(row.denoms[d] || 0, d)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {/* Totals */}
+            <div className="border-t mt-2 pt-2 text-xs space-y-0.5">
+              <div>
+                Planned: <span className="font-medium">₹{row.plannedValue}</span>
               </div>
-            ))}
-          </div>
-
-          {/* Totals */}
-          <div className="border-t mt-2 pt-2 text-xs space-y-0.5">
-            <div>
-              Planned: <span className="font-medium">₹{row.plannedValue}</span>
-            </div>
-            <div>
-              Loaded: <span className="font-medium">₹{row.loadedValue}</span>
+              <div>
+                Loaded: <span className="font-medium">₹{row.loadedValue}</span>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
     </div>
   </div>
 )}
 
 
-          {/* Loaded ATMs */}
+          {/* Loaded ATMs (only show loaded, remove pending) */}
           {loadedBySite.length > 0 && (
             <div className="bg-white rounded shadow p-4 hidden sm:block">
               <h3 className="font-semibold mb-3">
                 Loaded ATMs – Denomination Details
               </h3>
-
               <div className="overflow-x-auto">
                 <table className="w-full text-sm border">
                   <thead className="bg-slate-100">
@@ -648,21 +797,23 @@ const completionPct =
                     </tr>
                   </thead>
                   <tbody>
-                    {loadedBySite.map(row => (
-                      <tr key={row.site_id}>
-                        <td className="border p-2">
-                          {formatSite(row.site)}
-                        </td>
-                        {DENOMS.map(d => (
-                          <td key={d} className="border p-2 text-right">
-                            {row.denoms[d] || 0} / ₹
-                            {denomValue(row.denoms[d] || 0, d)}
+                    {loadedBySite
+                      .filter(row => loadedSiteIds.has(row.site_id))
+                      .map(row => (
+                        <tr key={row.site_id}>
+                          <td className="border p-2">
+                            {formatSite(row.site)}
                           </td>
-                        ))}
-                        <td className="border p-2 text-right">₹{row.plannedValue}</td>
-                        <td className="border p-2 text-right">₹{row.loadedValue}</td>
-                      </tr>
-                    ))}
+                          {DENOMS.map(d => (
+                            <td key={d} className="border p-2 text-right">
+                              {row.denoms[d] || 0} / ₹
+                              {denomValue(row.denoms[d] || 0, d)}
+                            </td>
+                          ))}
+                          <td className="border p-2 text-right">₹{row.plannedValue}</td>
+                          <td className="border p-2 text-right">₹{row.loadedValue}</td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -670,35 +821,6 @@ const completionPct =
           )}
 		  
 		
-
-          {/* Pending ATMs */}
-          {pendingSites.length > 0 && (
-  <div className="bg-white rounded shadow p-4">
-    <button
-      onClick={() => setShowPending(!showPending)}
-      className="w-full flex justify-between items-center font-semibold text-sm"
-    >
-      <span>Pending ATMs</span>
-      <span className="text-xs text-slate-500">
-        {pendingSites.length} {showPending ? "▲" : "▼"}
-      </span>
-    </button>
-
-    {showPending && (
-      <div className="mt-3 space-y-2">
-        {pendingSites.map(rs => (
-          <div
-            key={rs.id}
-            className="text-sm border rounded px-3 py-2 bg-slate-50"
-          >
-            {formatSite(rs.site)}
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-)}
-
         </div>
       )}
 	{/* Mobile Sticky CSV / Print Actions */}

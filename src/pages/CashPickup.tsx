@@ -5,7 +5,6 @@ import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
-import { ATMSiteSelector } from "../components/ATMSiteSelector";
 
 interface BankAccount {
   id: string;
@@ -17,13 +16,8 @@ interface BankAccount {
   branch_phone: string | null;
   branch_email: string | null;
   branch_address: string | null;
-}
-
-interface SiteDenoms {
-  denom_100: number;
-  denom_200: number;
-  denom_500: number;
-  denom_2000: number;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 interface ATMSite {
@@ -32,26 +26,59 @@ interface ATMSite {
   address: string;
   latitude: number | null;
   longitude: number | null;
+  atm_id?: string | null;
 }
 
-interface SelectedSite {
-  site: ATMSite;
-  denoms: SiteDenoms;
-  available: SiteDenoms;
+type GPSState = {
+  status: "unknown" | "verified" | "mismatch" | "no_gps";
+  message: string | null;
+  lat: number | null;
+  lng: number | null;
+  distance: number | null;
+  timestamp: string | null;
+};
+
+const GPS_RADIUS_METERS = 100;
+
+const EMPTY_GPS: GPSState = {
+  status: "unknown",
+  message: null,
+  lat: null,
+  lng: null,
+  distance: null,
+  timestamp: null,
+};
+
+function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
-type SourceMode = "bank-only" | "bank-and-atm";
+async function getGPS() {
+  return new Promise<{ lat: number; lng: number }>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      reject,
+      { enableHighAccuracy: true, timeout: 20000 }
+    );
+  });
+}
 
 export default function CashPickup() {
   const { profile } = useAuth();
-
+  const [activeTab, setActiveTab] = useState<'bank' | 'atm'>('bank');
+  // Bank Pickup State
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [selectedBankId, setSelectedBankId] = useState<string>("");
   const [expectedAmount, setExpectedAmount] = useState<number>(0);
-  const [sourceMode, setSourceMode] = useState<SourceMode>("bank-only");
-  const [selectedATMSites, setSelectedATMSites] = useState<SelectedSite[]>([]);
-
   const [form, setForm] = useState({
     denom_2000: 0,
     denom_500: 0,
@@ -61,15 +88,9 @@ export default function CashPickup() {
     denom_20: 0,
     denom_10: 0,
   });
-
-  const [loading, setLoading] = useState(false);
-  const [submitLocked, setSubmitLocked] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [confirmMessage, setConfirmMessage] = useState("");
-  const [banksLoading, setBanksLoading] = useState(false);
-  const [banksError, setBanksError] = useState<string | null>(null);
-
+  const [bankGps, setBankGps] = useState<GPSState>(EMPTY_GPS);
+  const [bankPhoto, setBankPhoto] = useState<File | null>(null);
+  const [bankSubmitLocked, setBankSubmitLocked] = useState(false);
   const [plannedDenoms, setPlannedDenoms] = useState<
     | {
         denom_100: number;
@@ -81,7 +102,26 @@ export default function CashPickup() {
   >(null);
   const [plannedLoading, setPlannedLoading] = useState(false);
   const [plannedError, setPlannedError] = useState<string | null>(null);
-
+  const [banksLoading, setBanksLoading] = useState(false);
+  const [banksError, setBanksError] = useState<string | null>(null);
+  // ATM Pickup State
+  const [atmSites, setAtmSites] = useState<ATMSite[]>([]);
+  const [selectedAtmSiteId, setSelectedAtmSiteId] = useState<number | null>(null);
+  const [atmDenoms, setAtmDenoms] = useState({
+    denom_2000: 0,
+    denom_500: 0,
+    denom_200: 0,
+    denom_100: 0,
+  });
+  const [atmGps, setAtmGps] = useState<GPSState>(EMPTY_GPS);
+  const [atmPhoto, setAtmPhoto] = useState<File | null>(null);
+  const [atmSubmitLocked, setAtmSubmitLocked] = useState(false);
+  // Shared
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [confirmType, setConfirmType] = useState<"bank" | "atm" | null>(null);
   const today = getISTDateString();
 
   // --------------------------------------------------
@@ -109,6 +149,24 @@ export default function CashPickup() {
 
     loadTodayAssignment();
   }, [profile]);
+
+  useEffect(() => {
+    if (!assignmentId) {
+      setAtmSites([]);
+      return;
+    }
+
+    async function loadAtmSites() {
+      const { data } = await supabase
+        .from("route_sites")
+        .select("site:sites(id, bank_name, address, latitude, longitude, atm_id)")
+        .eq("assignment_id", assignmentId);
+
+      setAtmSites((data || []).map((r: any) => r.site));
+    }
+
+    loadAtmSites();
+  }, [assignmentId]);
 
   // --------------------------------------------------
   // Load bank accounts
@@ -202,19 +260,13 @@ export default function CashPickup() {
     form.denom_200 * 200 +
     form.denom_100 * 100;
 
-  const internalAmount = selectedATMSites.reduce((total, site) => {
-    return (
-      total +
-      site.denoms.denom_100 * 100 +
-      site.denoms.denom_200 * 200 +
-      site.denoms.denom_500 * 500 +
-      site.denoms.denom_2000 * 2000
-    );
-  }, 0);
+  const atmAmount =
+    atmDenoms.denom_2000 * 2000 +
+    atmDenoms.denom_500 * 500 +
+    atmDenoms.denom_200 * 200 +
+    atmDenoms.denom_100 * 100;
 
-  const totalAmount = sourceMode === "bank-only" ? bankAmount : bankAmount + internalAmount;
-
-  const variance = totalAmount - expectedAmount;
+  const variance = bankAmount - expectedAmount;
 
   const plannedTotal = plannedDenoms
     ? plannedDenoms.denom_2000 * 2000 +
@@ -226,11 +278,9 @@ export default function CashPickup() {
   // --------------------------------------------------
   // Save (UPSERT – one pickup per bank per day)
   // --------------------------------------------------
-  function resetForm() {
+  function resetBankForm() {
     setSelectedBankId("");
     setExpectedAmount(0);
-    setSourceMode("bank-only");
-    setSelectedATMSites([]);
     setForm({
       denom_2000: 0,
       denom_500: 0,
@@ -240,44 +290,199 @@ export default function CashPickup() {
       denom_20: 0,
       denom_10: 0,
     });
-    setSubmitLocked(false);
+    setBankGps(EMPTY_GPS);
+    setBankPhoto(null);
+    setBankSubmitLocked(false);
+  }
+  function resetAtmForm() {
+    setAtmDenoms({
+      denom_2000: 0,
+      denom_500: 0,
+      denom_200: 0,
+      denom_100: 0,
+    });
+    setSelectedAtmSiteId(null);
+    setAtmGps(EMPTY_GPS);
+    setAtmSubmitLocked(false);
   }
 
-  async function handleSave() {
-    if (loading || submitLocked) return;
+  function buildGpsMetadata(gps: GPSState, target: string) {
+    return {
+      target,
+      status: gps.status,
+      gps_lat: gps.lat,
+      gps_lng: gps.lng,
+      distance_meters: gps.distance,
+      verified_at: gps.timestamp,
+    };
+  }
+
+  async function verifyBankGps() {
+    if (!selectedBank) return;
+
+    try {
+      const g = await getGPS();
+
+      if (selectedBank.latitude == null || selectedBank.longitude == null) {
+        setBankGps({
+          status: "no_gps",
+          message: "Bank GPS not configured. Upload photo to continue.",
+          lat: g.lat,
+          lng: g.lng,
+          distance: null,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const d = distanceMeters(
+        g.lat,
+        g.lng,
+        Number(selectedBank.latitude),
+        Number(selectedBank.longitude)
+      );
+
+      if (d <= GPS_RADIUS_METERS) {
+        setBankGps({
+          status: "verified",
+          message: `GPS verified (${d.toFixed(1)} m)`,
+          lat: g.lat,
+          lng: g.lng,
+          distance: d,
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        setBankGps({
+          status: "mismatch",
+          message: `GPS mismatch (${d.toFixed(1)} m). Move closer and retry.`,
+          lat: g.lat,
+          lng: g.lng,
+          distance: d,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      setBankGps({
+        status: "no_gps",
+        message: "Unable to fetch GPS. Ensure location is enabled.",
+        lat: null,
+        lng: null,
+        distance: null,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  async function verifyAtmGps() {
+    const site = atmSites.find((s) => s.id === selectedAtmSiteId);
+    if (!site) return;
+
+    try {
+      const g = await getGPS();
+
+      if (site.latitude == null || site.longitude == null) {
+        setAtmGps({
+          status: "no_gps",
+          message: "ATM GPS not configured. Upload photo to continue.",
+          lat: g.lat,
+          lng: g.lng,
+          distance: null,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      const d = distanceMeters(
+        g.lat,
+        g.lng,
+        Number(site.latitude),
+        Number(site.longitude)
+      );
+
+      if (d <= GPS_RADIUS_METERS) {
+        setAtmGps({
+          status: "verified",
+          message: `GPS verified (${d.toFixed(1)} m)`,
+          lat: g.lat,
+          lng: g.lng,
+          distance: d,
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        setAtmGps({
+          status: "mismatch",
+          message: `GPS mismatch (${d.toFixed(1)} m). Move closer and retry.`,
+          lat: g.lat,
+          lng: g.lng,
+          distance: d,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      setAtmGps({
+        status: "no_gps",
+        message: "Unable to fetch GPS. Ensure location is enabled.",
+        lat: null,
+        lng: null,
+        distance: null,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  async function uploadGpsPhoto(file: File, prefix: string) {
+    const path = `cash-pickup/${prefix}-${Date.now()}.jpg`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("issue-photos")
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) {
+      throw new Error("Photo upload failed");
+    }
+
+    return path;
+  }
+
+  async function saveBankPickup() {
+    if (loading || bankSubmitLocked) return;
     if (!assignmentId || !selectedBankId) {
       setMessage("Assignment or Bank selection missing");
+      return;
+    }
+
+    const totalNotes =
+      form.denom_2000 +
+      form.denom_500 +
+      form.denom_200 +
+      form.denom_100 +
+      form.denom_50 +
+      form.denom_20 +
+      form.denom_10;
+
+    if (totalNotes === 0) {
+      setMessage("Enter at least one denomination for bank pickup");
+      return;
+    }
+
+    const gpsOk = bankGps.status === "verified" || (bankGps.status !== "unknown" && !!bankPhoto);
+    if (!gpsOk) {
+      setMessage("Verify bank GPS or upload photo to continue");
       return;
     }
 
     setLoading(true);
     setMessage(null);
 
-    const bankName = selectedBank?.bank_name || "";
-
-    // Construct internal_source_metadata for bank-and-atm mode
-    let internalSourceMetadata = null;
-    if (sourceMode === "bank-and-atm" && selectedATMSites.length > 0) {
-      const sources = selectedATMSites.map((selected) => ({
-        site_id: selected.site.id,
-        site_name: selected.site.bank_name,
-        denominations: {
-          denom_100: selected.denoms.denom_100,
-          denom_200: selected.denoms.denom_200,
-          denom_500: selected.denoms.denom_500,
-          denom_2000: selected.denoms.denom_2000,
-        },
-        total_amount:
-          selected.denoms.denom_100 * 100 +
-          selected.denoms.denom_200 * 200 +
-          selected.denoms.denom_500 * 500 +
-          selected.denoms.denom_2000 * 2000,
-      }));
-
-      internalSourceMetadata = {
-        sources,
-        total_internal_amount: internalAmount,
-      };
+    let bankPhotoPath: string | null = null;
+    if (bankPhoto) {
+      try {
+        bankPhotoPath = await uploadGpsPhoto(bankPhoto, `bank-${assignmentId}-${selectedBankId}`);
+      } catch (err) {
+        setMessage("Failed to upload bank photo");
+        setLoading(false);
+        return;
+      }
     }
 
     const { error } = await supabase
@@ -285,13 +490,15 @@ export default function CashPickup() {
       .upsert(
         {
           assignment_id: assignmentId,
-          bank_name: bankName,
+          bank_name: selectedBank?.bank_name || "",
           branch: selectedBank?.branch_name || selectedBank?.branch_code || "",
           pickup_time: new Date().toISOString(),
           expected_amount: expectedAmount,
-          total_amount: totalAmount,
+          total_amount: bankAmount,
           variance,
-          internal_source_metadata: internalSourceMetadata,
+          pickup_source: "BANK",
+          gps_metadata: buildGpsMetadata(bankGps, "BANK"),
+          gps_photo_url: bankPhotoPath,
           ...form,
         },
         {
@@ -301,7 +508,7 @@ export default function CashPickup() {
 
     if (error) {
       console.error(error);
-      setMessage("Failed to save cash pickup");
+      setMessage("Failed to save bank pickup");
     } else {
       try {
         if (assignmentId && profile?.id) {
@@ -315,10 +522,94 @@ export default function CashPickup() {
       } catch (err) {
         console.warn("[CashPickup] Travel log trigger failed:", err);
       }
-      setSubmitLocked(true);
+      setBankSubmitLocked(true);
       setConfirmMessage(
-        `Cash pickup saved successfully for ${selectedBank?.bank_name || "bank"}.`
+        `Bank pickup saved successfully for ${selectedBank?.bank_name || "bank"}.`
       );
+      setConfirmType("bank");
+      setShowConfirm(true);
+    }
+
+    setLoading(false);
+  }
+
+  async function saveAtmPickup() {
+    if (loading || atmSubmitLocked) return;
+    if (!assignmentId || !selectedAtmSiteId) {
+      setMessage("Assignment or ATM selection missing");
+      return;
+    }
+
+    const totalNotes =
+      atmDenoms.denom_2000 +
+      atmDenoms.denom_500 +
+      atmDenoms.denom_200 +
+      atmDenoms.denom_100;
+
+    if (totalNotes === 0) {
+      setMessage("Enter at least one denomination for ATM pickup");
+      return;
+    }
+
+    const gpsOk = atmGps.status === "verified" || (atmGps.status !== "unknown" && !!atmPhoto);
+    if (!gpsOk) {
+      setMessage("Verify ATM GPS or upload photo to continue");
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    let atmPhotoPath: string | null = null;
+    if (atmPhoto) {
+      try {
+        atmPhotoPath = await uploadGpsPhoto(atmPhoto, `atm-${assignmentId}-${selectedAtmSiteId}`);
+      } catch (err) {
+        setMessage("Failed to upload ATM photo");
+        setLoading(false);
+        return;
+      }
+    }
+
+    const { error } = await supabase
+      .from("cash_pickups")
+      .insert({
+        assignment_id: assignmentId,
+        pickup_source: "ATM_INTERNAL",
+        source_site_id: selectedAtmSiteId,
+        pickup_time: new Date().toISOString(),
+        total_amount: atmAmount,
+        variance: null,
+        gps_metadata: buildGpsMetadata(atmGps, "ATM_INTERNAL"),
+        gps_photo_url: atmPhotoPath,
+        denom_2000: atmDenoms.denom_2000,
+        denom_500: atmDenoms.denom_500,
+        denom_200: atmDenoms.denom_200,
+        denom_100: atmDenoms.denom_100,
+        denom_50: 0,
+        denom_20: 0,
+        denom_10: 0,
+      });
+
+    if (error) {
+      console.error(error);
+      setMessage("Failed to save ATM pickup");
+    } else {
+      try {
+        if (assignmentId && profile?.id) {
+          await travelLogService.triggerCheckpoint({
+            assignmentId,
+            custodianId: profile.id,
+            vehicleType: "bike",
+            context: TravelContext.MANUAL,
+          });
+        }
+      } catch (err) {
+        console.warn("[CashPickup] Travel log trigger failed:", err);
+      }
+      setAtmSubmitLocked(true);
+      setConfirmMessage("ATM pickup saved successfully.");
+      setConfirmType("atm");
       setShowConfirm(true);
     }
 
@@ -336,7 +627,7 @@ export default function CashPickup() {
             Cash Pickup
           </h2>
           <p className="text-sm text-slate-600">
-            Record cash pickup details from banks
+            Record bank and internal ATM cash pickups independently
           </p>
         </div>
 
@@ -462,57 +753,17 @@ export default function CashPickup() {
                 />
               </div>
 
-              {/* Source Mode Selection */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Cash Pickup Source
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSourceMode("bank-only");
-                      setSelectedATMSites([]);
-                    }}
-                    className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
-                      sourceMode === "bank-only"
-                        ? "bg-primary text-white border-primary"
-                        : "bg-white text-slate-700 border-slate-300 hover:border-primary"
-                    }`}
-                  >
-                    Bank Only
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSourceMode("bank-and-atm")}
-                    className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
-                      sourceMode === "bank-and-atm"
-                        ? "bg-primary text-white border-primary"
-                        : "bg-white text-slate-700 border-slate-300 hover:border-primary"
-                    }`}
-                  >
-                    Bank + Internal ATM
-                  </button>
-                </div>
-                {sourceMode === "bank-and-atm" && (
-                  <p className="text-xs text-slate-600 mt-2">
-                    💡 You can pick up cash from both bank and internal ATM sites
-                  </p>
-                )}
-              </div>
             </div>
 
             {/* Bank Denomination Details */}
             <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
               <div>
                 <h3 className="text-lg font-semibold text-slate-800 mb-1">
-                  {sourceMode === "bank-and-atm" ? "Bank Cash Pickup" : "Denomination Details"}
+                  Bank Cash Pickup
                 </h3>
-                {sourceMode === "bank-and-atm" && (
-                  <p className="text-xs text-slate-600">
-                    Enter cash collected from the bank below
-                  </p>
-                )}
+                <p className="text-xs text-slate-600">
+                  Enter cash collected from the bank below
+                </p>
               </div>
 
               {plannedLoading ? (
@@ -597,7 +848,7 @@ export default function CashPickup() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <span className="text-xs text-slate-600">
-                    {sourceMode === "bank-and-atm" ? "Bank Amount" : "Total Amount"}
+                    Bank Amount
                   </span>
                   <div className="text-xl font-bold text-primary">
                     ₹{bankAmount.toLocaleString("en-IN")}
@@ -617,97 +868,178 @@ export default function CashPickup() {
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Internal ATM Sites Selector */}
-            {sourceMode === "bank-and-atm" && assignmentId && (
-              <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800 mb-1">
-                    Internal ATM Cash Pickup
-                  </h3>
-                  <p className="text-xs text-slate-600">
-                    Select ATM sites to transfer cash from (optional)
-                  </p>
+              <div className="border border-slate-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Bank GPS Verification</p>
+                    <p className="text-xs text-slate-500">
+                      Verify you are at the bank. If GPS fails, upload a photo.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={verifyBankGps}
+                    disabled={!selectedBankId}
+                    className="px-3 py-1.5 rounded-md text-xs font-semibold bg-slate-900 text-white disabled:opacity-50"
+                  >
+                    Verify GPS
+                  </button>
                 </div>
 
-                <ATMSiteSelector
-                  assignmentId={assignmentId}
-                  selectedSites={selectedATMSites}
-                  onChange={setSelectedATMSites}
-                />
-              </div>
-            )}
-
-            {/* Combined Total Summary (for bank-and-atm mode) */}
-            {sourceMode === "bank-and-atm" && (
-              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-300 rounded-lg p-5 space-y-4">
-                <h3 className="text-lg font-semibold text-indigo-900 mb-3">
-                  💰 Combined Cash Pickup Summary
-                </h3>
-
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-700">Bank Cash:</span>
-                    <span className="font-semibold text-slate-900">
-                      ₹{bankAmount.toLocaleString("en-IN")}
-                    </span>
+                {bankGps.status !== "unknown" && (
+                  <div
+                    className={`text-xs px-3 py-2 rounded border ${
+                      bankGps.status === "verified"
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                        : "bg-amber-50 border-amber-200 text-amber-700"
+                    }`}
+                  >
+                    {bankGps.message || "GPS checked"}
                   </div>
+                )}
 
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-700">Internal ATM Cash:</span>
-                    <span className="font-semibold text-slate-900">
-                      ₹{internalAmount.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-
-                  <div className="border-t border-indigo-300 my-2"></div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-indigo-900">Grand Total:</span>
-                    <span className="text-2xl font-bold text-indigo-900">
-                      ₹{totalAmount.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                </div>
-
-                {selectedATMSites.length > 0 && (
-                  <div className="bg-white bg-opacity-70 rounded-md p-3 mt-3">
-                    <div className="text-xs font-semibold text-slate-700 mb-2">
-                      Internal Sources ({selectedATMSites.length}):
-                    </div>
-                    <div className="space-y-1">
-                      {selectedATMSites.map((site) => {
-                        const siteTotal =
-                          site.denoms.denom_100 * 100 +
-                          site.denoms.denom_200 * 200 +
-                          site.denoms.denom_500 * 500 +
-                          site.denoms.denom_2000 * 2000;
-                        return (
-                          <div
-                            key={site.site.id}
-                            className="flex justify-between text-xs text-slate-600"
-                          >
-                            <span>• {site.site.bank_name}</span>
-                            <span className="font-medium">
-                              ₹{siteTotal.toLocaleString("en-IN")}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                {bankGps.status !== "verified" && bankGps.status !== "unknown" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-2">
+                      Upload GPS Photo (Required)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setBankPhoto(e.target.files?.[0] || null)}
+                      className="w-full text-xs"
+                    />
                   </div>
                 )}
               </div>
-            )}
+            </div>
+
+            {/* ATM Internal Cash Pickup */}
+            <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800 mb-1">
+                  ATM Cash Pickup (Internal Source)
+                </h3>
+                <p className="text-xs text-slate-600">
+                  Select the ATM site and record cash removed from that ATM.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  ATM Site <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedAtmSiteId ?? ""}
+                  onChange={(e) => setSelectedAtmSiteId(Number(e.target.value) || null)}
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">-- Select ATM site --</option>
+                  {atmSites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.bank_name} - {site.address}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {([
+                  ["denom_100", 100],
+                  ["denom_200", 200],
+                  ["denom_500", 500],
+                  ["denom_2000", 2000],
+                ] as const).map(([key, label]) => (
+                  <div key={key} className="form-group">
+                    <label className="text-sm font-medium text-slate-700">
+                      ₹{label}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      value={(atmDenoms as any)[key]}
+                      onChange={(e) =>
+                        setAtmDenoms({
+                          ...atmDenoms,
+                          [key]: Number(e.target.value),
+                        })
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                <span className="text-xs text-slate-600">ATM Pickup Amount</span>
+                <div className="text-xl font-bold text-indigo-900">
+                  ₹{atmAmount.toLocaleString("en-IN")}
+                </div>
+              </div>
+
+              <div className="border border-slate-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">ATM GPS Verification</p>
+                    <p className="text-xs text-slate-500">
+                      Verify you are at the ATM site. If GPS fails, upload a photo.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={verifyAtmGps}
+                    disabled={!selectedAtmSiteId}
+                    className="px-3 py-1.5 rounded-md text-xs font-semibold bg-slate-900 text-white disabled:opacity-50"
+                  >
+                    Verify GPS
+                  </button>
+                </div>
+
+                {atmGps.status !== "unknown" && (
+                  <div
+                    className={`text-xs px-3 py-2 rounded border ${
+                      atmGps.status === "verified"
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                        : "bg-amber-50 border-amber-200 text-amber-700"
+                    }`}
+                  >
+                    {atmGps.message || "GPS checked"}
+                  </div>
+                )}
+
+                {atmGps.status !== "verified" && atmGps.status !== "unknown" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-2">
+                      Upload GPS Photo (Required)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setAtmPhoto(e.target.files?.[0] || null)}
+                      className="w-full text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={saveAtmPickup}
+                disabled={loading || atmSubmitLocked || !selectedAtmSiteId}
+                className="w-full bg-slate-900 text-white py-2.5 rounded-lg font-semibold hover:bg-slate-800 active:scale-95 disabled:opacity-50 transition-all"
+              >
+                {loading ? "Saving..." : "Save ATM Pickup"}
+              </button>
+            </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
               <button
-                onClick={handleSave}
-                disabled={loading || submitLocked || !selectedBankId}
+                onClick={saveBankPickup}
+                disabled={loading || bankSubmitLocked || !selectedBankId}
                 className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
               >
-                {loading ? "Saving..." : "Save Cash Pickup"}
+                {loading ? "Saving..." : "Save Bank Pickup"}
               </button>
             </div>
 
@@ -731,7 +1063,13 @@ export default function CashPickup() {
         confirmLabel="Done"
         onConfirm={() => {
           setShowConfirm(false);
-          resetForm();
+          if (confirmType === "bank") {
+            resetBankForm();
+          }
+          if (confirmType === "atm") {
+            resetAtmForm();
+          }
+          setConfirmType(null);
         }}
       />
     </AppLayout>
