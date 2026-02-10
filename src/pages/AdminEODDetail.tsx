@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
-import { formatIST, formatISTAudit } from "../utils/time";
+import { formatIST, formatISTAudit, formatISTDate, formatISTTime, parseUTCDate } from "../utils/time";
 
 /* ---------------- Utilities ---------------- */
 function formatSite(site: any) {
@@ -179,10 +179,170 @@ export default function AdminEODDetail() {
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
 
+  const siteMap = new Map(
+    (data.routeSites || []).map((r: any) => [r.site?.id, r.site])
+  );
+
+  const normalizeUtcDate = (value?: string | null) =>
+    value ? parseUTCDate(value) : null;
+
+  const getAtmLabel = (site?: any) =>
+    site?.site_code || site?.atm_id || site?.bank_name || "-";
+
+  const printRows = useMemo(() => {
+    const rows: Array<{
+      ts: Date;
+      type: string;
+      atm: string;
+      debit: number;
+      credit: number;
+      remarks: string;
+    }> = [];
+
+    (data.cashPickups || []).forEach((c: any) => {
+      const ts = normalizeUtcDate(c.pickup_time) || new Date();
+      const isInternal = (c.pickup_source || "BANK") === "ATM_INTERNAL";
+      const sourceSite = siteMap.get(c.source_site_id) || c.site;
+      rows.push({
+        ts,
+        type: isInternal ? "ATM Internal Pickup" : "Bank Pickup",
+        atm: isInternal ? getAtmLabel(sourceSite) : "",
+        debit: 0,
+        credit: denomTotal(c),
+        remarks: c.branch ? `${c.bank_name || "Bank"} - ${c.branch}` : (c.bank_name || ""),
+      });
+    });
+
+    (data.atmLoads || []).forEach((a: any) => {
+      const ts = normalizeUtcDate(a.time_in || a.load_time) || new Date();
+      rows.push({
+        ts,
+        type: "ATM Load",
+        atm: getAtmLabel(a.site),
+        debit: denomTotal(a),
+        credit: 0,
+        remarks: "",
+      });
+    });
+
+    (data.excessCash || []).forEach((e: any) => {
+      const ts = normalizeUtcDate(e.created_at || e.reported_at) || new Date();
+      rows.push({
+        ts,
+        type: "Excess Cash",
+        atm: getAtmLabel(e.site),
+        debit: 0,
+        credit: denomTotal(e),
+        remarks: e.remarks || "",
+      });
+    });
+
+    exchanges.forEach((e: any) => {
+      const ts = normalizeUtcDate(e.created_at) || new Date();
+      const total = Number(e.exchange_metadata?.total_amount || 0);
+      rows.push({
+        ts,
+        type: "Exchange",
+        atm: "",
+        debit: total,
+        credit: total,
+        remarks: e.exchange_metadata?.from_bank_name && e.exchange_metadata?.to_bank_name
+          ? `${e.exchange_metadata.from_bank_name} to ${e.exchange_metadata.to_bank_name}`
+          : "",
+      });
+    });
+
+    transfers.forEach((t: any) => {
+      const ts = normalizeUtcDate(t.created_at) || new Date();
+      const total = Number(
+        t.transfer_metadata?.total_amount ||
+          t.transfer_metadata?.source_total_amount ||
+          0
+      );
+      rows.push({
+        ts,
+        type: "Inter-site Transfer",
+        atm: t.transfer_metadata?.source_site_name || "-",
+        debit: total,
+        credit: total,
+        remarks: t.transfer_metadata?.reference || "",
+      });
+    });
+
+    return rows.sort((a, b) => a.ts.getTime() - b.ts.getTime());
+  }, [data.cashPickups, data.atmLoads, data.excessCash, exchanges, transfers, siteMap]);
+
+  const printBalanceRows = useMemo(() => {
+    let running = 0;
+    return printRows.map((row) => {
+      running += row.credit - row.debit;
+      return { ...row, balance: running };
+    });
+  }, [printRows]);
+
   /* ---------------- Render ---------------- */
   return (
     <AppLayout>
-      <div className="container space-y-6 text-sm">
+      <div className="print-only mb-4 border-b pb-3">
+        <div className="flex justify-between items-start">
+          <div className="flex items-center gap-3">
+            <img src="/bank-logo.png" alt="Bank Logo" className="h-10 w-auto" />
+            <div>
+              <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
+              <p className="text-xs text-slate-600">
+                End of Day Cash Operations Summary
+              </p>
+            </div>
+          </div>
+          <div className="text-right text-xs">
+            <p className="font-semibold">EOD Report</p>
+            <p>Date: {assignment.assignment_date}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="print-only">
+        <table className="print-statement-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Transaction Type</th>
+              <th>ATM</th>
+              <th>Debit</th>
+              <th>Credit</th>
+              <th>Balance</th>
+              <th>Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {printBalanceRows.map((row, idx) => (
+              <tr key={`print-row-${idx}`} className="print-statement-row">
+                <td>{formatISTDate(row.ts, "short")}</td>
+                <td>{formatISTTime(row.ts)}</td>
+                <td>{row.type}</td>
+                <td>{row.atm}</td>
+                <td className="text-right">
+                  {row.debit > 0
+                    ? row.debit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
+                    : "-"}
+                </td>
+                <td className="text-right">
+                  {row.credit > 0
+                    ? row.credit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
+                    : "-"}
+                </td>
+                <td className="text-right">
+                  {row.balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </td>
+                <td>{row.remarks || ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="container space-y-6 text-sm print:hidden">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <h2 className="text-xl font-semibold text-primary">
             EOD Detail – Assignment #{assignment.id}

@@ -83,6 +83,46 @@ export function formatIST(date: string | Date): string {
 }
 
 /**
+ * Normalize a UTC timestamp string into a Date object.
+ * Handles Postgres-style timestamps like "YYYY-MM-DD HH:MM:SS+00".
+ */
+export function parseUTCDate(value: string | Date): Date | null {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : value;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  let normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+
+  // Normalize timezone offsets: +00 -> +00:00, +0000 -> +00:00
+  if (/[+-]\d{2}$/.test(normalized)) {
+    normalized = `${normalized}:00`;
+  } else if (/[+-]\d{4}$/.test(normalized)) {
+    normalized = normalized.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+  }
+
+  const hasTzSuffix = /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized);
+  if (!hasTzSuffix) {
+    normalized = `${normalized}Z`;
+  }
+
+  const parsed = new Date(normalized);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * Format a UTC timestamp for IST display, even if the input has no timezone.
+ * If the string lacks a timezone suffix, treat it as UTC.
+ */
+export function formatISTFromUTC(date: string | Date): string {
+  const parsed = parseUTCDate(date);
+  if (!parsed) return "";
+  return formatIST(parsed);
+}
+
+/**
  * Format date only for display (without time)
  * Shows: "26 Jan 2026" or "26/01/2026"
  * Used for: assignment_date, transaction dates, date-only displays

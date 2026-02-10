@@ -623,7 +623,7 @@ loadTravelKPI();
     <div className="flex justify-between text-sm mb-2">
       <span className="font-semibold">ATMs Loaded Today</span>
       <span className="text-slate-600">
-        {loadedATMs} / {totalATMs} ({completionPct}%)
+        {loadedATMsCount} / {totalATMs} ({completionPct}%)
       </span>
     </div>
 

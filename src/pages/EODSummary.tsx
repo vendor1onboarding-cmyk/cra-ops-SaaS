@@ -1,4 +1,4 @@
-import React, { useEffect, useState , useRef} from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
@@ -10,6 +10,9 @@ import {
   getISTMonthStart,
   formatISTDate,
   formatIST,
+  formatISTFromUTC,
+  formatISTTime,
+  parseUTCDate,
 } from "../utils/time";
 
 
@@ -51,6 +54,7 @@ export default function EODSummary() {
   const [custodianAssignments, setCustodianAssignments] = useState<any[]>([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<number | null>(null);
   const [custodianNotice, setCustodianNotice] = useState<string | null>(null);
+  const [travelKm, setTravelKm] = useState(0);
 
   // Admin data
   const [adminAssignments, setAdminAssignments] = useState<any[]>([]);
@@ -135,6 +139,7 @@ export default function EODSummary() {
       setAssignment(null);
       setRouteSites([]);
       setTaskSummary(null);
+      setTravelKm(0);
       setLoading(false);
       return;
     }
@@ -166,6 +171,7 @@ export default function EODSummary() {
       loadRows,
       excessRows,
       adjustmentRows,
+      travelRows,
     ] = await Promise.all([
       supabase
         .from("denomination_plans")
@@ -202,6 +208,11 @@ export default function EODSummary() {
         .eq("assignment_id", assign.id)
         .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"])
         .order("created_at", { ascending: true }),
+      supabase
+        .from("travel_logs")
+        .select("km_covered")
+        .eq("assignment_id", assign.id)
+        .eq("status", "completed"),
     ]);
 
     setTaskSummary({
@@ -217,6 +228,12 @@ export default function EODSummary() {
       excessCash: excessRows.data || [],
       adjustments: adjustmentRows.data || [],
     });
+
+    const travelTotal = (travelRows.data || []).reduce(
+      (sum: number, row: any) => sum + (Number(row.km_covered) || 0),
+      0
+    );
+    setTravelKm(travelTotal);
 
     setLoading(false);
   }
@@ -326,6 +343,7 @@ export default function EODSummary() {
           routeSites={routeSites}
           taskSummary={taskSummary}
           eodDetails={eodDetails}
+          travelKm={travelKm}
           custodianAssignments={custodianAssignments}
           selectedAssignmentId={selectedAssignmentId}
           setSelectedAssignmentId={setSelectedAssignmentId}
@@ -376,6 +394,7 @@ function CustodianEOD({
   routeSites,
   taskSummary,
   eodDetails,
+  travelKm,
   custodianAssignments,
   selectedAssignmentId,
   setSelectedAssignmentId,
@@ -401,12 +420,16 @@ function CustodianEOD({
   const atmLoads = eodDetails?.atmLoads || [];
   const excessCash = eodDetails?.excessCash || [];
   const adjustments = eodDetails?.adjustments || [];
+  const normalizeAdjustmentType = (value: any) =>
+    String(value || "").trim().toUpperCase();
+
   const exchanges = adjustments.filter(
-    (a: any) => a.adjustment_type === "EXCHANGE"
+    (a: any) => normalizeAdjustmentType(a.adjustment_type) === "EXCHANGE"
   );
-  const transfers = adjustments.filter(
-    (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
-  );
+  const transfers = adjustments.filter((a: any) => {
+    const normalized = normalizeAdjustmentType(a.adjustment_type);
+    return normalized === "INTER_SITE_TRANSFER" || normalized === "INTERSITE_TRANSFER";
+  });
 
   const sumPickupDenoms = (row: any) => denomTotal(row);
 
@@ -451,6 +474,8 @@ function CustodianEOD({
     return sum;
   }, 0);
 
+  const internalTransferTotal = Math.max(internalPicked, internalLoaded);
+
   // Bank cash drives EOD net position; internal transfers are neutralized.
   const totalPicked = bankPicked;
   const totalLoaded = bankLoaded;
@@ -492,6 +517,137 @@ function CustodianEOD({
   const status = assignment?.status || "open";
   const isEditable = status === "open" || status === "rejected";
   const canSubmit = isEditable && !assignment?.eod_signed;
+
+  const normalizeUtcDate = (value?: string | null) =>
+    value ? parseUTCDate(value) : null;
+
+  const getAtmLabel = (site?: any) =>
+    site?.site_code || site?.atm_id || site?.bank_name || "-";
+
+  const printRows = useMemo(() => {
+    const rows: Array<{
+      ts: Date;
+      type: string;
+      atm: string;
+      debit: number;
+      credit: number;
+      remarks: string;
+    }> = [];
+
+    bankPickupRows.forEach((c: any) => {
+      const ts = normalizeUtcDate(c.pickup_time) || new Date();
+      rows.push({
+        ts,
+        type: "Bank Pickup",
+        atm: "",
+        debit: 0,
+        credit: denomTotal(c),
+        remarks: c.branch ? `${c.bank_name || "Bank"} - ${c.branch}` : (c.bank_name || "Bank"),
+      });
+    });
+
+    atmPickupRows.forEach((c: any) => {
+      const ts = normalizeUtcDate(c.pickup_time) || new Date();
+      rows.push({
+        ts,
+        type: "ATM Internal Pickup",
+        atm: getAtmLabel(siteMap.get(c.source_site_id) || c.site),
+        debit: 0,
+        credit: denomTotal(c),
+        remarks: "Internal pickup",
+      });
+    });
+
+    internalPickupSources.forEach((s: any) => {
+      const ts = normalizeUtcDate(s.pickup_time) || new Date();
+      rows.push({
+        ts,
+        type: "ATM Internal Pickup",
+        atm: getAtmLabel(s.site),
+        debit: 0,
+        credit: Number(s.total_amount || 0),
+        remarks: "Internal pickup",
+      });
+    });
+
+    (atmLoads || []).forEach((a: any) => {
+      const ts = normalizeUtcDate(a.time_in) || new Date();
+      const total = denomTotal(a);
+      rows.push({
+        ts,
+        type: "ATM Load",
+        atm: getAtmLabel(a.site),
+        debit: total,
+        credit: 0,
+        remarks: Number(a.source_breakdown?.internal_source?.total_amount || 0) > 0
+          ? "Internal source used"
+          : "",
+      });
+    });
+
+    (excessCash || []).forEach((e: any) => {
+      const ts = normalizeUtcDate(e.created_at || e.reported_at) || new Date();
+      rows.push({
+        ts,
+        type: "Excess Cash",
+        atm: getAtmLabel(e.site),
+        debit: 0,
+        credit: denomTotal(e),
+        remarks: e.remarks || "",
+      });
+    });
+
+    exchanges.forEach((e: any) => {
+      const ts = normalizeUtcDate(e.created_at) || new Date();
+      const total = Number(e.exchange_metadata?.total_amount || 0);
+      rows.push({
+        ts,
+        type: "Exchange",
+        atm: "",
+        debit: total,
+        credit: total,
+        remarks: e.exchange_metadata?.from_bank_name && e.exchange_metadata?.to_bank_name
+          ? `${e.exchange_metadata.from_bank_name} to ${e.exchange_metadata.to_bank_name}`
+          : "",
+      });
+    });
+
+    transfers.forEach((t: any) => {
+      const ts = normalizeUtcDate(t.created_at) || new Date();
+      const total = Number(
+        t.transfer_metadata?.total_amount ||
+          t.transfer_metadata?.source_total_amount ||
+          0
+      );
+      rows.push({
+        ts,
+        type: "Inter-site Transfer",
+        atm: t.transfer_metadata?.source_site_name || "-",
+        debit: total,
+        credit: total,
+        remarks: t.transfer_metadata?.reference || "",
+      });
+    });
+
+    return rows.sort((a, b) => a.ts.getTime() - b.ts.getTime());
+  }, [
+    bankPickupRows,
+    atmPickupRows,
+    internalPickupSources,
+    atmLoads,
+    excessCash,
+    exchanges,
+    transfers,
+    siteMap,
+  ]);
+
+  const printBalanceRows = useMemo(() => {
+    let running = 0;
+    return printRows.map((row) => {
+      running += row.credit - row.debit;
+      return { ...row, balance: running };
+    });
+  }, [printRows]);
 
   const resizeSignatureCanvas = (
     ref: React.MutableRefObject<any>,
@@ -635,16 +791,58 @@ function CustodianEOD({
           </div>
         </div>
       </div>
-      <div className="space-y-2">
+      <div className="print-only">
+        <table className="print-statement-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Transaction Type</th>
+              <th>ATM</th>
+              <th>Debit</th>
+              <th>Credit</th>
+              <th>Balance</th>
+              <th>Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {printBalanceRows.map((row, idx) => (
+              <tr key={`print-row-${idx}`} className="print-statement-row">
+                <td>{formatISTDate(row.ts, "short")}</td>
+                <td>{formatISTTime(row.ts)}</td>
+                <td>{row.type}</td>
+                <td>{row.atm}</td>
+                <td className="text-right">
+                  {row.debit > 0
+                    ? row.debit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
+                    : "-"}
+                </td>
+                <td className="text-right">
+                  {row.credit > 0
+                    ? row.credit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
+                    : "-"}
+                </td>
+                <td className="text-right">
+                  {row.balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                </td>
+                <td>{row.remarks || ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="print:hidden">
+        <div className="space-y-2">
         <h2 className="text-lg font-semibold text-primary">
           End of Day Summary
         </h2>
         <p className="text-xs text-slate-500">
           Review and submit non-approved EODs. Approved EODs are read-only.
         </p>
-      </div>
+        </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+        <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs text-slate-600 mb-1">
@@ -674,14 +872,14 @@ function CustodianEOD({
         </div>
       </div>
 
-      {!assignment && (
-        <div className="p-4 bg-yellow-100 rounded text-sm">
-          No EOD available for the selected date.
-        </div>
-      )}
+        {!assignment && (
+          <div className="p-4 bg-yellow-100 rounded text-sm">
+            No EOD available for the selected date.
+          </div>
+        )}
 
-      {assignment && (
-        <>
+        {assignment && (
+          <>
           <div className={`p-4 rounded shadow text-sm ${assignment.eod_signed ? 'bg-green-50 border border-green-200' : 'bg-white'}`}>
             <div className="flex items-center justify-between">
               <div className="font-semibold">Assignment ID: {assignment.id}</div>
@@ -707,6 +905,18 @@ function CustodianEOD({
             <SummaryBox label="Cash Pickup" value={taskSummary?.pickupCount} />
             <SummaryBox label="ATM Loads" value={taskSummary?.loadCount} />
             <SummaryBox label="Issues Logged" value={taskSummary?.issueCount} />
+          </div>
+
+          <h3 className="font-semibold">KPI Summary</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <SummaryBox
+              label="Internal Transfers"
+              value={`₹${internalTransferTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`}
+            />
+            <SummaryBox
+              label="Covered KM"
+              value={`${Number(travelKm || 0).toFixed(2)} km`}
+            />
           </div>
 
           <div className="mt-6 space-y-4">
@@ -840,7 +1050,7 @@ function CustodianEOD({
               {atmLoads.map((a: any, i: number) => (
                 <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
                   <div className="font-medium">{formatSite(a.site)}</div>
-                  <div className="text-slate-500">Load Time: {formatIST(a.time_in)}</div>
+                  <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
                   {Number(a.source_breakdown?.internal_source?.total_amount || 0) > 0 && (
                     <div className="text-[10px] text-amber-700 mt-1">
                       Internal source used for this load
@@ -915,7 +1125,7 @@ function CustodianEOD({
                     <div key={`dest-${i}`} className="border rounded p-3 mb-2 bg-white text-xs">
                       <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
                       <div className="font-medium">{formatSite(a.site)}</div>
-                      <div className="text-slate-500">Load Time: {formatIST(a.time_in)}</div>
+                      <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
                       <div className="grid grid-cols-2 gap-2 mt-2">
                         {DENOM_ORDER.map((d) => (
                           <div key={d}>
@@ -1007,11 +1217,18 @@ function CustodianEOD({
             </div>
           )}
 
-          {submitMsg && (
-            <p className="text-sm text-center text-green-700">{submitMsg}</p>
-          )}
-        </>
-      )}
+            {submitMsg && (
+              <p className="text-sm text-center text-green-700">{submitMsg}</p>
+            )}
+          </>
+        )}
+
+        <div
+          className="sm:hidden"
+          style={{ height: "calc(5rem + env(safe-area-inset-bottom))" }}
+          aria-hidden="true"
+        />
+      </div>
 
       {/* PRINT SIGNATURE */}
       {assignment?.eod_signature_url && (

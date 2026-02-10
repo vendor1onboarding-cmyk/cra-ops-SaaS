@@ -6,6 +6,8 @@ import {
   getISTDateString,
   getISTMonthStart,
   formatISTDate,
+  formatISTTime,
+  parseUTCDate,
 } from "../utils/time";
 
 type SOASummaryRow = {
@@ -50,6 +52,15 @@ export default function StatementOfAccounts() {
   const [summaryRows, setSummaryRows] = useState<SOASummaryRow[]>([]);
   const [detailedRows, setDetailedRows] = useState<SOADetailedRow[]>([]);
   const [loadSourceData, setLoadSourceData] = useState<Map<number, { bank: number; internal: number }>>(new Map());
+  const [printTransactions, setPrintTransactions] = useState<{
+    cashPickups: any[];
+    atmLoads: any[];
+    excessCash: any[];
+    adjustments: any[];
+    routeSites: any[];
+    openingBalances: Map<number, number>;
+    assignmentDates: Map<number, string>;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<
@@ -211,6 +222,64 @@ export default function StatementOfAccounts() {
                   internal_loaded: internalLoaded,
                 };
               });
+
+              if (assignmentIds.length > 0) {
+                const assignmentDates = new Map<number, string>();
+                rows.forEach((row: any) => {
+                  const id = row.assignment_id ?? row.soa_id;
+                  if (id) {
+                    assignmentDates.set(id, row.assignment_date);
+                  }
+                });
+
+                const [routeSites, cashPickups, atmLoads, excessCash, adjustments, openingRows] =
+                  await Promise.all([
+                    supabase
+                      .from("route_sites")
+                      .select("assignment_id, site:site_id(id, site_code, atm_id, bank_name, address)")
+                      .in("assignment_id", assignmentIds),
+                    supabase
+                      .from("cash_pickups")
+                      .select("assignment_id, pickup_time, pickup_source, source_site_id, bank_name, branch, total_amount, expected_amount, denom_10, denom_20, denom_50, denom_100, denom_200, denom_500, denom_2000")
+                      .in("assignment_id", assignmentIds),
+                    supabase
+                      .from("atm_replenishments")
+                      .select("assignment_id, time_in, site_id, denom_100, denom_200, denom_500, denom_2000")
+                      .in("assignment_id", assignmentIds),
+                    supabase
+                      .from("atm_excess_cash")
+                      .select("assignment_id, site_id, created_at, reported_at, remarks, denom_100, denom_200, denom_500, denom_2000")
+                      .in("assignment_id", assignmentIds),
+                    supabase
+                      .from("soa_adjustments")
+                      .select("assignment_id, adjustment_type, exchange_metadata, transfer_metadata, created_at")
+                      .in("assignment_id", assignmentIds)
+                      .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"]),
+                    supabase
+                      .from("v_soa_detailed")
+                      .select("assignment_id, opening_balance")
+                      .in("assignment_id", assignmentIds),
+                  ]);
+
+                const openingBalances = new Map<number, number>();
+                (openingRows.data || []).forEach((row: any) => {
+                  if (row.assignment_id) {
+                    openingBalances.set(row.assignment_id, Number(row.opening_balance || 0));
+                  }
+                });
+
+                setPrintTransactions({
+                  cashPickups: cashPickups.data || [],
+                  atmLoads: atmLoads.data || [],
+                  excessCash: excessCash.data || [],
+                  adjustments: adjustments.data || [],
+                  routeSites: routeSites.data || [],
+                  openingBalances,
+                  assignmentDates,
+                });
+              } else {
+                setPrintTransactions(null);
+              }
             }
           }
 
@@ -285,6 +354,328 @@ export default function StatementOfAccounts() {
       { cashPicked: 0, cashLoaded: 0, bankPicked: 0, internalPicked: 0, bankLoaded: 0, internalLoaded: 0, allowance: 0, net: 0 }
     );
   }, [summaryRows]);
+
+  const normalizeUtcDate = (value?: string | Date) =>
+    value ? parseUTCDate(value) : null;
+
+  const printStatementRows = useMemo(() => {
+    if (!printTransactions) return [];
+
+    console.log("[SOA Print] printTransactions:", {
+      cashPickups: printTransactions.cashPickups?.length || 0,
+      atmLoads: printTransactions.atmLoads?.length || 0,
+      excessCash: printTransactions.excessCash?.length || 0,
+      adjustments: printTransactions.adjustments?.length || 0,
+    });
+
+    const routeSiteMap = new Map<number, any>();
+    (printTransactions.routeSites || []).forEach((row: any) => {
+      if (row?.site?.id) {
+        routeSiteMap.set(row.site.id, row.site);
+      }
+    });
+
+    // Group transactions by assignment date for consolidation
+    const dailyGroups = new Map<string, {
+      assignment_id: number;
+      assignment_date: string;
+      bankPickupCredit: number;
+      atmPickupCredit: number;
+      atmLoadDebit: number;
+      excessCashCredit: number;
+      exchanges: Array<{ debit: number; credit: number; remarks: string; ts: Date }>;
+      transfers: Array<{ debit: number; credit: number; remarks: string; ts: Date }>;
+      earliestTs: Date;
+    }>();
+
+    // Process cash pickups
+    (printTransactions.cashPickups || []).forEach((c: any) => {
+      const ts = normalizeUtcDate(c.pickup_time) || new Date();
+      const isInternal = (c.pickup_source || "BANK") === "ATM_INTERNAL";
+      const assignmentDate = printTransactions.assignmentDates.get(c.assignment_id) || "";
+      
+      const denomTotal =
+        (c.denom_10 || 0) * 10 +
+        (c.denom_20 || 0) * 20 +
+        (c.denom_50 || 0) * 50 +
+        (c.denom_100 || 0) * 100 +
+        (c.denom_200 || 0) * 200 +
+        (c.denom_500 || 0) * 500 +
+        (c.denom_2000 || 0) * 2000;
+      const creditAmount = denomTotal > 0
+        ? denomTotal
+        : Number(c.total_amount || c.expected_amount || 0);
+
+      console.log("[SOA Print] Processing cash pickup:", {
+        assignment_id: c.assignment_id,
+        pickup_source: c.pickup_source,
+        isInternal,
+        creditAmount,
+        bank_name: c.bank_name,
+        total_amount: c.total_amount,
+        expected_amount: c.expected_amount,
+        denomTotal
+      });
+
+      if (!dailyGroups.has(assignmentDate)) {
+        dailyGroups.set(assignmentDate, {
+          assignment_id: c.assignment_id,
+          assignment_date: assignmentDate,
+          bankPickupCredit: 0,
+          atmPickupCredit: 0,
+          atmLoadDebit: 0,
+          excessCashCredit: 0,
+          exchanges: [],
+          transfers: [],
+          earliestTs: ts,
+        });
+      }
+
+      const group = dailyGroups.get(assignmentDate)!;
+      if (isInternal) {
+        group.atmPickupCredit += creditAmount;
+      } else {
+        group.bankPickupCredit += creditAmount;
+      }
+      if (ts < group.earliestTs) group.earliestTs = ts;
+    });
+
+    // Process ATM loads
+    (printTransactions.atmLoads || []).forEach((a: any) => {
+      const ts = normalizeUtcDate(a.time_in) || new Date();
+      const assignmentDate = printTransactions.assignmentDates.get(a.assignment_id) || "";
+      const debitAmount = (a.denom_100 || 0) * 100 + (a.denom_200 || 0) * 200 + (a.denom_500 || 0) * 500 + (a.denom_2000 || 0) * 2000;
+
+      if (!dailyGroups.has(assignmentDate)) {
+        dailyGroups.set(assignmentDate, {
+          assignment_id: a.assignment_id,
+          assignment_date: assignmentDate,
+          bankPickupCredit: 0,
+          atmPickupCredit: 0,
+          atmLoadDebit: 0,
+          excessCashCredit: 0,
+          exchanges: [],
+          transfers: [],
+          earliestTs: ts,
+        });
+      }
+
+      const group = dailyGroups.get(assignmentDate)!;
+      group.atmLoadDebit += debitAmount;
+      if (ts < group.earliestTs) group.earliestTs = ts;
+    });
+
+    // Process excess cash
+    (printTransactions.excessCash || []).forEach((e: any) => {
+      const ts = normalizeUtcDate(e.created_at || e.reported_at) || new Date();
+      const assignmentDate = printTransactions.assignmentDates.get(e.assignment_id) || "";
+      const creditAmount = (e.denom_100 || 0) * 100 + (e.denom_200 || 0) * 200 + (e.denom_500 || 0) * 500 + (e.denom_2000 || 0) * 2000;
+
+      if (!dailyGroups.has(assignmentDate)) {
+        dailyGroups.set(assignmentDate, {
+          assignment_id: e.assignment_id,
+          assignment_date: assignmentDate,
+          bankPickupCredit: 0,
+          atmPickupCredit: 0,
+          atmLoadDebit: 0,
+          excessCashCredit: 0,
+          exchanges: [],
+          transfers: [],
+          earliestTs: ts,
+        });
+      }
+
+      const group = dailyGroups.get(assignmentDate)!;
+      group.excessCashCredit += creditAmount;
+      if (ts < group.earliestTs) group.earliestTs = ts;
+    });
+
+    // Process adjustments (keep these as individual items)
+    (printTransactions.adjustments || []).forEach((adj: any) => {
+      const ts = normalizeUtcDate(adj.created_at) || new Date();
+      const assignmentDate = printTransactions.assignmentDates.get(adj.assignment_id) || "";
+
+      if (!dailyGroups.has(assignmentDate)) {
+        dailyGroups.set(assignmentDate, {
+          assignment_id: adj.assignment_id,
+          assignment_date: assignmentDate,
+          bankPickupCredit: 0,
+          atmPickupCredit: 0,
+          atmLoadDebit: 0,
+          excessCashCredit: 0,
+          exchanges: [],
+          transfers: [],
+          earliestTs: ts,
+        });
+      }
+
+      const group = dailyGroups.get(assignmentDate)!;
+      
+      if (adj.adjustment_type === "EXCHANGE") {
+        const total = Number(adj.exchange_metadata?.total_amount || 0);
+        const remarks = adj.exchange_metadata?.from_bank_name && adj.exchange_metadata?.to_bank_name
+          ? `${adj.exchange_metadata.from_bank_name} to ${adj.exchange_metadata.to_bank_name}`
+          : "";
+        group.exchanges.push({ debit: total, credit: total, remarks, ts });
+      }
+      if (adj.adjustment_type === "INTER_SITE_TRANSFER") {
+        const total = Number(
+          adj.transfer_metadata?.total_amount ||
+            adj.transfer_metadata?.source_total_amount ||
+            0
+        );
+        const remarks = adj.transfer_metadata?.source_site_name || "";
+        group.transfers.push({ debit: total, credit: total, remarks, ts });
+      }
+
+      if (ts < group.earliestTs) group.earliestTs = ts;
+    });
+
+    // Build consolidated rows
+    const consolidatedRows: Array<{
+      assignment_id: number;
+      assignment_date: string;
+      ts: Date;
+      type: string;
+      atm: string;
+      debit: number;
+      credit: number;
+      remarks: string;
+    }> = [];
+
+    const sortedDates = Array.from(dailyGroups.keys()).sort();
+
+    console.log("[SOA Print] Daily groups summary:", 
+      Array.from(dailyGroups.entries()).map(([date, group]) => ({
+        date,
+        bankPickupCredit: group.bankPickupCredit,
+        atmPickupCredit: group.atmPickupCredit,
+        atmLoadDebit: group.atmLoadDebit,
+        excessCashCredit: group.excessCashCredit,
+      }))
+    );
+
+    sortedDates.forEach((date) => {
+      const group = dailyGroups.get(date)!;
+
+      // Bank pickups (consolidated)
+      if (group.bankPickupCredit > 0) {
+        consolidatedRows.push({
+          assignment_id: group.assignment_id,
+          assignment_date: date,
+          ts: group.earliestTs,
+          type: "Bank Pickup (Total)",
+          atm: "",
+          debit: 0,
+          credit: group.bankPickupCredit,
+          remarks: "",
+        });
+      }
+
+      // ATM pickups (consolidated)
+      if (group.atmPickupCredit > 0) {
+        consolidatedRows.push({
+          assignment_id: group.assignment_id,
+          assignment_date: date,
+          ts: group.earliestTs,
+          type: "ATM Cash Removal (Total)",
+          atm: "",
+          debit: 0,
+          credit: group.atmPickupCredit,
+          remarks: "",
+        });
+      }
+
+      // ATM loads (consolidated)
+      if (group.atmLoadDebit > 0) {
+        consolidatedRows.push({
+          assignment_id: group.assignment_id,
+          assignment_date: date,
+          ts: group.earliestTs,
+          type: "ATM Load (Total)",
+          atm: "",
+          debit: group.atmLoadDebit,
+          credit: 0,
+          remarks: "",
+        });
+      }
+
+      // Excess cash (consolidated)
+      if (group.excessCashCredit > 0) {
+        consolidatedRows.push({
+          assignment_id: group.assignment_id,
+          assignment_date: date,
+          ts: group.earliestTs,
+          type: "Excess Cash (Total)",
+          atm: "",
+          debit: 0,
+          credit: group.excessCashCredit,
+          remarks: "",
+        });
+      }
+
+      // Exchanges (individual items)
+      group.exchanges.forEach((exch) => {
+        consolidatedRows.push({
+          assignment_id: group.assignment_id,
+          assignment_date: date,
+          ts: exch.ts,
+          type: "Exchange",
+          atm: "",
+          debit: exch.debit,
+          credit: exch.credit,
+          remarks: exch.remarks,
+        });
+      });
+
+      // Transfers (individual items)
+      group.transfers.forEach((trans) => {
+        consolidatedRows.push({
+          assignment_id: group.assignment_id,
+          assignment_date: date,
+          ts: trans.ts,
+          type: "Inter-site Transfer",
+          atm: "",
+          debit: trans.debit,
+          credit: trans.credit,
+          remarks: trans.remarks,
+        });
+      });
+    });
+
+    console.log("[SOA Print] Consolidated rows created:", consolidatedRows.length, consolidatedRows.map(r => ({
+      date: r.assignment_date,
+      type: r.type,
+      debit: r.debit,
+      credit: r.credit
+    })));
+
+    // Sort by date, then by timestamp
+    const sorted = consolidatedRows.sort((a, b) => {
+      if (a.assignment_date !== b.assignment_date) {
+        return a.assignment_date.localeCompare(b.assignment_date);
+      }
+      return a.ts.getTime() - b.ts.getTime();
+    });
+
+    // Calculate running balance (exclude excess cash - it's handed over to vendor)
+    let running = 0;
+    let currentAssignment = -1;
+    return sorted.map((row) => {
+      if (row.assignment_id !== currentAssignment) {
+        currentAssignment = row.assignment_id;
+        running = printTransactions.openingBalances.get(row.assignment_id) || 0;
+      }
+      
+      // Excess cash is handed over to vendor (India One), so don't include in balance
+      const isExcessCash = row.type.includes("Excess Cash");
+      if (!isExcessCash) {
+        running += row.credit - row.debit;
+      }
+      
+      return { ...row, balance: running };
+    });
+  }, [printTransactions]);
 
   const summaryTravelKmTotal = useMemo(() => {
     return summaryRows.reduce((acc, r) => acc + (r.travel_km || 0), 0);
@@ -430,8 +821,50 @@ export default function StatementOfAccounts() {
           </div>
         </div>
 
-        {/* ===== Page Header (Hidden on Print) ===== */}
-        <div className="space-y-2 print:hidden">
+        <div className="print-only">
+          <table className="print-statement-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Transaction Type</th>
+                <th>ATM</th>
+                <th>Debit</th>
+                <th>Credit</th>
+                <th>Balance</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {printStatementRows.map((row, idx) => (
+                <tr key={`print-row-${idx}`} className="print-statement-row">
+                  <td>{formatISTDate(row.ts, "short")}</td>
+                  <td>{formatISTTime(row.ts)}</td>
+                  <td>{row.type}</td>
+                  <td>{row.atm}</td>
+                  <td className="text-right">
+                    {row.debit > 0
+                      ? row.debit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
+                      : "-"}
+                  </td>
+                  <td className="text-right">
+                    {row.credit > 0
+                      ? row.credit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
+                      : "-"}
+                  </td>
+                  <td className="text-right">
+                    {row.balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  </td>
+                  <td>{row.remarks || ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="print:hidden print-hidden">
+          {/* ===== Page Header (Hidden on Print) ===== */}
+          <div className="space-y-2">
           <h1 className="text-2xl font-bold text-slate-900">
             Statement of Accounts
           </h1>
@@ -440,17 +873,17 @@ export default function StatementOfAccounts() {
               ? "View and manage all custodian statements of accounts"
               : "View your personal statement of accounts"}
           </p>
-        </div>
-
-        {/* ===== Error Message ===== */}
-        {error && (
-          <div className="rounded-lg bg-red-50 border border-red-200 p-4">
-            <p className="text-sm text-red-700 font-medium">⚠️ {error}</p>
           </div>
-        )}
 
-        {/* ===== Filters Section ===== */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          {/* ===== Error Message ===== */}
+          {error && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-4">
+              <p className="text-sm text-red-700 font-medium">⚠️ {error}</p>
+            </div>
+          )}
+
+          {/* ===== Filters Section ===== */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end print:hidden">
             <div className="w-full sm:w-auto">
               <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -582,9 +1015,9 @@ export default function StatementOfAccounts() {
           )}
         </div>
 
-        {/* ===== Load Source Breakdown Info ===== */}
-        {!loading && viewMode === "summary" && summaryTotals.internalLoaded > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 print:hidden">
+          {/* ===== Load Source Breakdown Info ===== */}
+          {!loading && viewMode === "summary" && summaryTotals.internalLoaded > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h3 className="text-sm font-semibold text-blue-900 mb-2">
               💡 Cash Load Breakdown
             </h3>
@@ -599,9 +1032,9 @@ export default function StatementOfAccounts() {
           </div>
         )}
 
-        {/* ===== KPI Section ===== */}
-        {!loading && viewMode === "summary" && (
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 sm:gap-4">
+          {/* ===== KPI Section ===== */}
+          {!loading && viewMode === "summary" && (
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 sm:gap-4">
             <KPI
               label="Bank Picked"
               value={summaryTotals.bankPicked}
@@ -653,8 +1086,8 @@ export default function StatementOfAccounts() {
           </div>
         )}
 
-        {!loading && viewMode === "detailed" && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          {!loading && viewMode === "detailed" && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             <KPI
               label="Opening Balance"
               value={detailedTotals.opening}
@@ -683,8 +1116,8 @@ export default function StatementOfAccounts() {
           </div>
         )}
 
-        {/* ===== Table Section ===== */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          {/* ===== Table Section ===== */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center p-12">
               <div className="text-center">
@@ -1256,6 +1689,7 @@ export default function StatementOfAccounts() {
               )}
             </>
           )}
+          </div>
         </div>
 
         {/* ===== PRINT FOOTER – SIGNATURES ===== */}
