@@ -303,13 +303,23 @@ export default function ATMReplenishment() {
       };
 
       (pickups || []).forEach((p: any) => {
-        // Main denominations are bank-sourced
-        bankPickups.denom_100 += p.denom_100 || 0;
-        bankPickups.denom_200 += p.denom_200 || 0;
-        bankPickups.denom_500 += p.denom_500 || 0;
-        bankPickups.denom_2000 += p.denom_2000 || 0;
+        const pickupSource = p.pickup_source || "BANK";
 
-        // Internal source metadata contains cash from internal ATM pickups
+        if (pickupSource === "ATM_INTERNAL") {
+          // ATM_INTERNAL pickups go directly to internal cash
+          internalPickups.denom_100 += p.denom_100 || 0;
+          internalPickups.denom_200 += p.denom_200 || 0;
+          internalPickups.denom_500 += p.denom_500 || 0;
+          internalPickups.denom_2000 += p.denom_2000 || 0;
+        } else {
+          // Bank pickups (pickup_source = "BANK" or null)
+          bankPickups.denom_100 += p.denom_100 || 0;
+          bankPickups.denom_200 += p.denom_200 || 0;
+          bankPickups.denom_500 += p.denom_500 || 0;
+          bankPickups.denom_2000 += p.denom_2000 || 0;
+        }
+
+        // Internal source metadata contains cash from internal ATM pickups (legacy support)
         if (p.internal_source_metadata?.sources) {
           p.internal_source_metadata.sources.forEach((source: any) => {
             const denoms = source.denominations || {};
