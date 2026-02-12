@@ -248,12 +248,25 @@ loadTravelKPI();
   }
 
   function computeCash(pickups: any[], loads: any[]) {
+    // FLOW 1: BANK CASH (affects Cash-in-Hand)
     const bankPicked = pickups.reduce((sum, p) => {
       const source = p.pickup_source || "BANK";
       if (source === "ATM_INTERNAL") return sum;
       return sum + sumDenoms(p, DENOMS);
     }, 0);
 
+    const bankLoaded = loads.reduce((sum, l) => {
+      if (l.source_breakdown?.bank_source) {
+        return sum + Number(l.source_breakdown?.bank_source?.total_amount || 0);
+      }
+      // If no breakdown exists, assume all is bank source (legacy)
+      if (!l.source_breakdown?.internal_source) {
+        return sum + sumDenoms(l, DENOMS);
+      }
+      return sum;
+    }, 0);
+
+    // FLOW 2: INTERNAL ATM TRANSFER (does NOT affect Cash-in-Hand)
     const internalPickedRows = pickups.reduce((sum, p) => {
       const source = p.pickup_source || "BANK";
       if (source !== "ATM_INTERNAL") return sum;
@@ -269,13 +282,6 @@ loadTravelKPI();
       return sum + metaTotal;
     }, 0);
 
-    const bankLoaded = loads.reduce((sum, l) => {
-      if (l.source_breakdown?.bank_source) {
-        return sum + Number(l.source_breakdown?.bank_source?.total_amount || 0);
-      }
-      return sum + sumDenoms(l, DENOMS);
-    }, 0);
-
     const internalLoaded = loads.reduce((sum, l) => {
       if (l.source_breakdown?.internal_source) {
         return sum + Number(l.source_breakdown?.internal_source?.total_amount || 0);
@@ -284,19 +290,21 @@ loadTravelKPI();
     }, 0);
 
     const internalPickedTotal = internalPickedRows + internalPickedMeta;
-    const picked = bankPicked + internalPickedTotal;
-    const loaded = bankLoaded + internalLoaded;
 
-    // Avoid double counting: show the larger of picked vs loaded for transfer volume
+    // Internal transfer must net to zero (display max for visibility)
     setInternalTransferTotal(Math.max(internalPickedTotal, internalLoaded));
+
+    // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
+    // Internal transfers do NOT impact Cash-in-Hand
     setCashUtil({
-      picked,
-      loaded,
-      inHand: picked - loaded,
+      picked: bankPicked,
+      loaded: bankLoaded,
+      inHand: bankPicked - bankLoaded,
     });
   }
 
   function computeDenoms(pickups: any[], loads: any[], exchanges: any[]) {
+    // BANK CASH ONLY for picked/loaded (internal is tracked separately for visibility)
     const picked: Record<number, number> = emptyDenomMap();
     const loaded: Record<number, number> = emptyDenomMap();
     const inHand: Record<number, number> = emptyDenomMap();
@@ -313,39 +321,37 @@ loadTravelKPI();
       });
     });
 
+    // Only count BANK pickups
     pickups.forEach((p) => {
       const source = p.pickup_source || "BANK";
-      DENOMS.forEach((d) => {
-        if (source === "ATM_INTERNAL") {
-          picked[d] += p[`denom_${d}`] || 0;
-          return;
-        }
-
-        picked[d] += p[`denom_${d}`] || 0;
-      });
-
-      const metaSources = extractInternalSourcesFromMetadata(p);
-      if (metaSources.length > 0) {
-        metaSources.forEach((s: any) => {
-          DENOMS.forEach((d) => {
-            picked[d] += Number(s.denominations?.[`denom_${d}`] || 0);
-          });
-        });
-      }
-    });
-
-    loads.forEach((l) => {
-      if (l.source_breakdown?.bank_source || l.source_breakdown?.internal_source) {
-        DENOMS.forEach((d) => {
-          loaded[d] += Number(l.source_breakdown?.bank_source?.[`denom_${d}`] || 0);
-          loaded[d] += Number(l.source_breakdown?.internal_source?.[`denom_${d}`] || 0);
-        });
+      if (source === "ATM_INTERNAL") {
+        // Skip internal ATM removals - they don't affect Cash-in-Hand
         return;
       }
 
       DENOMS.forEach((d) => {
-        loaded[d] += l[`denom_${d}`] || 0;
+        picked[d] += p[`denom_${d}`] || 0;
       });
+
+      // Note: internal_source_metadata in BANK pickups is already excluded from 
+      // the pickup row denominations, so we don't double-count
+    });
+
+    // Only count BANK-sourced loads
+    loads.forEach((l) => {
+      if (l.source_breakdown?.bank_source) {
+        DENOMS.forEach((d) => {
+          loaded[d] += Number(l.source_breakdown?.bank_source?.[`denom_${d}`] || 0);
+        });
+        return;
+      }
+
+      // Legacy loads without breakdown - assume all bank
+      if (!l.source_breakdown?.internal_source) {
+        DENOMS.forEach((d) => {
+          loaded[d] += l[`denom_${d}`] || 0;
+        });
+      }
     });
 
     DENOMS.forEach((d) => {

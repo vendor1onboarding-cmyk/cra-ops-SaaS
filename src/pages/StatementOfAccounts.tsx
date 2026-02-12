@@ -330,11 +330,11 @@ export default function StatementOfAccounts() {
     row.opening_balance - row.total_loads;
 
   const getFinalNet = (row: SOASummaryRow) => {
+    // CRITICAL: Only BANK CASH affects closing balance
+    // Internal transfers are neutral and must NOT be included
     const bankPicked = row.bank_picked ?? row.cash_picked;
-    const internalPicked = row.internal_picked ?? 0;
     const bankLoaded = row.bank_loaded ?? row.cash_loaded;
-    const internalLoaded = row.internal_loaded ?? 0;
-    return bankPicked + internalPicked - bankLoaded - internalLoaded;
+    return bankPicked - bankLoaded;
   };
 
   // Calculate totals
