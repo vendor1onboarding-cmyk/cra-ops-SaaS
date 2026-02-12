@@ -1,3 +1,4 @@
+// EOD Summary - Updated 2026-02-12
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
