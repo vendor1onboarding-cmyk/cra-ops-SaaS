@@ -277,7 +277,9 @@ export default function ATMReplenishment() {
       // Get today's cash pickups for this custodian (with internal_source_metadata)
       const { data: pickups, error: pickupError } = await supabase
         .from("cash_pickups")
-        .select("denom_2000, denom_500, denom_200, denom_100, internal_source_metadata")
+        .select(
+          "denom_2000, denom_500, denom_200, denom_100, pickup_source, internal_source_metadata"
+        )
         .eq("assignment_id", assignmentId);
 
       if (pickupError) {
@@ -320,7 +322,7 @@ export default function ATMReplenishment() {
         }
 
         // Internal source metadata contains cash from internal ATM pickups (legacy support)
-        if (p.internal_source_metadata?.sources) {
+        if (!p.pickup_source && p.internal_source_metadata?.sources) {
           p.internal_source_metadata.sources.forEach((source: any) => {
             const denoms = source.denominations || {};
             internalPickups.denom_100 += denoms.denom_100 || 0;

@@ -248,7 +248,7 @@ export default function StatementOfAccounts() {
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("atm_excess_cash")
-                      .select("assignment_id, site_id, created_at, reported_at, remarks, denom_100, denom_200, denom_500, denom_2000")
+                      .select("assignment_id, site_id, created_at, remarks, denom_100, denom_200, denom_500, denom_2000")
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("soa_adjustments")
@@ -330,11 +330,11 @@ export default function StatementOfAccounts() {
     row.opening_balance - row.total_loads;
 
   const getFinalNet = (row: SOASummaryRow) => {
+    // CRITICAL: Only BANK CASH affects closing balance
+    // Internal transfers are neutral and must NOT be included
     const bankPicked = row.bank_picked ?? row.cash_picked;
-    const internalPicked = row.internal_picked ?? 0;
     const bankLoaded = row.bank_loaded ?? row.cash_loaded;
-    const internalLoaded = row.internal_loaded ?? 0;
-    return bankPicked + internalPicked - bankLoaded - internalLoaded;
+    return bankPicked - bankLoaded;
   };
 
   // Calculate totals
@@ -361,12 +361,7 @@ export default function StatementOfAccounts() {
   const printStatementRows = useMemo(() => {
     if (!printTransactions) return [];
 
-    console.log("[SOA Print] printTransactions:", {
-      cashPickups: printTransactions.cashPickups?.length || 0,
-      atmLoads: printTransactions.atmLoads?.length || 0,
-      excessCash: printTransactions.excessCash?.length || 0,
-      adjustments: printTransactions.adjustments?.length || 0,
-    });
+
 
     const routeSiteMap = new Map<number, any>();
     (printTransactions.routeSites || []).forEach((row: any) => {
@@ -406,16 +401,7 @@ export default function StatementOfAccounts() {
         ? denomTotal
         : Number(c.total_amount || c.expected_amount || 0);
 
-      console.log("[SOA Print] Processing cash pickup:", {
-        assignment_id: c.assignment_id,
-        pickup_source: c.pickup_source,
-        isInternal,
-        creditAmount,
-        bank_name: c.bank_name,
-        total_amount: c.total_amount,
-        expected_amount: c.expected_amount,
-        denomTotal
-      });
+
 
       if (!dailyGroups.has(assignmentDate)) {
         dailyGroups.set(assignmentDate, {
@@ -545,15 +531,7 @@ export default function StatementOfAccounts() {
 
     const sortedDates = Array.from(dailyGroups.keys()).sort();
 
-    console.log("[SOA Print] Daily groups summary:", 
-      Array.from(dailyGroups.entries()).map(([date, group]) => ({
-        date,
-        bankPickupCredit: group.bankPickupCredit,
-        atmPickupCredit: group.atmPickupCredit,
-        atmLoadDebit: group.atmLoadDebit,
-        excessCashCredit: group.excessCashCredit,
-      }))
-    );
+
 
     sortedDates.forEach((date) => {
       const group = dailyGroups.get(date)!;
@@ -643,12 +621,7 @@ export default function StatementOfAccounts() {
       });
     });
 
-    console.log("[SOA Print] Consolidated rows created:", consolidatedRows.length, consolidatedRows.map(r => ({
-      date: r.assignment_date,
-      type: r.type,
-      debit: r.debit,
-      credit: r.credit
-    })));
+
 
     // Sort by date, then by timestamp
     const sorted = consolidatedRows.sort((a, b) => {

@@ -168,14 +168,41 @@ export default function AdminEODDetail() {
     (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
   );
 
-  const totalPicked = (data.cashPickups || []).reduce(
-    (sum: number, row: any) => sum + denomTotal(row),
-    0
-  );
-  const totalLoaded = (data.atmLoads || []).reduce(
-    (sum: number, row: any) => sum + denomTotal(row),
-    0
-  );
+  // FLOW 1: BANK CASH ONLY (affects Cash-in-Hand)
+  const bankPicked = (data.cashPickups || []).reduce((sum: number, row: any) => {
+    const source = row.pickup_source || "BANK";
+    if (source === "ATM_INTERNAL") return sum;
+    return sum + denomTotal(row);
+  }, 0);
+
+  const bankLoaded = (data.atmLoads || []).reduce((sum: number, row: any) => {
+    if (row.source_breakdown?.bank_source) {
+      return sum + Number(row.source_breakdown?.bank_source?.total_amount || 0);
+    }
+    // Legacy loads without breakdown - assume all bank if no internal source
+    if (!row.source_breakdown?.internal_source) {
+      return sum + denomTotal(row);
+    }
+    return sum;
+  }, 0);
+
+  // FLOW 2: INTERNAL ATM TRANSFER (does NOT affect Cash-in-Hand)
+  const internalPicked = (data.cashPickups || []).reduce((sum: number, row: any) => {
+    const source = row.pickup_source || "BANK";
+    if (source !== "ATM_INTERNAL") return sum;
+    return sum + denomTotal(row);
+  }, 0);
+
+  const internalLoaded = (data.atmLoads || []).reduce((sum: number, row: any) => {
+    if (row.source_breakdown?.internal_source) {
+      return sum + Number(row.source_breakdown?.internal_source?.total_amount || 0);
+    }
+    return sum;
+  }, 0);
+
+  // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
+  const totalPicked = bankPicked;
+  const totalLoaded = bankLoaded;
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
 
