@@ -78,6 +78,7 @@ export default function StatementOfAccounts() {
 
   const isAdmin = profile?.role === "admin" || profile?.role === "supervisor";
   const showAllowance = isAdmin;
+  const bankLogoSrc = `${import.meta.env.BASE_URL}bank-logo.png`;
 
   useEffect(() => {
     if (!profile) return;
@@ -136,10 +137,12 @@ export default function StatementOfAccounts() {
 
         const { data, error: queryError } = await query;
 
+        let sourceMap = new Map<number, { bank: number; internal: number }>();
+
         // Load source breakdown data for summary view
         if (isSummary && data && data.length > 0) {
           const assignmentIds = [...new Set(data.map((r: any) => r.assignment_id).filter(Boolean))];
-          
+
           if (assignmentIds.length > 0) {
             const { data: sourceData } = await supabase
               .from("v_atm_load_sources")
@@ -147,7 +150,6 @@ export default function StatementOfAccounts() {
               .in("assignment_id", assignmentIds);
 
             if (sourceData) {
-              const sourceMap = new Map<number, { bank: number; internal: number }>();
               sourceData.forEach((s: any) => {
                 const existing = sourceMap.get(s.assignment_id) || { bank: 0, internal: 0 };
                 sourceMap.set(s.assignment_id, {
@@ -155,9 +157,12 @@ export default function StatementOfAccounts() {
                   internal: existing.internal + (s.internal_total_amount || 0),
                 });
               });
-              setLoadSourceData(sourceMap);
             }
           }
+        }
+
+        if (isSummary) {
+          setLoadSourceData(sourceMap);
         }
 
         if (queryError) {
@@ -208,7 +213,7 @@ export default function StatementOfAccounts() {
               );
 
               rows = rows.map((row: any) => {
-                const sources = loadSourceData.get(row.assignment_id ?? row.soa_id);
+                const sources = sourceMap.get(row.assignment_id ?? row.soa_id);
                 const bankPicked = row.bank_picked ?? row.cash_picked;
                 const internalPicked = row.internal_picked ?? 0;
                 const bankLoaded = row.bank_loaded ?? sources?.bank ?? row.cash_loaded;
@@ -240,15 +245,15 @@ export default function StatementOfAccounts() {
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("cash_pickups")
-                      .select("assignment_id, pickup_time, pickup_source, source_site_id, bank_name, branch, total_amount, expected_amount, denom_10, denom_20, denom_50, denom_100, denom_200, denom_500, denom_2000")
+                      .select("assignment_id, pickup_time, pickup_source, source_site_id, bank_name, branch, total_amount, expected_amount, internal_source_metadata, denom_10, denom_20, denom_50, denom_100, denom_200, denom_500, denom_2000")
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("atm_replenishments")
-                      .select("assignment_id, time_in, site_id, denom_100, denom_200, denom_500, denom_2000")
+                      .select("assignment_id, time_in, site_id, denom_100, denom_200, denom_500, denom_2000, source_breakdown")
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("atm_excess_cash")
-                      .select("assignment_id, site_id, created_at, reported_at, remarks, denom_100, denom_200, denom_500, denom_2000")
+                      .select("assignment_id, site_id, created_at, remarks, denom_100, denom_200, denom_500, denom_2000")
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("soa_adjustments")
@@ -342,7 +347,7 @@ export default function StatementOfAccounts() {
     return summaryRows.reduce(
       (acc, r) => {
         acc.cashPicked += r.cash_picked;
-        acc.cashLoaded += r.cash_loaded;
+        acc.cashLoaded += r.bank_loaded ?? r.cash_loaded;
         acc.bankPicked += r.bank_picked ?? r.cash_picked;
         acc.internalPicked += r.internal_picked ?? 0;
         acc.bankLoaded += r.bank_loaded ?? r.cash_loaded;
@@ -369,24 +374,50 @@ export default function StatementOfAccounts() {
     });
 
     const routeSiteMap = new Map<number, any>();
+    const assignmentSiteLabels = new Map<number, string>();
     (printTransactions.routeSites || []).forEach((row: any) => {
       if (row?.site?.id) {
         routeSiteMap.set(row.site.id, row.site);
       }
+      if (row?.assignment_id && row?.site) {
+        const siteCode = row.site.site_code || row.site.atm_id || "";
+        const address = row.site.address || row.site.bank_name || "";
+        const label = [siteCode, address].filter(Boolean).join(" - ");
+        if (label) {
+          const existing = assignmentSiteLabels.get(row.assignment_id);
+          const labels = existing ? existing.split(" | ") : [];
+          if (!labels.includes(label)) {
+            labels.push(label);
+            assignmentSiteLabels.set(row.assignment_id, labels.join(" | "));
+          }
+        }
+      }
     });
 
-    // Group transactions by assignment date for consolidation
-    const dailyGroups = new Map<string, {
+    const getAssignmentSiteLabel = (assignmentId: number) =>
+      assignmentSiteLabels.get(assignmentId) || "";
+    const formatSiteLabel = (site: any) => {
+      if (!site) return "";
+      const siteCode = site.site_code || site.atm_id || "";
+      const address = site.address || site.bank_name || "";
+      return [siteCode, address].filter(Boolean).join(" - ");
+    };
+    const getSiteLabelById = (siteId?: number | null) => {
+      if (!siteId) return "";
+      const site = routeSiteMap.get(siteId);
+      return formatSiteLabel(site);
+    };
+
+    const transactionRows: Array<{
       assignment_id: number;
       assignment_date: string;
-      bankPickupCredit: number;
-      atmPickupCredit: number;
-      atmLoadDebit: number;
-      excessCashCredit: number;
-      exchanges: Array<{ debit: number; credit: number; remarks: string; ts: Date }>;
-      transfers: Array<{ debit: number; credit: number; remarks: string; ts: Date }>;
-      earliestTs: Date;
-    }>();
+      ts: Date;
+      type: string;
+      atm: string;
+      debit: number;
+      credit: number;
+      remarks: string;
+    }> = [];
 
     // Process cash pickups
     (printTransactions.cashPickups || []).forEach((c: any) => {
@@ -417,52 +448,96 @@ export default function StatementOfAccounts() {
         denomTotal
       });
 
-      if (!dailyGroups.has(assignmentDate)) {
-        dailyGroups.set(assignmentDate, {
-          assignment_id: c.assignment_id,
-          assignment_date: assignmentDate,
-          bankPickupCredit: 0,
-          atmPickupCredit: 0,
-          atmLoadDebit: 0,
-          excessCashCredit: 0,
-          exchanges: [],
-          transfers: [],
-          earliestTs: ts,
-        });
+      const internalSources = c.internal_source_metadata?.sources || [];
+      const internalTotal = internalSources.reduce(
+        (sum: number, s: any) => sum + Number(s.total_amount || 0),
+        0
+      );
+      const pickupSiteLabel = getSiteLabelById(c.source_site_id);
+
+      if (isInternal) {
+        const amount = internalTotal > 0 ? internalTotal : creditAmount;
+        if (amount > 0) {
+          transactionRows.push({
+            assignment_id: c.assignment_id,
+            assignment_date: assignmentDate,
+            ts,
+            type: "ATM Cash Removal",
+            atm: pickupSiteLabel,
+            debit: 0,
+            credit: -amount,
+            remarks: "",
+          });
+        }
+        return;
       }
 
-      const group = dailyGroups.get(assignmentDate)!;
-      if (isInternal) {
-        group.atmPickupCredit += creditAmount;
-      } else {
-        group.bankPickupCredit += creditAmount;
+      const bankAmount = Math.max(creditAmount - internalTotal, 0);
+      if (bankAmount > 0) {
+        transactionRows.push({
+          assignment_id: c.assignment_id,
+          assignment_date: assignmentDate,
+          ts,
+          type: "Bank Pickup",
+          atm: pickupSiteLabel,
+          debit: 0,
+          credit: bankAmount,
+          remarks: "",
+        });
       }
-      if (ts < group.earliestTs) group.earliestTs = ts;
+      if (internalTotal > 0) {
+        transactionRows.push({
+          assignment_id: c.assignment_id,
+          assignment_date: assignmentDate,
+          ts,
+          type: "ATM Cash Removal",
+          atm: pickupSiteLabel,
+          debit: 0,
+          credit: -internalTotal,
+          remarks: "",
+        });
+      }
     });
 
     // Process ATM loads
     (printTransactions.atmLoads || []).forEach((a: any) => {
       const ts = normalizeUtcDate(a.time_in) || new Date();
       const assignmentDate = printTransactions.assignmentDates.get(a.assignment_id) || "";
-      const debitAmount = (a.denom_100 || 0) * 100 + (a.denom_200 || 0) * 200 + (a.denom_500 || 0) * 500 + (a.denom_2000 || 0) * 2000;
+      const bankDebitAmount = a.source_breakdown?.bank_source
+        ? Number(a.source_breakdown?.bank_source?.total_amount || 0)
+        : (a.denom_100 || 0) * 100 +
+          (a.denom_200 || 0) * 200 +
+          (a.denom_500 || 0) * 500 +
+          (a.denom_2000 || 0) * 2000;
+      const internalCreditAmount = a.source_breakdown?.internal_source
+        ? Number(a.source_breakdown?.internal_source?.total_amount || 0)
+        : 0;
 
-      if (!dailyGroups.has(assignmentDate)) {
-        dailyGroups.set(assignmentDate, {
+      const loadSiteLabel = getSiteLabelById(a.site_id);
+      if (bankDebitAmount > 0) {
+        transactionRows.push({
           assignment_id: a.assignment_id,
           assignment_date: assignmentDate,
-          bankPickupCredit: 0,
-          atmPickupCredit: 0,
-          atmLoadDebit: 0,
-          excessCashCredit: 0,
-          exchanges: [],
-          transfers: [],
-          earliestTs: ts,
+          ts,
+          type: "ATM Load",
+          atm: loadSiteLabel,
+          debit: bankDebitAmount,
+          credit: 0,
+          remarks: "",
         });
       }
-
-      const group = dailyGroups.get(assignmentDate)!;
-      group.atmLoadDebit += debitAmount;
-      if (ts < group.earliestTs) group.earliestTs = ts;
+      if (internalCreditAmount > 0) {
+        transactionRows.push({
+          assignment_id: a.assignment_id,
+          assignment_date: assignmentDate,
+          ts,
+          type: "ATM Internal Load",
+          atm: loadSiteLabel,
+          debit: 0,
+          credit: internalCreditAmount,
+          remarks: "",
+        });
+      }
     });
 
     // Process excess cash
@@ -471,23 +546,19 @@ export default function StatementOfAccounts() {
       const assignmentDate = printTransactions.assignmentDates.get(e.assignment_id) || "";
       const creditAmount = (e.denom_100 || 0) * 100 + (e.denom_200 || 0) * 200 + (e.denom_500 || 0) * 500 + (e.denom_2000 || 0) * 2000;
 
-      if (!dailyGroups.has(assignmentDate)) {
-        dailyGroups.set(assignmentDate, {
+      const excessSiteLabel = getSiteLabelById(e.site_id);
+      if (creditAmount > 0) {
+        transactionRows.push({
           assignment_id: e.assignment_id,
           assignment_date: assignmentDate,
-          bankPickupCredit: 0,
-          atmPickupCredit: 0,
-          atmLoadDebit: 0,
-          excessCashCredit: 0,
-          exchanges: [],
-          transfers: [],
-          earliestTs: ts,
+          ts,
+          type: "Excess Cash",
+          atm: excessSiteLabel,
+          debit: 0,
+          credit: creditAmount,
+          remarks: e.remarks || "",
         });
       }
-
-      const group = dailyGroups.get(assignmentDate)!;
-      group.excessCashCredit += creditAmount;
-      if (ts < group.earliestTs) group.earliestTs = ts;
     });
 
     // Process adjustments (keep these as individual items)
@@ -495,165 +566,83 @@ export default function StatementOfAccounts() {
       const ts = normalizeUtcDate(adj.created_at) || new Date();
       const assignmentDate = printTransactions.assignmentDates.get(adj.assignment_id) || "";
 
-      if (!dailyGroups.has(assignmentDate)) {
-        dailyGroups.set(assignmentDate, {
-          assignment_id: adj.assignment_id,
-          assignment_date: assignmentDate,
-          bankPickupCredit: 0,
-          atmPickupCredit: 0,
-          atmLoadDebit: 0,
-          excessCashCredit: 0,
-          exchanges: [],
-          transfers: [],
-          earliestTs: ts,
-        });
-      }
-
-      const group = dailyGroups.get(assignmentDate)!;
-      
       if (adj.adjustment_type === "EXCHANGE") {
         const total = Number(adj.exchange_metadata?.total_amount || 0);
         const remarks = adj.exchange_metadata?.from_bank_name && adj.exchange_metadata?.to_bank_name
           ? `${adj.exchange_metadata.from_bank_name} to ${adj.exchange_metadata.to_bank_name}`
           : "";
-        group.exchanges.push({ debit: total, credit: total, remarks, ts });
+        if (total > 0) {
+          const atmLabel = getAssignmentSiteLabel(adj.assignment_id);
+          transactionRows.push({
+            assignment_id: adj.assignment_id,
+            assignment_date: assignmentDate,
+            ts,
+            type: "Exchange (Out)",
+            atm: atmLabel,
+            debit: 0,
+            credit: -total,
+            remarks,
+          });
+          transactionRows.push({
+            assignment_id: adj.assignment_id,
+            assignment_date: assignmentDate,
+            ts,
+            type: "Exchange (In)",
+            atm: atmLabel,
+            debit: 0,
+            credit: total,
+            remarks,
+          });
+        }
       }
       if (adj.adjustment_type === "INTER_SITE_TRANSFER") {
-        const total = Number(
-          adj.transfer_metadata?.total_amount ||
-            adj.transfer_metadata?.source_total_amount ||
+        const sourceTotal = Number(
+          adj.transfer_metadata?.source_total_amount ||
+            adj.transfer_metadata?.total_amount ||
             0
         );
-        const remarks = adj.transfer_metadata?.source_site_name || "";
-        group.transfers.push({ debit: total, credit: total, remarks, ts });
+        const sourceSiteName = adj.transfer_metadata?.source_site_name || "";
+        const destinations = adj.transfer_metadata?.destinations || [];
+        
+        // Source removal (negative credit - cash leaving)
+        if (sourceTotal > 0) {
+          transactionRows.push({
+            assignment_id: adj.assignment_id,
+            assignment_date: assignmentDate,
+            ts,
+            type: "Inter-site Transfer (Out)",
+            atm: sourceSiteName,
+            debit: 0,
+            credit: -sourceTotal,
+            remarks: `Transferred to ${destinations.length} site(s)`,
+          });
+        }
+        
+        // Destination loads (positive credit - cash arriving)
+        destinations.forEach((dest: any) => {
+          const destAmount = Number(dest.total_amount || 0);
+          if (destAmount > 0) {
+            transactionRows.push({
+              assignment_id: adj.assignment_id,
+              assignment_date: assignmentDate,
+              ts,
+              type: "Inter-site Transfer (In)",
+              atm: dest.site_name || "",
+              debit: 0,
+              credit: destAmount,
+              remarks: `From ${sourceSiteName}`,
+            });
+          }
+        });
       }
-
-      if (ts < group.earliestTs) group.earliestTs = ts;
     });
 
-    // Build consolidated rows
-    const consolidatedRows: Array<{
-      assignment_id: number;
-      assignment_date: string;
-      ts: Date;
-      type: string;
-      atm: string;
-      debit: number;
-      credit: number;
-      remarks: string;
-    }> = [];
-
-    const sortedDates = Array.from(dailyGroups.keys()).sort();
-
-    console.log("[SOA Print] Daily groups summary:", 
-      Array.from(dailyGroups.entries()).map(([date, group]) => ({
-        date,
-        bankPickupCredit: group.bankPickupCredit,
-        atmPickupCredit: group.atmPickupCredit,
-        atmLoadDebit: group.atmLoadDebit,
-        excessCashCredit: group.excessCashCredit,
-      }))
-    );
-
-    sortedDates.forEach((date) => {
-      const group = dailyGroups.get(date)!;
-
-      // Bank pickups (consolidated)
-      if (group.bankPickupCredit > 0) {
-        consolidatedRows.push({
-          assignment_id: group.assignment_id,
-          assignment_date: date,
-          ts: group.earliestTs,
-          type: "Bank Pickup (Total)",
-          atm: "",
-          debit: 0,
-          credit: group.bankPickupCredit,
-          remarks: "",
-        });
-      }
-
-      // ATM pickups (consolidated)
-      if (group.atmPickupCredit > 0) {
-        consolidatedRows.push({
-          assignment_id: group.assignment_id,
-          assignment_date: date,
-          ts: group.earliestTs,
-          type: "ATM Cash Removal (Total)",
-          atm: "",
-          debit: 0,
-          credit: group.atmPickupCredit,
-          remarks: "",
-        });
-      }
-
-      // ATM loads (consolidated)
-      if (group.atmLoadDebit > 0) {
-        consolidatedRows.push({
-          assignment_id: group.assignment_id,
-          assignment_date: date,
-          ts: group.earliestTs,
-          type: "ATM Load (Total)",
-          atm: "",
-          debit: group.atmLoadDebit,
-          credit: 0,
-          remarks: "",
-        });
-      }
-
-      // Excess cash (consolidated)
-      if (group.excessCashCredit > 0) {
-        consolidatedRows.push({
-          assignment_id: group.assignment_id,
-          assignment_date: date,
-          ts: group.earliestTs,
-          type: "Excess Cash (Total)",
-          atm: "",
-          debit: 0,
-          credit: group.excessCashCredit,
-          remarks: "",
-        });
-      }
-
-      // Exchanges (individual items)
-      group.exchanges.forEach((exch) => {
-        consolidatedRows.push({
-          assignment_id: group.assignment_id,
-          assignment_date: date,
-          ts: exch.ts,
-          type: "Exchange",
-          atm: "",
-          debit: exch.debit,
-          credit: exch.credit,
-          remarks: exch.remarks,
-        });
-      });
-
-      // Transfers (individual items)
-      group.transfers.forEach((trans) => {
-        consolidatedRows.push({
-          assignment_id: group.assignment_id,
-          assignment_date: date,
-          ts: trans.ts,
-          type: "Inter-site Transfer",
-          atm: "",
-          debit: trans.debit,
-          credit: trans.credit,
-          remarks: trans.remarks,
-        });
-      });
-    });
-
-    console.log("[SOA Print] Consolidated rows created:", consolidatedRows.length, consolidatedRows.map(r => ({
-      date: r.assignment_date,
-      type: r.type,
-      debit: r.debit,
-      credit: r.credit
-    })));
-
-    // Sort by date, then by timestamp
-    const sorted = consolidatedRows.sort((a, b) => {
+    const sorted = transactionRows.sort((a, b) => {
       if (a.assignment_date !== b.assignment_date) {
         return a.assignment_date.localeCompare(b.assignment_date);
+      }
+      if (a.assignment_id !== b.assignment_id) {
+        return a.assignment_id - b.assignment_id;
       }
       return a.ts.getTime() - b.ts.getTime();
     });
@@ -797,7 +786,7 @@ export default function StatementOfAccounts() {
             <div className="flex items-center gap-3">
               {/* Bank Logo */}
               <img
-                src="/bank-logo.png"
+                src={bankLogoSrc}
                 alt="Bank Logo"
                 className="h-10 w-auto"
               />
@@ -843,12 +832,12 @@ export default function StatementOfAccounts() {
                   <td>{row.type}</td>
                   <td>{row.atm}</td>
                   <td className="text-right">
-                    {row.debit > 0
+                    {row.debit !== 0
                       ? row.debit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
                       : "-"}
                   </td>
                   <td className="text-right">
-                    {row.credit > 0
+                    {row.credit !== 0
                       ? row.credit.toLocaleString("en-IN", { minimumFractionDigits: 2 })
                       : "-"}
                   </td>
@@ -1022,7 +1011,7 @@ export default function StatementOfAccounts() {
               💡 Cash Load Breakdown
             </h3>
             <div className="text-xs text-blue-800 space-y-1">
-              <p className="font-medium">Total Cash Loaded: ₹{summaryTotals.cashLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+              <p className="font-medium">Total Bank Cash Loaded: ₹{summaryTotals.cashLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
               <p className="ml-4">├─ From Bank: ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-green-700">(included in SOA)</span></p>
               <p className="ml-4">└─ Internal Transfers: ₹{summaryTotals.internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-slate-700">(neutral - already accounted)</span></p>
             </div>
