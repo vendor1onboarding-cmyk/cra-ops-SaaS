@@ -135,6 +135,7 @@ export default function AdvancedAnalytics() {
                assignment_date,
                cash_picked,
                cash_loaded,
+               bank_loaded,
                excess_reported,
                final_net_cash_position,
                custodian_id`
@@ -178,7 +179,7 @@ export default function AdvancedAnalytics() {
           0
         );
         const totalCashLoaded = soaData.reduce(
-          (sum: number, r: any) => sum + (r.cash_loaded || 0),
+          (sum: number, r: any) => sum + ((r.bank_loaded ?? r.cash_loaded) || 0),
           0
         );
         const totalExcessReported = soaData.reduce(
