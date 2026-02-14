@@ -253,7 +253,7 @@ export default function StatementOfAccounts() {
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("atm_excess_cash")
-                      .select("assignment_id, site_id, created_at, reported_at, remarks, denom_100, denom_200, denom_500, denom_2000")
+                      .select("assignment_id, site_id, created_at, remarks, denom_100, denom_200, denom_500, denom_2000")
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("soa_adjustments")
@@ -596,24 +596,44 @@ export default function StatementOfAccounts() {
         }
       }
       if (adj.adjustment_type === "INTER_SITE_TRANSFER") {
-        const total = Number(
-          adj.transfer_metadata?.total_amount ||
-            adj.transfer_metadata?.source_total_amount ||
+        const sourceTotal = Number(
+          adj.transfer_metadata?.source_total_amount ||
+            adj.transfer_metadata?.total_amount ||
             0
         );
-        const remarks = adj.transfer_metadata?.source_site_name || "";
-        if (total > 0) {
+        const sourceSiteName = adj.transfer_metadata?.source_site_name || "";
+        const destinations = adj.transfer_metadata?.destinations || [];
+        
+        // Source removal (negative credit - cash leaving)
+        if (sourceTotal > 0) {
           transactionRows.push({
             assignment_id: adj.assignment_id,
             assignment_date: assignmentDate,
             ts,
-            type: "Inter-site Transfer",
-            atm: getAssignmentSiteLabel(adj.assignment_id),
-            debit: total,
-            credit: total,
-            remarks,
+            type: "Inter-site Transfer (Out)",
+            atm: sourceSiteName,
+            debit: 0,
+            credit: -sourceTotal,
+            remarks: `Transferred to ${destinations.length} site(s)`,
           });
         }
+        
+        // Destination loads (positive credit - cash arriving)
+        destinations.forEach((dest: any) => {
+          const destAmount = Number(dest.total_amount || 0);
+          if (destAmount > 0) {
+            transactionRows.push({
+              assignment_id: adj.assignment_id,
+              assignment_date: assignmentDate,
+              ts,
+              type: "Inter-site Transfer (In)",
+              atm: dest.site_name || "",
+              debit: 0,
+              credit: destAmount,
+              remarks: `From ${sourceSiteName}`,
+            });
+          }
+        });
       }
     });
 

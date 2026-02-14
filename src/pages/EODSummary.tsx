@@ -614,18 +614,40 @@ function CustodianEOD({
 
     transfers.forEach((t: any) => {
       const ts = normalizeUtcDate(t.created_at) || new Date();
-      const total = Number(
-        t.transfer_metadata?.total_amount ||
-          t.transfer_metadata?.source_total_amount ||
+      const sourceTotal = Number(
+        t.transfer_metadata?.source_total_amount ||
+          t.transfer_metadata?.total_amount ||
           0
       );
-      rows.push({
-        ts,
-        type: "Inter-site Transfer",
-        atm: t.transfer_metadata?.source_site_name || "-",
-        debit: total,
-        credit: total,
-        remarks: t.transfer_metadata?.reference || "",
+      const sourceSiteName = t.transfer_metadata?.source_site_name || "-";
+      const destinations = t.transfer_metadata?.destinations || [];
+      const reference = t.transfer_metadata?.reference || "";
+      
+      // Source removal (negative credit - cash leaving)
+      if (sourceTotal > 0) {
+        rows.push({
+          ts,
+          type: "Inter-site Transfer (Out)",
+          atm: sourceSiteName,
+          debit: 0,
+          credit: -sourceTotal,
+          remarks: reference || `Transferred to ${destinations.length} site(s)`,
+        });
+      }
+      
+      // Destination loads (positive credit - cash arriving)
+      destinations.forEach((dest: any) => {
+        const destAmount = Number(dest.total_amount || 0);
+        if (destAmount > 0) {
+          rows.push({
+            ts,
+            type: "Inter-site Transfer (In)",
+            atm: dest.site_name || "-",
+            debit: 0,
+            credit: destAmount,
+            remarks: reference || `From ${sourceSiteName}`,
+          });
+        }
       });
     });
 
