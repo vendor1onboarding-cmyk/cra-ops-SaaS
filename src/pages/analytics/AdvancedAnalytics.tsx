@@ -135,7 +135,10 @@ export default function AdvancedAnalytics() {
                assignment_date,
                cash_picked,
                cash_loaded,
+               bank_picked,
                bank_loaded,
+               internal_picked,
+               internal_loaded,
                excess_reported,
                final_net_cash_position,
                custodian_id`
@@ -174,12 +177,15 @@ export default function AdvancedAnalytics() {
         const totalAssignments = assignmentData.filter((a: any) =>
           filteredAssignmentIds.includes(a.id)
         ).length;
+
+        // CRITICAL: Use bank_picked and bank_loaded for KPI metrics
+        // Internal transfers are neutral and must NOT inflate KPI totals
         const totalCashPicked = soaData.reduce(
-          (sum: number, r: any) => sum + (r.cash_picked || 0),
+          (sum: number, r: any) => sum + (r.bank_picked || r.cash_picked || 0),
           0
         );
         const totalCashLoaded = soaData.reduce(
-          (sum: number, r: any) => sum + ((r.bank_loaded ?? r.cash_loaded) || 0),
+          (sum: number, r: any) => sum + (r.bank_loaded || 0),
           0
         );
         const totalExcessReported = soaData.reduce(

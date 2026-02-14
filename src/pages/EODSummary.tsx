@@ -1,3 +1,4 @@
+// EOD Summary - Updated 2026-02-12
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
@@ -436,12 +437,25 @@ function CustodianEOD({
   const extractInternalSources = (pickup: any) =>
     pickup?.internal_source_metadata?.sources || [];
 
+  // FLOW 1: BANK CASH (affects Cash-in-Hand)
   const bankPicked = cashPickups.reduce((sum: number, row: any) => {
     const source = row.pickup_source || "BANK";
     if (source === "ATM_INTERNAL") return sum;
     return sum + sumPickupDenoms(row);
   }, 0);
 
+  const bankLoaded = atmLoads.reduce((sum: number, row: any) => {
+    if (row.source_breakdown?.bank_source) {
+      return sum + Number(row.source_breakdown?.bank_source?.total_amount || 0);
+    }
+    // Legacy loads without breakdown - assume all bank if no internal source
+    if (!row.source_breakdown?.internal_source) {
+      return sum + denomTotal(row);
+    }
+    return sum;
+  }, 0);
+
+  // FLOW 2: INTERNAL ATM TRANSFER (does NOT affect Cash-in-Hand)
   const internalPickedFromRows = cashPickups.reduce((sum: number, row: any) => {
     const source = row.pickup_source || "BANK";
     if (source !== "ATM_INTERNAL") return sum;
@@ -458,15 +472,6 @@ function CustodianEOD({
     return sum + metaTotal;
   }, 0);
 
-  const internalPicked = internalPickedFromRows + internalPickedFromMeta;
-
-  const bankLoaded = atmLoads.reduce((sum: number, row: any) => {
-    if (row.source_breakdown?.bank_source) {
-      return sum + Number(row.source_breakdown?.bank_source?.total_amount || 0);
-    }
-    return sum + denomTotal(row);
-  }, 0);
-
   const internalLoaded = atmLoads.reduce((sum: number, row: any) => {
     if (row.source_breakdown?.internal_source) {
       return sum + Number(row.source_breakdown?.internal_source?.total_amount || 0);
@@ -474,12 +479,16 @@ function CustodianEOD({
     return sum;
   }, 0);
 
-  const internalTransferTotal = Math.max(internalPicked, internalLoaded);
+  const internalPicked = internalPickedFromRows + internalPickedFromMeta;
 
-  // Bank cash drives EOD net position; internal transfers are neutralized.
+  // Internal transfer net MUST be zero (showing max for visibility only)
+  const internalTransferTotal = Math.max(internalPicked, internalLoaded);
+  const netInternalTransfer = internalPicked - internalLoaded;
+
+  // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
+  // Internal transfers are neutral and do NOT impact Cash-in-Hand
   const totalPicked = bankPicked;
   const totalLoaded = bankLoaded;
-  const netInternalTransfer = internalPicked - internalLoaded;
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
 
