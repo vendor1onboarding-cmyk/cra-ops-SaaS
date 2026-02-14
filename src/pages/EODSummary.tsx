@@ -448,8 +448,9 @@ function CustodianEOD({
     if (row.source_breakdown?.bank_source) {
       return sum + Number(row.source_breakdown?.bank_source?.total_amount || 0);
     }
-    // Legacy loads without breakdown - assume all bank if no internal source
-    if (!row.source_breakdown?.internal_source) {
+    // Legacy loads without breakdown - only count as bank if there was bank pickup
+    // If only internal transfers (no bank pickup), don't count as bank load
+    if (!row.source_breakdown?.internal_source && bankPicked > 0) {
       return sum + denomTotal(row);
     }
     return sum;
@@ -562,8 +563,8 @@ function CustodianEOD({
         type: "ATM Internal Pickup",
         atm: getAtmLabel(siteMap.get(c.source_site_id) || c.site),
         debit: 0,
-        credit: denomTotal(c),
-        remarks: "Internal pickup",
+        credit: -denomTotal(c),
+        remarks: "Removed from ATM",
       });
     });
 
@@ -574,24 +575,51 @@ function CustodianEOD({
         type: "ATM Internal Pickup",
         atm: getAtmLabel(s.site),
         debit: 0,
-        credit: Number(s.total_amount || 0),
-        remarks: "Internal pickup",
+        credit: -Number(s.total_amount || 0),
+        remarks: "Removed from ATM",
       });
     });
 
     (atmLoads || []).forEach((a: any) => {
       const ts = normalizeUtcDate(a.time_in) || new Date();
+      const bankSourceAmount = Number(a.source_breakdown?.bank_source?.total_amount || 0);
+      const internalSourceAmount = Number(a.source_breakdown?.internal_source?.total_amount || 0);
       const total = denomTotal(a);
-      rows.push({
-        ts,
-        type: "ATM Load",
-        atm: getAtmLabel(a.site),
-        debit: total,
-        credit: 0,
-        remarks: Number(a.source_breakdown?.internal_source?.total_amount || 0) > 0
-          ? "Internal source used"
-          : "",
-      });
+      
+      // If load has both sources, show separately
+      if (bankSourceAmount > 0) {
+        rows.push({
+          ts,
+          type: "ATM Load (Bank)",
+          atm: getAtmLabel(a.site),
+          debit: bankSourceAmount,
+          credit: 0,
+          remarks: "",
+        });
+      }
+      
+      if (internalSourceAmount > 0) {
+        rows.push({
+          ts,
+          type: "ATM Load (Internal)",
+          atm: getAtmLabel(a.site),
+          debit: 0,
+          credit: internalSourceAmount,
+          remarks: "From internal pool",
+        });
+      }
+      
+      // Legacy loads without source breakdown - only if bank pickup exists
+      if (!a.source_breakdown && bankPicked > 0) {
+        rows.push({
+          ts,
+          type: "ATM Load",
+          atm: getAtmLabel(a.site),
+          debit: total,
+          credit: 0,
+          remarks: "",
+        });
+      }
     });
 
     (excessCash || []).forEach((e: any) => {

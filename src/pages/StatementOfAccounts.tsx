@@ -419,6 +419,15 @@ export default function StatementOfAccounts() {
       remarks: string;
     }> = [];
 
+    // Build a map of assignments with bank pickups (to handle legacy loads correctly)
+    const assignmentsWithBankPickup = new Set<number>();
+    (printTransactions.cashPickups || []).forEach((c: any) => {
+      const isInternal = (c.pickup_source || "BANK") === "ATM_INTERNAL";
+      if (!isInternal) {
+        assignmentsWithBankPickup.add(c.assignment_id);
+      }
+    });
+
     // Process cash pickups
     (printTransactions.cashPickups || []).forEach((c: any) => {
       const ts = normalizeUtcDate(c.pickup_time) || new Date();
@@ -503,12 +512,16 @@ export default function StatementOfAccounts() {
     (printTransactions.atmLoads || []).forEach((a: any) => {
       const ts = normalizeUtcDate(a.time_in) || new Date();
       const assignmentDate = printTransactions.assignmentDates.get(a.assignment_id) || "";
+      const hasBankPickup = assignmentsWithBankPickup.has(a.assignment_id);
+      
       const bankDebitAmount = a.source_breakdown?.bank_source
         ? Number(a.source_breakdown?.bank_source?.total_amount || 0)
-        : (a.denom_100 || 0) * 100 +
+        : hasBankPickup
+        ? (a.denom_100 || 0) * 100 +
           (a.denom_200 || 0) * 200 +
           (a.denom_500 || 0) * 500 +
-          (a.denom_2000 || 0) * 2000;
+          (a.denom_2000 || 0) * 2000
+        : 0;
       const internalCreditAmount = a.source_breakdown?.internal_source
         ? Number(a.source_breakdown?.internal_source?.total_amount || 0)
         : 0;
