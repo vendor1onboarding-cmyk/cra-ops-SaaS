@@ -209,33 +209,40 @@ tbody tr:last-child td {
 
 /* ===== CORE PRINT STYLES ===== */
 @media print {
-  /* Page setup with proper margins to prevent overlap */
+  /* Page setup */
   @page {
     size: A4;
-    margin: 15mm 12mm 25mm 12mm; /* Top | Right | Bottom (larger for page numbers) | Left */
+    margin: 12mm 10mm 18mm 10mm;
   }
 
-  /* Reset body and hide navigation */
+  /* Reset body */
   body {
     background: #ffffff !important;
-    margin: 0;
-    padding: 0;
-    font-size: 10pt;
-    line-height: 1.3;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 9pt;
+    line-height: 1.35;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
+  /* Hide screen-only elements */
   nav,
   header,
   button,
+  select,
+  input,
+  textarea,
   .print-hidden,
-  .no-print {
+  .no-print,
+  .fixed,
+  .sticky {
     display: none !important;
   }
 
-  main {
-    padding: 0 !important;
-    margin: 0 !important;
-    max-width: 100% !important;
+  /* Re-show buttons INSIDE print-only sections (e.g. none here but future-proof) */
+  .print-only button {
+    display: none !important;
   }
 
   /* Visibility toggles */
@@ -243,52 +250,103 @@ tbody tr:last-child td {
     display: block !important;
   }
 
-  /* Headings spacing */
+  /* ── Layout reset: remove sidebar, padding, max-width constraints ── */
+  .min-h-screen,
+  .flex-1 {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  main > div {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Hide desktop sidebar in print */
+  nav.hidden.md\\:block,
+  .md\\:block[class*="w-64"] {
+    display: none !important;
+  }
+
+  /* Hide mobile drawer overlay */
+  .fixed.inset-0.z-50 {
+    display: none !important;
+  }
+
+  /* Container reset */
+  .container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* ── Page break controls ── */
   h1, h2, h3, h4 {
     page-break-after: avoid;
     break-after: avoid;
-    margin-top: 8px;
-    margin-bottom: 6px;
+    margin-top: 6pt;
+    margin-bottom: 4pt;
   }
 
-  /* Prevent awkward breaks */
-  table, details, .summary-section {
+  /* Keep summary sections and cards together */
+  .summary-section,
+  .border.rounded,
+  .bg-white.rounded-lg,
+  .bg-white.rounded {
     page-break-inside: avoid;
     break-inside: avoid;
   }
 
-  /* Page numbers - positioned in margin area to avoid overlap */
-  body::after {
-    counter-increment: page;
-    content: "Page " counter(page);
-    position: fixed;
-    bottom: 8mm; /* Within bottom margin */
-    right: 12mm;
-    font-size: 9pt;
-    color: #64748b;
-    z-index: 9999;
+  /* Tables: allow break but keep rows together */
+  table {
+    page-break-inside: auto;
+    break-inside: auto;
   }
 
-  /* Ensure content doesn't overlap with footer */
-  .print-only {
-    padding-bottom: 10mm;
+  thead {
+    display: table-header-group; /* Repeat header on every page */
   }
 
-  /* ===== TABLE STYLES - MOBILE & DESKTOP RESPONSIVE ===== */
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Orphans / widows — at least 3 rows before/after break */
+  tbody {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* ── Print statement table ── */
   .print-statement-table {
     width: 100%;
     border-collapse: collapse;
-    table-layout: auto; /* Changed from fixed for better mobile scaling */
-    font-size: 8pt; /* Reduced for mobile */
-    margin-bottom: 8mm;
+    table-layout: fixed;
+    font-size: 7.5pt;
+    margin-bottom: 4mm;
+    page-break-inside: auto;
+    break-inside: auto;
   }
 
   .print-statement-table th,
   .print-statement-table td {
-    border: 1px solid #cbd5e1;
-    padding: 3px 4px;
-    font-size: 8pt;
-    line-height: 1.2;
+    border: 0.5pt solid #94a3b8;
+    padding: 2pt 3pt;
+    font-size: 7.5pt;
+    line-height: 1.25;
     vertical-align: top;
     word-break: break-word;
     overflow-wrap: anywhere;
@@ -303,59 +361,30 @@ tbody tr:last-child td {
     print-color-adjust: exact;
   }
 
-  /* Column width optimization for mobile */
-  @media (max-width: 600px) {
-    .print-statement-table {
-      font-size: 7pt;
-    }
-
-    .print-statement-table th,
-    .print-statement-table td {
-      padding: 2px 3px;
-      font-size: 7pt;
-    }
-  }
-
-  /* Flexible column widths - adjusts based on content */
+  /* Column widths (8 columns: Date, Time, Type, ATM, Debit, Credit, Balance, Remarks) */
   .print-statement-table th:nth-child(1),
-  .print-statement-table td:nth-child(1) {
-    width: 8%; /* Date */
-  }
+  .print-statement-table td:nth-child(1) { width: 9%; } /* Date */
 
   .print-statement-table th:nth-child(2),
-  .print-statement-table td:nth-child(2) {
-    width: 8%; /* Time */
-  }
+  .print-statement-table td:nth-child(2) { width: 7%; } /* Time */
 
   .print-statement-table th:nth-child(3),
-  .print-statement-table td:nth-child(3) {
-    width: 20%; /* Details */
-  }
+  .print-statement-table td:nth-child(3) { width: 16%; } /* Type */
 
   .print-statement-table th:nth-child(4),
-  .print-statement-table td:nth-child(4) {
-    width: 11%; /* Type/Notes */
-  }
+  .print-statement-table td:nth-child(4) { width: 14%; } /* ATM */
 
   .print-statement-table th:nth-child(5),
-  .print-statement-table td:nth-child(5),
+  .print-statement-table td:nth-child(5) { width: 11%; text-align: right; } /* Debit */
+
   .print-statement-table th:nth-child(6),
-  .print-statement-table td:nth-child(6) {
-    width: 10%; /* Debit/Credit */
-    text-align: right;
-  }
+  .print-statement-table td:nth-child(6) { width: 11%; text-align: right; } /* Credit */
 
   .print-statement-table th:nth-child(7),
-  .print-statement-table td:nth-child(7) {
-    width: 11%; /* Balance */
-    text-align: right;
-    font-weight: 500;
-  }
+  .print-statement-table td:nth-child(7) { width: 12%; text-align: right; font-weight: 500; } /* Balance */
 
   .print-statement-table th:nth-child(8),
-  .print-statement-table td:nth-child(8) {
-    width: 22%; /* Metadata */
-  }
+  .print-statement-table td:nth-child(8) { width: 20%; } /* Remarks */
 
   /* Row stability */
   .print-statement-row {
@@ -363,26 +392,45 @@ tbody tr:last-child td {
     break-inside: avoid;
   }
 
-  /* Prevent orphaned rows at page breaks */
-  .print-statement-table tbody tr {
-    page-break-inside: avoid;
-    break-inside: avoid;
+  /* ── Print header section ── */
+  .print-only.mb-4 {
+    margin-bottom: 3mm !important;
+    padding-bottom: 2mm !important;
   }
 
-  /* KPI and summary boxes */
+  .print-only h1 {
+    font-size: 14pt !important;
+    margin: 0 !important;
+  }
+
+  .print-only h2 {
+    font-size: 12pt;
+    margin-bottom: 3mm;
+    border-bottom: 1.5pt solid #1e293b;
+    padding-bottom: 1.5mm;
+  }
+
+  .print-only h3 {
+    font-size: 10pt;
+    margin-top: 3mm;
+    margin-bottom: 2mm;
+  }
+
+  /* ── KPI & summary boxes ── */
   .print-only .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 8px;
-    margin-bottom: 8mm;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6pt;
+    margin-bottom: 4mm;
   }
 
   .print-only .kpi-card {
-    border: 1px solid #e2e8f0;
-    padding: 6px;
+    border: 0.5pt solid #e2e8f0;
+    padding: 4pt;
     background: #f8fafc !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    font-size: 7.5pt;
   }
 
   .print-only .kpi-card p,
@@ -390,82 +438,107 @@ tbody tr:last-child td {
     white-space: normal;
     overflow-wrap: anywhere;
     word-break: break-word;
-    font-size: 8pt;
+    font-size: 7.5pt;
   }
 
-  /* Header section styling */
-  .print-only h2 {
-    font-size: 14pt;
-    margin-bottom: 4mm;
-    border-bottom: 2px solid #1e293b;
-    padding-bottom: 2mm;
-  }
-
-  .print-only h3 {
-    font-size: 11pt;
-    margin-top: 4mm;
-    margin-bottom: 2mm;
-  }
-
-  /* Signature section */
-  .print-only .signature-section {
-    margin-top: 10mm;
+  /* ── Signature section ── */
+  .print-only .signature-section,
+  .print-only .border-t.text-xs {
     page-break-inside: avoid;
     break-inside: avoid;
   }
 
-  /* Signature grid - mobile friendly */
-  .print-only .grid {
-    display: grid;
-    gap: 8px;
+  /* Signature grid: always 2 columns in print */
+  .print-only .grid.grid-cols-1.sm\\:grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 20mm !important;
   }
 
-  /* Footer text */
+  .print-only .border-b {
+    width: 50mm !important;
+  }
+
+  /* ── Footer ── */
   .print-only .border-t {
-    border-top: 1px solid #cbd5e1 !important;
-    padding-top: 4mm;
+    border-top: 0.5pt solid #cbd5e1 !important;
+    padding-top: 3mm;
   }
 
-  /* Prevent element overflow */
+  /* Page number */
+  body::after {
+    counter-increment: page;
+    content: "Page " counter(page);
+    position: fixed;
+    bottom: 5mm;
+    right: 10mm;
+    font-size: 7.5pt;
+    color: #64748b;
+  }
+
+  /* Ensure nothing overflows the page */
   * {
-    max-width: 100%;
+    max-width: 100% !important;
+    overflow: visible !important;
   }
 
-  /* Mobile-specific adjustments */
-  @media (max-width: 600px) {
-    @page {
-      margin: 12mm 8mm 25mm 8mm;
-    }
+  /* Remove shadows, box-shadows, and border-radius for cleaner print */
+  .shadow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl {
+    box-shadow: none !important;
+  }
 
-    body::after {
-      font-size: 8pt;
-      bottom: 7mm;
-      right: 8mm;
-    }
+  /* ── Tailwind print utilities support ── */
+  .print\\:hidden {
+    display: none !important;
+  }
 
-    .print-only h2 {
-      font-size: 12pt;
-    }
+  .print\\:block {
+    display: block !important;
+  }
 
-    .print-only h3 {
-      font-size: 10pt;
-    }
+  /* ── Analytics page print support ── */
+  /* Force grid layouts to render in print */
+  .grid {
+    display: grid !important;
+  }
 
-    .print-only .kpi-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
+  /* Ensure SVG charts are visible with proper sizing */
+  svg {
+    display: inline-block !important;
+    max-height: 180px;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 
-    /* Single column signature section on mobile */
-    .print-only .grid.grid-cols-1.sm\\:grid-cols-2 {
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
+  /* Keep KPI color indicators in print */
+  .border-l-4 {
+    border-left-width: 4px !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 
-    /* Signature line mobile width */
-    .print-only .border-b {
-      width: 100% !important;
-      max-width: 180px !important;
-    }
+  .border-l-emerald-500 { border-left-color: #10b981 !important; }
+  .border-l-amber-400   { border-left-color: #fbbf24 !important; }
+  .border-l-red-500     { border-left-color: #ef4444 !important; }
+  .border-l-slate-300   { border-left-color: #cbd5e1 !important; }
+
+  /* Alert backgrounds in print */
+  .bg-red-50    { background-color: #fef2f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bg-amber-50  { background-color: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bg-emerald-100 { background-color: #d1fae5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Image handling */
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Signature image in print */
+  .print-only img {
+    display: inline-block !important;
+    max-height: 25mm;
+    width: auto;
   }
 }
 

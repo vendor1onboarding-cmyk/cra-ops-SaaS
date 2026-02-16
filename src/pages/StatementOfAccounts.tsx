@@ -416,6 +416,7 @@ export default function StatementOfAccounts() {
       atm: string;
       debit: number;
       credit: number;
+      balanceImpact: number;
       remarks: string;
     }> = [];
 
@@ -428,45 +429,146 @@ export default function StatementOfAccounts() {
       }
     });
 
-    // Process cash pickups
+    // ──────────────────────────────────────────────────────────────
+    // CHRONOLOGICAL EVENT PROCESSING
+    // Merge pickups + ATM loads into a single timeline so that:
+    //   • Each bank withdrawal / ATM removal adds to the pool first
+    //   • Each ATM load consumes from the pool available at that moment
+    // This supports multiple removals and withdrawals at any time of day.
+    // ──────────────────────────────────────────────────────────────
+
+    type TimelineEvent = {
+      kind: "pickup" | "load";
+      assignment_id: number;
+      ts: Date;
+      raw: any;
+    };
+
+    const timeline: TimelineEvent[] = [];
+
     (printTransactions.cashPickups || []).forEach((c: any) => {
-      const ts = normalizeUtcDate(c.pickup_time) || new Date();
-      const isInternal = (c.pickup_source || "BANK") === "ATM_INTERNAL";
-      const assignmentDate = printTransactions.assignmentDates.get(c.assignment_id) || "";
-      
-      const denomTotal =
-        (c.denom_10 || 0) * 10 +
-        (c.denom_20 || 0) * 20 +
-        (c.denom_50 || 0) * 50 +
-        (c.denom_100 || 0) * 100 +
-        (c.denom_200 || 0) * 200 +
-        (c.denom_500 || 0) * 500 +
-        (c.denom_2000 || 0) * 2000;
-      const creditAmount = denomTotal > 0
-        ? denomTotal
-        : Number(c.total_amount || c.expected_amount || 0);
-
-      console.log("[SOA Print] Processing cash pickup:", {
+      timeline.push({
+        kind: "pickup",
         assignment_id: c.assignment_id,
-        pickup_source: c.pickup_source,
-        isInternal,
-        creditAmount,
-        bank_name: c.bank_name,
-        total_amount: c.total_amount,
-        expected_amount: c.expected_amount,
-        denomTotal
+        ts: normalizeUtcDate(c.pickup_time) || new Date(),
+        raw: c,
       });
+    });
 
-      const internalSources = c.internal_source_metadata?.sources || [];
-      const internalTotal = internalSources.reduce(
-        (sum: number, s: any) => sum + Number(s.total_amount || 0),
-        0
-      );
-      const pickupSiteLabel = getSiteLabelById(c.source_site_id);
+    (printTransactions.atmLoads || []).forEach((a: any) => {
+      timeline.push({
+        kind: "load",
+        assignment_id: a.assignment_id,
+        ts: normalizeUtcDate(a.time_in) || new Date(),
+        raw: a,
+      });
+    });
 
-      if (isInternal) {
-        const amount = internalTotal > 0 ? internalTotal : creditAmount;
-        if (amount > 0) {
+    // Sort: by assignment, then by time, pickups before loads at same time
+    timeline.sort((a, b) => {
+      if (a.assignment_id !== b.assignment_id) return a.assignment_id - b.assignment_id;
+      const timeDiff = a.ts.getTime() - b.ts.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      // Pickups come before loads at the same timestamp
+      return (a.kind === "pickup" ? 0 : 1) - (b.kind === "pickup" ? 0 : 1);
+    });
+
+    // Live denomination pools that grow with each removal and shrink with each load
+    const removalPools = new Map<number, { [key: number]: number }>();
+
+    const getOrCreatePool = (assignmentId: number) => {
+      let pool = removalPools.get(assignmentId);
+      if (!pool) {
+        pool = { 100: 0, 200: 0, 500: 0, 2000: 0 };
+        removalPools.set(assignmentId, pool);
+      }
+      return pool;
+    };
+
+    // Process every event in chronological order
+    timeline.forEach((evt) => {
+      if (evt.kind === "pickup") {
+        const c = evt.raw;
+        const ts = evt.ts;
+        const isInternal = (c.pickup_source || "BANK") === "ATM_INTERNAL";
+        const assignmentDate = printTransactions.assignmentDates.get(c.assignment_id) || "";
+
+        const denomTotal =
+          (c.denom_10 || 0) * 10 +
+          (c.denom_20 || 0) * 20 +
+          (c.denom_50 || 0) * 50 +
+          (c.denom_100 || 0) * 100 +
+          (c.denom_200 || 0) * 200 +
+          (c.denom_500 || 0) * 500 +
+          (c.denom_2000 || 0) * 2000;
+        const creditAmount = denomTotal > 0
+          ? denomTotal
+          : Number(c.total_amount || c.expected_amount || 0);
+
+        console.log("[SOA Print] Processing cash pickup:", {
+          assignment_id: c.assignment_id,
+          pickup_source: c.pickup_source,
+          isInternal,
+          creditAmount,
+          bank_name: c.bank_name,
+          total_amount: c.total_amount,
+          expected_amount: c.expected_amount,
+          denomTotal,
+        });
+
+        const internalSources = c.internal_source_metadata?.sources || [];
+        const internalTotal = internalSources.reduce(
+          (sum: number, s: any) => sum + Number(s.total_amount || 0),
+          0
+        );
+        const pickupSiteLabel = getSiteLabelById(c.source_site_id);
+
+        if (isInternal) {
+          const amount = internalTotal > 0 ? internalTotal : creditAmount;
+          if (amount > 0) {
+            // Add denominations to the removal pool (accumulates across multiple removals)
+            const pool = getOrCreatePool(c.assignment_id);
+            for (const d of [100, 200, 500, 2000]) {
+              pool[d] += (c[`denom_${d}`] || 0);
+            }
+
+            transactionRows.push({
+              assignment_id: c.assignment_id,
+              assignment_date: assignmentDate,
+              ts,
+              type: "ATM Cash Removal",
+              atm: pickupSiteLabel,
+              debit: 0,
+              credit: -amount,
+              balanceImpact: amount,
+              remarks: "",
+            });
+          }
+          return;
+        }
+
+        // Bank pickup
+        const bankAmount = Math.max(creditAmount - internalTotal, 0);
+        if (bankAmount > 0) {
+          transactionRows.push({
+            assignment_id: c.assignment_id,
+            assignment_date: assignmentDate,
+            ts,
+            type: "Bank Pickup",
+            atm: pickupSiteLabel,
+            debit: 0,
+            credit: bankAmount,
+            balanceImpact: bankAmount,
+            remarks: "",
+          });
+        }
+        if (internalTotal > 0) {
+          // Mixed pickup with internal component — add to removal pool
+          const pool = getOrCreatePool(c.assignment_id);
+          for (const d of [100, 200, 500, 2000]) {
+            pool[d] += (c[`denom_${d}`] || 0);
+          }
+
           transactionRows.push({
             assignment_id: c.assignment_id,
             assignment_date: assignmentDate,
@@ -474,82 +576,64 @@ export default function StatementOfAccounts() {
             type: "ATM Cash Removal",
             atm: pickupSiteLabel,
             debit: 0,
-            credit: -amount,
+            credit: -internalTotal,
+            balanceImpact: internalTotal,
             remarks: "",
           });
         }
-        return;
-      }
+      } else {
+        // ── ATM LOAD ──
+        const a = evt.raw;
+        const ts = evt.ts;
+        const assignmentDate = printTransactions.assignmentDates.get(a.assignment_id) || "";
+        const hasBankPickup = assignmentsWithBankPickup.has(a.assignment_id);
+        const pool = removalPools.get(a.assignment_id);
+        const loadSiteLabel = getSiteLabelById(a.site_id);
 
-      const bankAmount = Math.max(creditAmount - internalTotal, 0);
-      if (bankAmount > 0) {
-        transactionRows.push({
-          assignment_id: c.assignment_id,
-          assignment_date: assignmentDate,
-          ts,
-          type: "Bank Pickup",
-          atm: pickupSiteLabel,
-          debit: 0,
-          credit: bankAmount,
-          remarks: "",
-        });
-      }
-      if (internalTotal > 0) {
-        transactionRows.push({
-          assignment_id: c.assignment_id,
-          assignment_date: assignmentDate,
-          ts,
-          type: "ATM Cash Removal",
-          atm: pickupSiteLabel,
-          debit: 0,
-          credit: -internalTotal,
-          remarks: "",
-        });
-      }
-    });
+        let loadBankAmount = 0;
+        let loadInternalAmount = 0;
 
-    // Process ATM loads
-    (printTransactions.atmLoads || []).forEach((a: any) => {
-      const ts = normalizeUtcDate(a.time_in) || new Date();
-      const assignmentDate = printTransactions.assignmentDates.get(a.assignment_id) || "";
-      const hasBankPickup = assignmentsWithBankPickup.has(a.assignment_id);
-      
-      const bankDebitAmount = a.source_breakdown?.bank_source
-        ? Number(a.source_breakdown?.bank_source?.total_amount || 0)
-        : hasBankPickup
-        ? (a.denom_100 || 0) * 100 +
-          (a.denom_200 || 0) * 200 +
-          (a.denom_500 || 0) * 500 +
-          (a.denom_2000 || 0) * 2000
-        : 0;
-      const internalCreditAmount = a.source_breakdown?.internal_source
-        ? Number(a.source_breakdown?.internal_source?.total_amount || 0)
-        : 0;
+        if (pool) {
+          // Denomination-level matching: consume from pool available at this moment
+          for (const denom of [100, 200, 500, 2000]) {
+            const loadCount = (a[`denom_${denom}`] || 0) as number;
+            const poolCount = pool[denom] || 0;
+            const matchedCount = Math.min(loadCount, poolCount);
 
-      const loadSiteLabel = getSiteLabelById(a.site_id);
-      if (bankDebitAmount > 0) {
-        transactionRows.push({
-          assignment_id: a.assignment_id,
-          assignment_date: assignmentDate,
-          ts,
-          type: "ATM Load",
-          atm: loadSiteLabel,
-          debit: bankDebitAmount,
-          credit: 0,
-          remarks: "",
-        });
-      }
-      if (internalCreditAmount > 0) {
-        transactionRows.push({
-          assignment_id: a.assignment_id,
-          assignment_date: assignmentDate,
-          ts,
-          type: "ATM Internal Load",
-          atm: loadSiteLabel,
-          debit: 0,
-          credit: internalCreditAmount,
-          remarks: "",
-        });
+            loadInternalAmount += matchedCount * denom;
+            loadBankAmount += (loadCount - matchedCount) * denom;
+
+            // Consume matched denominations from the removal pool
+            pool[denom] = poolCount - matchedCount;
+          }
+        } else {
+          // No ATM removal for this assignment - all bank-sourced
+          loadBankAmount = hasBankPickup
+            ? (a.denom_100 || 0) * 100 +
+              (a.denom_200 || 0) * 200 +
+              (a.denom_500 || 0) * 500 +
+              (a.denom_2000 || 0) * 2000
+            : 0;
+        }
+
+        const totalLoaded = loadBankAmount + loadInternalAmount;
+
+        if (totalLoaded > 0) {
+          // Single row per site: debit = bank-sourced, credit = ATM-removal-sourced
+          transactionRows.push({
+            assignment_id: a.assignment_id,
+            assignment_date: assignmentDate,
+            ts,
+            type: "ATM Load",
+            atm: loadSiteLabel,
+            debit: loadBankAmount,
+            credit: loadInternalAmount,
+            balanceImpact: -totalLoaded,
+            remarks: loadInternalAmount > 0
+              ? `Bank: \u20B9${loadBankAmount.toLocaleString("en-IN")} | ATM Cash: \u20B9${loadInternalAmount.toLocaleString("en-IN")}`
+              : "",
+          });
+        }
       }
     });
 
@@ -569,6 +653,7 @@ export default function StatementOfAccounts() {
           atm: excessSiteLabel,
           debit: 0,
           credit: creditAmount,
+          balanceImpact: creditAmount,
           remarks: e.remarks || "",
         });
       }
@@ -594,6 +679,7 @@ export default function StatementOfAccounts() {
             atm: atmLabel,
             debit: 0,
             credit: -total,
+            balanceImpact: -total,
             remarks,
           });
           transactionRows.push({
@@ -604,6 +690,7 @@ export default function StatementOfAccounts() {
             atm: atmLabel,
             debit: 0,
             credit: total,
+            balanceImpact: total,
             remarks,
           });
         }
@@ -627,6 +714,7 @@ export default function StatementOfAccounts() {
             atm: sourceSiteName,
             debit: 0,
             credit: -sourceTotal,
+            balanceImpact: -sourceTotal,
             remarks: `Transferred to ${destinations.length} site(s)`,
           });
         }
@@ -643,6 +731,7 @@ export default function StatementOfAccounts() {
               atm: dest.site_name || "",
               debit: 0,
               credit: destAmount,
+              balanceImpact: destAmount,
               remarks: `From ${sourceSiteName}`,
             });
           }
@@ -660,7 +749,10 @@ export default function StatementOfAccounts() {
       return a.ts.getTime() - b.ts.getTime();
     });
 
-    // Calculate running balance (exclude excess cash - it's handed over to vendor)
+    // Calculate running balance using balanceImpact
+    // - Pickups (Bank/ATM Removal): positive impact (cash entering custody)
+    // - ATM Loads: negative impact (total cash leaving, regardless of source)
+    // - Excess Cash: excluded (handed over to vendor)
     let running = 0;
     let currentAssignment = -1;
     return sorted.map((row) => {
@@ -672,7 +764,7 @@ export default function StatementOfAccounts() {
       // Excess cash is handed over to vendor (India One), so don't include in balance
       const isExcessCash = row.type.includes("Excess Cash");
       if (!isExcessCash) {
-        running += row.credit - row.debit;
+        running += row.balanceImpact;
       }
       
       return { ...row, balance: running };

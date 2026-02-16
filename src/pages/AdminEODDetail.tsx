@@ -168,37 +168,90 @@ export default function AdminEODDetail() {
     (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
   );
 
+  const extractInternalSources = (pickup: any) =>
+    pickup?.internal_source_metadata?.sources || [];
+
   // FLOW 1: BANK CASH ONLY (affects Cash-in-Hand)
   const bankPicked = (data.cashPickups || []).reduce((sum: number, row: any) => {
     const source = row.pickup_source || "BANK";
     if (source === "ATM_INTERNAL") return sum;
-    return sum + denomTotal(row);
+    const metaSources = extractInternalSources(row);
+    const metaTotal = metaSources.reduce(
+      (acc: number, s: any) => acc + Number(s.total_amount || 0),
+      0
+    );
+    return sum + Math.max(denomTotal(row) - metaTotal, 0);
   }, 0);
 
-  const bankLoaded = (data.atmLoads || []).reduce((sum: number, row: any) => {
-    if (row.source_breakdown?.bank_source) {
-      return sum + Number(row.source_breakdown?.bank_source?.total_amount || 0);
-    }
-    // Legacy loads without breakdown - assume all bank if no internal source
-    if (!row.source_breakdown?.internal_source) {
-      return sum + denomTotal(row);
-    }
-    return sum;
-  }, 0);
-
-  // FLOW 2: INTERNAL ATM TRANSFER (does NOT affect Cash-in-Hand)
+  // FLOW 2: INTERNAL ATM TRANSFER tracking
   const internalPicked = (data.cashPickups || []).reduce((sum: number, row: any) => {
     const source = row.pickup_source || "BANK";
     if (source !== "ATM_INTERNAL") return sum;
     return sum + denomTotal(row);
   }, 0);
 
-  const internalLoaded = (data.atmLoads || []).reduce((sum: number, row: any) => {
-    if (row.source_breakdown?.internal_source) {
-      return sum + Number(row.source_breakdown?.internal_source?.total_amount || 0);
+  // ── Chronological denomination matching ──
+  type AdminCashEvt = { kind: "pickup" | "load"; ts: number; raw: any };
+  const adminCashEvents: AdminCashEvt[] = [];
+
+  (data.cashPickups || []).forEach((p: any) => {
+    const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
+    adminCashEvents.push({ kind: "pickup", ts, raw: p });
+  });
+  (data.atmLoads || []).forEach((l: any) => {
+    const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
+    adminCashEvents.push({ kind: "load", ts, raw: l });
+  });
+
+  adminCashEvents.sort((a, b) => {
+    const diff = a.ts - b.ts;
+    if (diff !== 0) return diff;
+    return (a.kind === "pickup" ? 0 : 1) - (b.kind === "pickup" ? 0 : 1);
+  });
+
+  const adminRemovalPool: Record<number, number> = { 100: 0, 200: 0, 500: 0, 2000: 0 };
+  let adminBankLoaded = 0;
+  let adminInternalLoaded = 0;
+  const adminLoadAlloc = new Map<any, { bankAmount: number; internalAmount: number }>();
+
+  adminCashEvents.forEach((evt) => {
+    if (evt.kind === "pickup") {
+      const p = evt.raw;
+      const source = p.pickup_source || "BANK";
+      if (source === "ATM_INTERNAL") {
+        DENOM_ORDER.forEach((d) => {
+          adminRemovalPool[d] += (p[`denom_${d}`] || 0);
+        });
+      } else {
+        const metaSources = extractInternalSources(p);
+        metaSources.forEach((s: any) => {
+          DENOM_ORDER.forEach((d) => {
+            adminRemovalPool[d] += Number(s.denominations?.[`denom_${d}`] || 0);
+          });
+        });
+      }
+    } else {
+      const l = evt.raw;
+      let loadBank = 0;
+      let loadInternal = 0;
+
+      DENOM_ORDER.forEach((d) => {
+        const loadCount = (l[`denom_${d}`] || 0) as number;
+        const poolCount = adminRemovalPool[d] || 0;
+        const matched = Math.min(loadCount, poolCount);
+
+        loadInternal += matched * d;
+        loadBank += (loadCount - matched) * d;
+        adminRemovalPool[d] = poolCount - matched;
+      });
+
+      adminBankLoaded += loadBank;
+      adminInternalLoaded += loadInternal;
+      adminLoadAlloc.set(l, { bankAmount: loadBank, internalAmount: loadInternal });
     }
-    return sum;
-  }, 0);
+  });
+
+  const bankLoaded = adminBankLoaded;
 
   // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
   const totalPicked = bankPicked;
@@ -223,6 +276,7 @@ export default function AdminEODDetail() {
       atm: string;
       debit: number;
       credit: number;
+      balanceImpact: number;
       remarks: string;
     }> = [];
 
@@ -230,25 +284,68 @@ export default function AdminEODDetail() {
       const ts = normalizeUtcDate(c.pickup_time) || new Date();
       const isInternal = (c.pickup_source || "BANK") === "ATM_INTERNAL";
       const sourceSite = siteMap.get(c.source_site_id) || c.site;
-      rows.push({
-        ts,
-        type: isInternal ? "ATM Internal Pickup" : "Bank Pickup",
-        atm: isInternal ? getAtmLabel(sourceSite) : "",
-        debit: 0,
-        credit: denomTotal(c),
-        remarks: c.branch ? `${c.bank_name || "Bank"} - ${c.branch}` : (c.bank_name || ""),
-      });
+      const amount = denomTotal(c);
+
+      if (isInternal) {
+        rows.push({
+          ts,
+          type: "ATM Cash Removal",
+          atm: getAtmLabel(sourceSite),
+          debit: 0,
+          credit: -amount,
+          balanceImpact: amount,
+          remarks: "Removed from ATM",
+        });
+      } else {
+        // Bank pickup — subtract internal metadata portion
+        const metaSources = extractInternalSources(c);
+        const metaTotal = metaSources.reduce(
+          (acc: number, s: any) => acc + Number(s.total_amount || 0),
+          0
+        );
+        const bankAmount = Math.max(amount - metaTotal, 0);
+        if (bankAmount > 0) {
+          rows.push({
+            ts,
+            type: "Bank Pickup",
+            atm: "",
+            debit: 0,
+            credit: bankAmount,
+            balanceImpact: bankAmount,
+            remarks: c.branch ? `${c.bank_name || "Bank"} - ${c.branch}` : (c.bank_name || ""),
+          });
+        }
+        if (metaTotal > 0) {
+          rows.push({
+            ts,
+            type: "ATM Cash Removal",
+            atm: "",
+            debit: 0,
+            credit: -metaTotal,
+            balanceImpact: metaTotal,
+            remarks: "From mixed pickup",
+          });
+        }
+      }
     });
 
     (data.atmLoads || []).forEach((a: any) => {
       const ts = normalizeUtcDate(a.time_in || a.load_time) || new Date();
+      const alloc = adminLoadAlloc.get(a);
+      const bankAmt = alloc?.bankAmount || denomTotal(a);
+      const internalAmt = alloc?.internalAmount || 0;
+      const total = bankAmt + internalAmt;
+
       rows.push({
         ts,
         type: "ATM Load",
         atm: getAtmLabel(a.site),
-        debit: denomTotal(a),
-        credit: 0,
-        remarks: "",
+        debit: bankAmt,
+        credit: internalAmt,
+        balanceImpact: -total,
+        remarks: internalAmt > 0
+          ? `Bank: ₹${bankAmt.toLocaleString("en-IN")} | ATM Cash: ₹${internalAmt.toLocaleString("en-IN")}`
+          : "",
       });
     });
 
@@ -260,6 +357,7 @@ export default function AdminEODDetail() {
         atm: getAtmLabel(e.site),
         debit: 0,
         credit: denomTotal(e),
+        balanceImpact: denomTotal(e),
         remarks: e.remarks || "",
       });
     });
@@ -273,6 +371,7 @@ export default function AdminEODDetail() {
         atm: "",
         debit: total,
         credit: total,
+        balanceImpact: 0,
         remarks: e.exchange_metadata?.from_bank_name && e.exchange_metadata?.to_bank_name
           ? `${e.exchange_metadata.from_bank_name} to ${e.exchange_metadata.to_bank_name}`
           : "",
@@ -286,23 +385,44 @@ export default function AdminEODDetail() {
           t.transfer_metadata?.source_total_amount ||
           0
       );
-      rows.push({
-        ts,
-        type: "Inter-site Transfer",
-        atm: t.transfer_metadata?.source_site_name || "-",
-        debit: total,
-        credit: total,
-        remarks: t.transfer_metadata?.reference || "",
+      const sourceSiteName = t.transfer_metadata?.source_site_name || "-";
+      const destinations = t.transfer_metadata?.destinations || [];
+
+      if (total > 0) {
+        rows.push({
+          ts,
+          type: "Inter-site Transfer (Out)",
+          atm: sourceSiteName,
+          debit: 0,
+          credit: -total,
+          balanceImpact: -total,
+          remarks: t.transfer_metadata?.reference || `Transferred to ${destinations.length} site(s)`,
+        });
+      }
+
+      destinations.forEach((dest: any) => {
+        const destAmount = Number(dest.total_amount || 0);
+        if (destAmount > 0) {
+          rows.push({
+            ts,
+            type: "Inter-site Transfer (In)",
+            atm: dest.site_name || "-",
+            debit: 0,
+            credit: destAmount,
+            balanceImpact: destAmount,
+            remarks: t.transfer_metadata?.reference || `From ${sourceSiteName}`,
+          });
+        }
       });
     });
 
     return rows.sort((a, b) => a.ts.getTime() - b.ts.getTime());
-  }, [data.cashPickups, data.atmLoads, data.excessCash, exchanges, transfers, siteMap]);
+  }, [data.cashPickups, data.atmLoads, data.excessCash, exchanges, transfers, siteMap, adminLoadAlloc]);
 
   const printBalanceRows = useMemo(() => {
     let running = 0;
     return printRows.map((row) => {
-      running += row.credit - row.debit;
+      running += row.balanceImpact;
       return { ...row, balance: running };
     });
   }, [printRows]);
@@ -369,7 +489,7 @@ export default function AdminEODDetail() {
         </table>
       </div>
 
-      <div className="container space-y-6 text-sm print:hidden">
+      <div className="container space-y-6 text-sm print:hidden print-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <h2 className="text-xl font-semibold text-primary">
             EOD Detail – Assignment #{assignment.id}
@@ -551,7 +671,7 @@ export default function AdminEODDetail() {
 
             {showSignature && (
               <div
-                className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+                className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 print:hidden"
                 onClick={() => setShowSignature(false)}
               >
                 <div className="bg-white p-4 rounded shadow max-w-lg w-full">
@@ -689,6 +809,35 @@ export default function AdminEODDetail() {
             </button>
           </Section>
         )}
+      </div>
+
+      {/* PRINT FOOTER – SIGNATURES */}
+      <div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
+        <div className="grid grid-cols-2 gap-12">
+          <div>
+            <p className="font-semibold">Custodian Signature</p>
+            <div className="mt-6 border-b w-48"></div>
+            <p className="mt-1">Name & Date</p>
+          </div>
+          <div className="text-right">
+            <p className="font-semibold">Admin / Supervisor</p>
+            <div className="mt-6 border-b w-48 ml-auto"></div>
+            <p className="mt-1">Name, Seal & Date</p>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-between">
+          <div>
+            <div className="font-semibold">Sruthi CRA Ops</div>
+            <div>Cash Replenishment & ATM Operations</div>
+          </div>
+          <div className="text-right">
+            <div>Generated: {new Date().toLocaleDateString("en-IN")}</div>
+            <div>Confidential – Internal Use Only</div>
+          </div>
+        </div>
+        <p className="mt-2 text-[10px] text-slate-500">
+          This is a system-generated report from Sruthi CRA Ops. Any discrepancy must be reported within RBI-prescribed timelines.
+        </p>
       </div>
 
       <ConfirmationModal

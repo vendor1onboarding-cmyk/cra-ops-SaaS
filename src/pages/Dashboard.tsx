@@ -252,21 +252,16 @@ loadTravelKPI();
     const bankPicked = pickups.reduce((sum, p) => {
       const source = p.pickup_source || "BANK";
       if (source === "ATM_INTERNAL") return sum;
-      return sum + sumDenoms(p, DENOMS);
+      // For BANK pickups, subtract any internal_source_metadata total
+      const metaSources = extractInternalSourcesFromMetadata(p);
+      const metaTotal = metaSources.reduce(
+        (acc: number, s: any) => acc + Number(s.total_amount || 0),
+        0
+      );
+      return sum + Math.max(sumDenoms(p, DENOMS) - metaTotal, 0);
     }, 0);
 
-    const bankLoaded = loads.reduce((sum, l) => {
-      if (l.source_breakdown?.bank_source) {
-        return sum + Number(l.source_breakdown?.bank_source?.total_amount || 0);
-      }
-      // If no breakdown exists, assume all is bank source (legacy)
-      if (!l.source_breakdown?.internal_source) {
-        return sum + sumDenoms(l, DENOMS);
-      }
-      return sum;
-    }, 0);
-
-    // FLOW 2: INTERNAL ATM TRANSFER (does NOT affect Cash-in-Hand)
+    // FLOW 2: INTERNAL ATM TRANSFER tracking
     const internalPickedRows = pickups.reduce((sum, p) => {
       const source = p.pickup_source || "BANK";
       if (source !== "ATM_INTERNAL") return sum;
@@ -282,29 +277,89 @@ loadTravelKPI();
       return sum + metaTotal;
     }, 0);
 
-    const internalLoaded = loads.reduce((sum, l) => {
-      if (l.source_breakdown?.internal_source) {
-        return sum + Number(l.source_breakdown?.internal_source?.total_amount || 0);
-      }
-      return sum;
-    }, 0);
-
     const internalPickedTotal = internalPickedRows + internalPickedMeta;
 
-    // Internal transfer must net to zero (display max for visibility)
-    setInternalTransferTotal(Math.max(internalPickedTotal, internalLoaded));
+    // ── Chronological denomination matching ──
+    // Build timeline of pickup + load events sorted by time
+    type CashEvent = { kind: "pickup" | "load"; ts: number; raw: any };
+    const events: CashEvent[] = [];
+
+    pickups.forEach((p) => {
+      const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
+      events.push({ kind: "pickup", ts, raw: p });
+    });
+    loads.forEach((l) => {
+      const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
+      events.push({ kind: "load", ts, raw: l });
+    });
+
+    // Pickups before loads at same timestamp
+    events.sort((a, b) => {
+      const diff = a.ts - b.ts;
+      if (diff !== 0) return diff;
+      return (a.kind === "pickup" ? 0 : 1) - (b.kind === "pickup" ? 0 : 1);
+    });
+
+    // Live denomination pool from ATM removals
+    const removalPool: Record<number, number> = { 100: 0, 200: 0, 500: 0, 2000: 0 };
+
+    let totalBankLoaded = 0;
+    let totalInternalLoaded = 0;
+
+    events.forEach((evt) => {
+      if (evt.kind === "pickup") {
+        const p = evt.raw;
+        const source = p.pickup_source || "BANK";
+        if (source === "ATM_INTERNAL") {
+          // Add to removal pool
+          DENOMS.forEach((d) => {
+            removalPool[d] += (p[`denom_${d}`] || 0);
+          });
+        } else {
+          // Check for mixed pickup that includes internal_source_metadata
+          const metaSources = extractInternalSourcesFromMetadata(p);
+          metaSources.forEach((s: any) => {
+            DENOMS.forEach((d) => {
+              removalPool[d] += Number(s.denominations?.[`denom_${d}`] || 0);
+            });
+          });
+        }
+      } else {
+        // ATM Load — match denominations against removal pool
+        const l = evt.raw;
+        let loadBank = 0;
+        let loadInternal = 0;
+
+        DENOMS.forEach((d) => {
+          const loadCount = (l[`denom_${d}`] || 0) as number;
+          const poolCount = removalPool[d] || 0;
+          const matched = Math.min(loadCount, poolCount);
+
+          loadInternal += matched * d;
+          loadBank += (loadCount - matched) * d;
+
+          removalPool[d] = poolCount - matched;
+        });
+
+        totalBankLoaded += loadBank;
+        totalInternalLoaded += loadInternal;
+      }
+    });
+
+    // Internal transfer display (max of picked vs loaded for visibility)
+    setInternalTransferTotal(Math.max(internalPickedTotal, totalInternalLoaded));
 
     // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
     // Internal transfers do NOT impact Cash-in-Hand
     setCashUtil({
       picked: bankPicked,
-      loaded: bankLoaded,
-      inHand: bankPicked - bankLoaded,
+      loaded: totalBankLoaded,
+      inHand: bankPicked - totalBankLoaded,
     });
   }
 
   function computeDenoms(pickups: any[], loads: any[], exchanges: any[]) {
-    // BANK CASH ONLY for picked/loaded (internal is tracked separately for visibility)
+    // Physical cash position: ALL pickups (bank + ATM removal) and ALL loads
     const picked: Record<number, number> = emptyDenomMap();
     const loaded: Record<number, number> = emptyDenomMap();
     const inHand: Record<number, number> = emptyDenomMap();
@@ -321,39 +376,21 @@ loadTravelKPI();
       });
     });
 
-    // Only count BANK pickups
+    // Count ALL pickups (bank + ATM internal) — this is total physical cash received
     pickups.forEach((p) => {
-      const source = p.pickup_source || "BANK";
-      if (source === "ATM_INTERNAL") {
-        // Skip internal ATM removals - they don't affect Cash-in-Hand
-        return;
-      }
-
       DENOMS.forEach((d) => {
-        picked[d] += p[`denom_${d}`] || 0;
+        picked[d] += (p[`denom_${d}`] || 0);
       });
-
-      // Note: internal_source_metadata in BANK pickups is already excluded from 
-      // the pickup row denominations, so we don't double-count
     });
 
-    // Only count BANK-sourced loads
+    // Count ALL loads — this is total physical cash loaded into ATMs
     loads.forEach((l) => {
-      if (l.source_breakdown?.bank_source) {
-        DENOMS.forEach((d) => {
-          loaded[d] += Number(l.source_breakdown?.bank_source?.[`denom_${d}`] || 0);
-        });
-        return;
-      }
-
-      // Legacy loads without breakdown - assume all bank
-      if (!l.source_breakdown?.internal_source) {
-        DENOMS.forEach((d) => {
-          loaded[d] += l[`denom_${d}`] || 0;
-        });
-      }
+      DENOMS.forEach((d) => {
+        loaded[d] += (l[`denom_${d}`] || 0);
+      });
     });
 
+    // In Hand = total picked - total loaded + exchange net
     DENOMS.forEach((d) => {
       inHand[d] = picked[d] - loaded[d] + exchangeNet[d];
     });
@@ -458,27 +495,27 @@ loadTravelKPI();
     </div>
   </div>
 </div>
-      {loading && <div className="text-center text-sm">Loading…</div>}
+      {loading && <div className="text-center text-sm print:hidden">Loading…</div>}
 {isSubmitted && (
-  <div className="bg-yellow-50 border border-yellow-300 p-3 rounded text-sm text-yellow-800">
+  <div className="bg-yellow-50 border border-yellow-300 p-3 rounded text-sm text-yellow-800 print:hidden">
     ⏳ EOD submitted. Awaiting admin approval.
   </div>
 )}
 
 {isRejected && assignment?.rejection_reason && (
-  <div className="bg-red-50 border border-red-300 p-3 rounded text-sm text-red-700">
+  <div className="bg-red-50 border border-red-300 p-3 rounded text-sm text-red-700 print:hidden">
     ❌ EOD rejected: {assignment.rejection_reason}
   </div>
 )}
 
 {isApproved && (
-  <div className="bg-green-50 border border-green-300 p-3 rounded text-sm text-green-700">
+  <div className="bg-green-50 border border-green-300 p-3 rounded text-sm text-green-700 print:hidden">
     ✅ EOD approved. Day is locked.
   </div>
 )}
 
       {!loading && !assignment && (
-        <div className="space-y-4 pb-10 px-2 max-w-full">
+        <div className="space-y-4 pb-10 px-2 max-w-full print:hidden">
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -573,10 +610,10 @@ loadTravelKPI();
       {!loading && assignment && (
         <div className="space-y-4 pb-24 px-2 max-w-full overflow-x-hidden">
 <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">
+            <h2 className="text-lg font-semibold print:hidden">
               Custodian Dashboard – Today ({loadedSiteIds.size}/{routeSites.length} ATMs Loaded)
             </h2>
-            <div className="hidden sm:flex gap-2">
+            <div className="hidden sm:flex gap-2 print:hidden">
               <button onClick={exportCSV} className="btn-secondary">⬇ CSV</button>
               <button onClick={() => window.print()} className="btn-primary">🖨 Print</button>
             </div>
@@ -585,7 +622,7 @@ loadTravelKPI();
           <div className="bg-white rounded shadow">
             <button
               onClick={() => setKpiOpen(!kpiOpen)}
-              className="w-full flex justify-between px-4 py-3 font-semibold"
+              className="w-full flex justify-between px-4 py-3 font-semibold print:hidden"
             >
               Cash Summary <span>{kpiOpen ? "▲" : "▼"}</span>
             </button>
@@ -661,7 +698,7 @@ loadTravelKPI();
               </h3>
 
               {/* Desktop table */}
-              <div className="hidden sm:block overflow-x-auto">
+              <div className="hidden sm:block print:block overflow-x-auto">
                 <table className="w-full text-sm border">
                   <thead className="bg-slate-100">
                     <tr>
@@ -691,7 +728,7 @@ loadTravelKPI();
               </div>
 
               {/* Mobile cards */}
-              <div className="sm:hidden space-y-2">
+              <div className="sm:hidden print:hidden space-y-2">
                 {DENOMS.map(d => (
                   <div key={d} className="border rounded p-3 text-sm">
                     <div className="font-semibold mb-1">₹{d}</div>
@@ -736,7 +773,7 @@ loadTravelKPI();
 		  
           {/* MOBILE: Loaded ATMs – Denomination wise (pending list removed) */}
 {loadedBySite.length > 0 && (
-  <div className="sm:hidden bg-white rounded shadow p-4">
+  <div className="sm:hidden print:hidden bg-white rounded shadow p-4">
     <h3 className="font-semibold mb-3">
       Loaded ATMs – Denomination Details
     </h3>
@@ -784,7 +821,7 @@ loadTravelKPI();
 
           {/* Loaded ATMs (only show loaded, remove pending) */}
           {loadedBySite.length > 0 && (
-            <div className="bg-white rounded shadow p-4 hidden sm:block">
+            <div className="bg-white rounded shadow p-4 hidden sm:block print:block">
               <h3 className="font-semibold mb-3">
                 Loaded ATMs – Denomination Details
               </h3>
@@ -830,7 +867,7 @@ loadTravelKPI();
         </div>
       )}
 	{/* Mobile Sticky CSV / Print Actions */}
-<div className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-white border-t shadow-md">
+<div className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-white border-t shadow-md print:hidden">
   <div className="flex gap-3 px-4 py-3">
     <button
       onClick={exportCSV}

@@ -333,7 +333,7 @@ export default function EODSummary() {
   return (
     <AppLayout>
       {loading && (
-        <div className="text-center text-sm text-slate-500">
+        <div className="text-center text-sm text-slate-500 print:hidden">
           Loading...
         </div>
       )}
@@ -441,22 +441,16 @@ function CustodianEOD({
   const bankPicked = cashPickups.reduce((sum: number, row: any) => {
     const source = row.pickup_source || "BANK";
     if (source === "ATM_INTERNAL") return sum;
-    return sum + sumPickupDenoms(row);
+    // Subtract internal_source_metadata portion from BANK pickups
+    const metaSources = extractInternalSources(row);
+    const metaTotal = metaSources.reduce(
+      (acc: number, s: any) => acc + Number(s.total_amount || 0),
+      0
+    );
+    return sum + Math.max(sumPickupDenoms(row) - metaTotal, 0);
   }, 0);
 
-  const bankLoaded = atmLoads.reduce((sum: number, row: any) => {
-    if (row.source_breakdown?.bank_source) {
-      return sum + Number(row.source_breakdown?.bank_source?.total_amount || 0);
-    }
-    // Legacy loads without breakdown - only count as bank if there was bank pickup
-    // If only internal transfers (no bank pickup), don't count as bank load
-    if (!row.source_breakdown?.internal_source && bankPicked > 0) {
-      return sum + denomTotal(row);
-    }
-    return sum;
-  }, 0);
-
-  // FLOW 2: INTERNAL ATM TRANSFER (does NOT affect Cash-in-Hand)
+  // FLOW 2: INTERNAL ATM TRANSFER tracking
   const internalPickedFromRows = cashPickups.reduce((sum: number, row: any) => {
     const source = row.pickup_source || "BANK";
     if (source !== "ATM_INTERNAL") return sum;
@@ -473,18 +467,81 @@ function CustodianEOD({
     return sum + metaTotal;
   }, 0);
 
-  const internalLoaded = atmLoads.reduce((sum: number, row: any) => {
-    if (row.source_breakdown?.internal_source) {
-      return sum + Number(row.source_breakdown?.internal_source?.total_amount || 0);
-    }
-    return sum;
-  }, 0);
-
   const internalPicked = internalPickedFromRows + internalPickedFromMeta;
 
+  // ── Chronological denomination matching ──
+  // Build timeline of pickup + load events sorted by time
+  type CashEvt = { kind: "pickup" | "load"; ts: number; raw: any };
+  const cashEvents: CashEvt[] = [];
+
+  cashPickups.forEach((p: any) => {
+    const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
+    cashEvents.push({ kind: "pickup", ts, raw: p });
+  });
+  atmLoads.forEach((l: any) => {
+    const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
+    cashEvents.push({ kind: "load", ts, raw: l });
+  });
+
+  // Pickups before loads at same timestamp
+  cashEvents.sort((a, b) => {
+    const diff = a.ts - b.ts;
+    if (diff !== 0) return diff;
+    return (a.kind === "pickup" ? 0 : 1) - (b.kind === "pickup" ? 0 : 1);
+  });
+
+  // Live denomination pool from ATM removals
+  const removalPool: Record<number, number> = { 100: 0, 200: 0, 500: 0, 2000: 0 };
+
+  let totalBankLoaded = 0;
+  let totalInternalLoaded = 0;
+
+  // Per-load allocation results for print rows
+  const loadAllocations = new Map<any, { bankAmount: number; internalAmount: number }>();
+
+  cashEvents.forEach((evt) => {
+    if (evt.kind === "pickup") {
+      const p = evt.raw;
+      const source = p.pickup_source || "BANK";
+      if (source === "ATM_INTERNAL") {
+        DENOM_ORDER.forEach((d) => {
+          removalPool[d] += (p[`denom_${d}`] || 0);
+        });
+      } else {
+        const metaSources = extractInternalSources(p);
+        metaSources.forEach((s: any) => {
+          DENOM_ORDER.forEach((d) => {
+            removalPool[d] += Number(s.denominations?.[`denom_${d}`] || 0);
+          });
+        });
+      }
+    } else {
+      const l = evt.raw;
+      let loadBank = 0;
+      let loadInternal = 0;
+
+      DENOM_ORDER.forEach((d) => {
+        const loadCount = (l[`denom_${d}`] || 0) as number;
+        const poolCount = removalPool[d] || 0;
+        const matched = Math.min(loadCount, poolCount);
+
+        loadInternal += matched * d;
+        loadBank += (loadCount - matched) * d;
+
+        removalPool[d] = poolCount - matched;
+      });
+
+      totalBankLoaded += loadBank;
+      totalInternalLoaded += loadInternal;
+      loadAllocations.set(l, { bankAmount: loadBank, internalAmount: loadInternal });
+    }
+  });
+
+  const bankLoaded = totalBankLoaded;
+
   // Internal transfer net MUST be zero (showing max for visibility only)
-  const internalTransferTotal = Math.max(internalPicked, internalLoaded);
-  const netInternalTransfer = internalPicked - internalLoaded;
+  const internalTransferTotal = Math.max(internalPicked, totalInternalLoaded);
+  const netInternalTransfer = internalPicked - totalInternalLoaded;
 
   // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
   // Internal transfers are neutral and do NOT impact Cash-in-Hand
@@ -521,7 +578,10 @@ function CustodianEOD({
   });
 
   const internalLoadRows = atmLoads.filter(
-    (row: any) => Number(row.source_breakdown?.internal_source?.total_amount || 0) > 0
+    (row: any) => {
+      const alloc = loadAllocations.get(row);
+      return alloc ? alloc.internalAmount > 0 : false;
+    }
   );
 
   const status = assignment?.status || "open";
@@ -541,82 +601,89 @@ function CustodianEOD({
       atm: string;
       debit: number;
       credit: number;
+      balanceImpact: number;
       remarks: string;
     }> = [];
 
     bankPickupRows.forEach((c: any) => {
       const ts = normalizeUtcDate(c.pickup_time) || new Date();
-      rows.push({
-        ts,
-        type: "Bank Pickup",
-        atm: "",
-        debit: 0,
-        credit: denomTotal(c),
-        remarks: c.branch ? `${c.bank_name || "Bank"} - ${c.branch}` : (c.bank_name || "Bank"),
-      });
+      // Subtract internal metadata portion from bank pickup credit
+      const metaSources = extractInternalSources(c);
+      const metaTotal = metaSources.reduce(
+        (acc: number, s: any) => acc + Number(s.total_amount || 0),
+        0
+      );
+      const total = denomTotal(c);
+      const bankAmount = Math.max(total - metaTotal, 0);
+      if (bankAmount > 0) {
+        rows.push({
+          ts,
+          type: "Bank Pickup",
+          atm: "",
+          debit: 0,
+          credit: bankAmount,
+          balanceImpact: bankAmount,
+          remarks: c.branch ? `${c.bank_name || "Bank"} - ${c.branch}` : (c.bank_name || "Bank"),
+        });
+      }
     });
 
     atmPickupRows.forEach((c: any) => {
       const ts = normalizeUtcDate(c.pickup_time) || new Date();
+      const amount = denomTotal(c);
       rows.push({
         ts,
-        type: "ATM Internal Pickup",
+        type: "ATM Cash Removal",
         atm: getAtmLabel(siteMap.get(c.source_site_id) || c.site),
         debit: 0,
-        credit: -denomTotal(c),
+        credit: -amount,
+        balanceImpact: amount,
         remarks: "Removed from ATM",
       });
     });
 
     internalPickupSources.forEach((s: any) => {
       const ts = normalizeUtcDate(s.pickup_time) || new Date();
+      const amount = Number(s.total_amount || 0);
       rows.push({
         ts,
-        type: "ATM Internal Pickup",
+        type: "ATM Cash Removal",
         atm: getAtmLabel(s.site),
         debit: 0,
-        credit: -Number(s.total_amount || 0),
+        credit: -amount,
+        balanceImpact: amount,
         remarks: "Removed from ATM",
       });
     });
 
     (atmLoads || []).forEach((a: any) => {
       const ts = normalizeUtcDate(a.time_in) || new Date();
-      const bankSourceAmount = Number(a.source_breakdown?.bank_source?.total_amount || 0);
-      const internalSourceAmount = Number(a.source_breakdown?.internal_source?.total_amount || 0);
+      const alloc = loadAllocations.get(a);
+      const bankSourceAmount = alloc?.bankAmount || 0;
+      const internalSourceAmount = alloc?.internalAmount || 0;
       const total = denomTotal(a);
       
-      // If load has both sources, show separately
-      if (bankSourceAmount > 0) {
+      if (bankSourceAmount > 0 || internalSourceAmount > 0) {
+        const totalLoaded = bankSourceAmount + internalSourceAmount;
         rows.push({
           ts,
-          type: "ATM Load (Bank)",
+          type: "ATM Load",
           atm: getAtmLabel(a.site),
           debit: bankSourceAmount,
-          credit: 0,
-          remarks: "",
-        });
-      }
-      
-      if (internalSourceAmount > 0) {
-        rows.push({
-          ts,
-          type: "ATM Load (Internal)",
-          atm: getAtmLabel(a.site),
-          debit: 0,
           credit: internalSourceAmount,
-          remarks: "From internal pool",
+          balanceImpact: -totalLoaded,
+          remarks: internalSourceAmount > 0
+            ? `Bank: ₹${bankSourceAmount.toLocaleString("en-IN")} | ATM Cash: ₹${internalSourceAmount.toLocaleString("en-IN")}`
+            : "",
         });
-      }
-      
-      // Legacy loads without source breakdown - only if bank pickup exists
-      if (!a.source_breakdown && bankPicked > 0) {
+      } else if (bankPicked > 0) {
         rows.push({
           ts,
           type: "ATM Load",
           atm: getAtmLabel(a.site),
           debit: total,
           credit: 0,
+          balanceImpact: -total,
           remarks: "",
         });
       }
@@ -630,6 +697,7 @@ function CustodianEOD({
         atm: getAtmLabel(e.site),
         debit: 0,
         credit: denomTotal(e),
+        balanceImpact: denomTotal(e),
         remarks: e.remarks || "",
       });
     });
@@ -643,6 +711,7 @@ function CustodianEOD({
         atm: "",
         debit: total,
         credit: total,
+        balanceImpact: 0,
         remarks: e.exchange_metadata?.from_bank_name && e.exchange_metadata?.to_bank_name
           ? `${e.exchange_metadata.from_bank_name} to ${e.exchange_metadata.to_bank_name}`
           : "",
@@ -660,7 +729,6 @@ function CustodianEOD({
       const destinations = t.transfer_metadata?.destinations || [];
       const reference = t.transfer_metadata?.reference || "";
       
-      // Source removal (negative credit - cash leaving)
       if (sourceTotal > 0) {
         rows.push({
           ts,
@@ -668,11 +736,11 @@ function CustodianEOD({
           atm: sourceSiteName,
           debit: 0,
           credit: -sourceTotal,
+          balanceImpact: -sourceTotal,
           remarks: reference || `Transferred to ${destinations.length} site(s)`,
         });
       }
       
-      // Destination loads (positive credit - cash arriving)
       destinations.forEach((dest: any) => {
         const destAmount = Number(dest.total_amount || 0);
         if (destAmount > 0) {
@@ -682,6 +750,7 @@ function CustodianEOD({
             atm: dest.site_name || "-",
             debit: 0,
             credit: destAmount,
+            balanceImpact: destAmount,
             remarks: reference || `From ${sourceSiteName}`,
           });
         }
@@ -698,12 +767,13 @@ function CustodianEOD({
     exchanges,
     transfers,
     siteMap,
+    loadAllocations,
   ]);
 
   const printBalanceRows = useMemo(() => {
     let running = 0;
     return printRows.map((row) => {
-      running += row.credit - row.debit;
+      running += row.balanceImpact;
       return { ...row, balance: running };
     });
   }, [printRows]);
@@ -1005,7 +1075,7 @@ function CustodianEOD({
               <div className="flex items-center justify-between">
                 <span className="text-slate-600">ATM Cash Loaded (Internal Debit)</span>
                 <span className="font-semibold text-slate-900">
-                  ₹{internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  ₹{totalInternalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -1110,9 +1180,9 @@ function CustodianEOD({
                 <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
                   <div className="font-medium">{formatSite(a.site)}</div>
                   <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
-                  {Number(a.source_breakdown?.internal_source?.total_amount || 0) > 0 && (
+                  {(loadAllocations.get(a)?.internalAmount || 0) > 0 && (
                     <div className="text-[10px] text-amber-700 mt-1">
-                      Internal source used for this load
+                      Internal source used: ₹{(loadAllocations.get(a)?.internalAmount || 0).toLocaleString("en-IN")} from ATM removal pool
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-2 mt-2">
@@ -1180,23 +1250,20 @@ function CustodianEOD({
                   <div className="text-xs font-semibold text-slate-600 mb-2">
                     Internal Pool → Destination ATM (Load)
                   </div>
-                  {internalLoadRows.map((a: any, i: number) => (
+                  {internalLoadRows.map((a: any, i: number) => {
+                    const alloc = loadAllocations.get(a);
+                    const internalAmt = alloc?.internalAmount || 0;
+                    return (
                     <div key={`dest-${i}`} className="border rounded p-3 mb-2 bg-white text-xs">
                       <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
                       <div className="font-medium">{formatSite(a.site)}</div>
                       <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        {DENOM_ORDER.map((d) => (
-                          <div key={d}>
-                            {a.source_breakdown?.internal_source?.[`denom_${d}`] || 0} × ₹{d}
-                          </div>
-                        ))}
-                      </div>
                       <div className="mt-2 font-semibold">
-                        Total: ₹{Number(a.source_breakdown?.internal_source?.total_amount || 0).toLocaleString("en-IN")}
+                        ATM Removal Used: ₹{internalAmt.toLocaleString("en-IN")}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </Section>
@@ -1305,7 +1372,7 @@ function CustodianEOD({
 
       {/* ✍️ DIGITAL SIGNATURE - READ ONLY (SIGNED) */}
       {assignment?.eod_signed && (
-        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded shadow">
+        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded shadow print:hidden">
           <h3 className="font-semibold mb-2 text-green-800">✍️ Signed EOD</h3>
           <p className="text-xs text-slate-600 mb-4">
             Signed on: {formatIST(assignment.eod_signed_at)}
@@ -1325,7 +1392,7 @@ function CustodianEOD({
 
       {/* ✍️ DIGITAL SIGNATURE - INPUT MODE */}
       {assignment?.status === "submitted" && !assignment.eod_signed && (
-        <div className="mt-6 p-4 bg-white rounded shadow">
+        <div className="mt-6 p-4 bg-white rounded shadow print:hidden">
           <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
 
           <p className="text-xs text-slate-500 mb-2">

@@ -274,13 +274,16 @@ export default function ATMReplenishment() {
     setCashLoadingError(null);
 
     try {
-      // Get today's cash pickups for this custodian (with internal_source_metadata)
+      const DENOMS: (keyof typeof DENOM_VALUES)[] = ["denom_100", "denom_200", "denom_500", "denom_2000"];
+
+      // Fetch pickups (with pickup_time for chronological ordering)
       const { data: pickups, error: pickupError } = await supabase
         .from("cash_pickups")
         .select(
-          "denom_2000, denom_500, denom_200, denom_100, pickup_source, internal_source_metadata"
+          "denom_2000, denom_500, denom_200, denom_100, pickup_source, internal_source_metadata, pickup_time"
         )
-        .eq("assignment_id", assignmentId);
+        .eq("assignment_id", assignmentId)
+        .order("pickup_time", { ascending: true });
 
       if (pickupError) {
         console.warn("[ATMLoad] Failed to fetch pickups:", pickupError);
@@ -289,55 +292,12 @@ export default function ATMReplenishment() {
         return;
       }
 
-      // Split pickups into bank-sourced and internal-sourced
-      const bankPickups = {
-        denom_100: 0,
-        denom_200: 0,
-        denom_500: 0,
-        denom_2000: 0,
-      };
-
-      const internalPickups = {
-        denom_100: 0,
-        denom_200: 0,
-        denom_500: 0,
-        denom_2000: 0,
-      };
-
-      (pickups || []).forEach((p: any) => {
-        const pickupSource = p.pickup_source || "BANK";
-
-        if (pickupSource === "ATM_INTERNAL") {
-          // ATM_INTERNAL pickups go directly to internal cash
-          internalPickups.denom_100 += p.denom_100 || 0;
-          internalPickups.denom_200 += p.denom_200 || 0;
-          internalPickups.denom_500 += p.denom_500 || 0;
-          internalPickups.denom_2000 += p.denom_2000 || 0;
-        } else {
-          // Bank pickups (pickup_source = "BANK" or null)
-          bankPickups.denom_100 += p.denom_100 || 0;
-          bankPickups.denom_200 += p.denom_200 || 0;
-          bankPickups.denom_500 += p.denom_500 || 0;
-          bankPickups.denom_2000 += p.denom_2000 || 0;
-        }
-
-        // Internal source metadata contains cash from internal ATM pickups (legacy support)
-        if (!p.pickup_source && p.internal_source_metadata?.sources) {
-          p.internal_source_metadata.sources.forEach((source: any) => {
-            const denoms = source.denominations || {};
-            internalPickups.denom_100 += denoms.denom_100 || 0;
-            internalPickups.denom_200 += denoms.denom_200 || 0;
-            internalPickups.denom_500 += denoms.denom_500 || 0;
-            internalPickups.denom_2000 += denoms.denom_2000 || 0;
-          });
-        }
-      });
-
-      // Get all previous ATM loads for this assignment (with source_breakdown)
+      // Fetch previous loads (with time_in for chronological ordering)
       const { data: loads, error: loadError } = await supabase
         .from("atm_replenishments")
-        .select("denom_2000, denom_500, denom_200, denom_100, source_breakdown")
-        .eq("assignment_id", assignmentId);
+        .select("denom_2000, denom_500, denom_200, denom_100, time_in")
+        .eq("assignment_id", assignmentId)
+        .order("time_in", { ascending: true });
 
       if (loadError) {
         console.warn("[ATMLoad] Failed to fetch previous loads:", loadError);
@@ -346,46 +306,7 @@ export default function ATMReplenishment() {
         return;
       }
 
-      // Sum up bank-sourced and internal-sourced loads separately
-      const bankLoads = {
-        denom_100: 0,
-        denom_200: 0,
-        denom_500: 0,
-        denom_2000: 0,
-      };
-
-      const internalLoads = {
-        denom_100: 0,
-        denom_200: 0,
-        denom_500: 0,
-        denom_2000: 0,
-      };
-
-      (loads || []).forEach((l: any) => {
-        if (l.source_breakdown) {
-          // Load has source breakdown - split accordingly
-          const bankSource = l.source_breakdown.bank_source || {};
-          const internalSource = l.source_breakdown.internal_source || {};
-
-          bankLoads.denom_100 += bankSource.denom_100 || 0;
-          bankLoads.denom_200 += bankSource.denom_200 || 0;
-          bankLoads.denom_500 += bankSource.denom_500 || 0;
-          bankLoads.denom_2000 += bankSource.denom_2000 || 0;
-
-          internalLoads.denom_100 += internalSource.denom_100 || 0;
-          internalLoads.denom_200 += internalSource.denom_200 || 0;
-          internalLoads.denom_500 += internalSource.denom_500 || 0;
-          internalLoads.denom_2000 += internalSource.denom_2000 || 0;
-        } else {
-          // No source breakdown - all bank-sourced (backward compatibility)
-          bankLoads.denom_100 += l.denom_100 || 0;
-          bankLoads.denom_200 += l.denom_200 || 0;
-          bankLoads.denom_500 += l.denom_500 || 0;
-          bankLoads.denom_2000 += l.denom_2000 || 0;
-        }
-      });
-
-      // Apply denomination exchanges (only affects bank cash)
+      // Fetch denomination exchanges (only affects bank cash)
       const { data: exchanges, error: exchangeError } = await supabase
         .from("soa_adjustments")
         .select("exchange_metadata")
@@ -396,49 +317,107 @@ export default function ATMReplenishment() {
         console.warn("[ATMLoad] Failed to fetch exchanges:", exchangeError);
       }
 
-      const exchangeDelta = (exchanges || []).reduce(
-        (acc: typeof bankPickups, row: any) => {
-          const from = row?.exchange_metadata?.from_denominations || {};
-          const to = row?.exchange_metadata?.to_denominations || {};
+      // ── Step 1: Build bank pickup pool (all non-ATM_INTERNAL pickups) ──
+      const bankPool: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
 
-          acc.denom_100 += (to.denom_100 || 0) - (from.denom_100 || 0);
-          acc.denom_200 += (to.denom_200 || 0) - (from.denom_200 || 0);
-          acc.denom_500 += (to.denom_500 || 0) - (from.denom_500 || 0);
-          acc.denom_2000 += (to.denom_2000 || 0) - (from.denom_2000 || 0);
-          return acc;
-        },
-        { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 }
-      );
+      (pickups || []).forEach((p: any) => {
+        const source = p.pickup_source || "BANK";
+        if (source !== "ATM_INTERNAL") {
+          // Bank pickup contributes full denoms to bank pool
+          DENOMS.forEach((d) => { bankPool[d] += (p[d] || 0); });
 
-      // Calculate available bank cash = bank pickups - bank loads + exchanges
-      const availableBank = {
-        denom_100: Math.max(
-          0,
-          bankPickups.denom_100 - bankLoads.denom_100 + exchangeDelta.denom_100
-        ),
-        denom_200: Math.max(
-          0,
-          bankPickups.denom_200 - bankLoads.denom_200 + exchangeDelta.denom_200
-        ),
-        denom_500: Math.max(
-          0,
-          bankPickups.denom_500 - bankLoads.denom_500 + exchangeDelta.denom_500
-        ),
-        denom_2000: Math.max(
-          0,
-          bankPickups.denom_2000 - bankLoads.denom_2000 + exchangeDelta.denom_2000
-        ),
-      };
+          // But subtract any internal_source_metadata portion (those go to internal pool)
+          if (p.internal_source_metadata?.sources) {
+            p.internal_source_metadata.sources.forEach((s: any) => {
+              const sDenoms = s.denominations || {};
+              DENOMS.forEach((d) => { bankPool[d] -= Number(sDenoms[d] || 0); });
+            });
+          }
+        }
+      });
 
-      // Calculate available internal cash = internal pickups - internal loads
-      const availableInternal = {
-        denom_100: Math.max(0, internalPickups.denom_100 - internalLoads.denom_100),
-        denom_200: Math.max(0, internalPickups.denom_200 - internalLoads.denom_200),
-        denom_500: Math.max(0, internalPickups.denom_500 - internalLoads.denom_500),
-        denom_2000: Math.max(0, internalPickups.denom_2000 - internalLoads.denom_2000),
-      };
+      // Ensure no negatives in bank pool
+      DENOMS.forEach((d) => { bankPool[d] = Math.max(0, bankPool[d]); });
 
-      // Total available = bank + internal
+      // Apply exchange deltas to bank pool
+      (exchanges || []).forEach((row: any) => {
+        const from = row?.exchange_metadata?.from_denominations || {};
+        const to = row?.exchange_metadata?.to_denominations || {};
+        DENOMS.forEach((d) => {
+          bankPool[d] += (to[d] || 0) - (from[d] || 0);
+        });
+      });
+      DENOMS.forEach((d) => { bankPool[d] = Math.max(0, bankPool[d]); });
+
+      // ── Step 2: Chronological denomination pool matching ──
+      // Merge pickups + loads into a timeline, sorted by time (pickups before loads at same ts)
+      type CashEvt = { kind: "pickup" | "load"; ts: number; raw: any };
+      const events: CashEvt[] = [];
+
+      (pickups || []).forEach((p: any) => {
+        const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
+        events.push({ kind: "pickup", ts, raw: p });
+      });
+      (loads || []).forEach((l: any) => {
+        const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
+        events.push({ kind: "load", ts, raw: l });
+      });
+
+      events.sort((a, b) => {
+        const diff = a.ts - b.ts;
+        if (diff !== 0) return diff;
+        return (a.kind === "pickup" ? 0 : 1) - (b.kind === "pickup" ? 0 : 1);
+      });
+
+      // Live internal (ATM removal) denomination pool — accumulated chronologically
+      const removalPool: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
+
+      // Track how much bank vs internal cash has been consumed by completed loads
+      let bankUsed: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
+      let internalUsed: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
+
+      events.forEach((evt) => {
+        if (evt.kind === "pickup") {
+          const p = evt.raw;
+          const source = p.pickup_source || "BANK";
+
+          if (source === "ATM_INTERNAL") {
+            // ATM_INTERNAL pickup → feeds the internal removal pool
+            DENOMS.forEach((d) => { removalPool[d] += (p[d] || 0); });
+          } else {
+            // Bank pickup may contain internal_source_metadata
+            if (p.internal_source_metadata?.sources) {
+              p.internal_source_metadata.sources.forEach((s: any) => {
+                const sDenoms = s.denominations || {};
+                DENOMS.forEach((d) => { removalPool[d] += Number(sDenoms[d] || 0); });
+              });
+            }
+          }
+        } else {
+          // Load event — consume from internal pool first, remainder from bank
+          const l = evt.raw;
+          DENOMS.forEach((d) => {
+            const loadCount = (l[d] || 0) as number;
+            const poolCount = removalPool[d] || 0;
+            const fromInternal = Math.min(loadCount, poolCount);
+            const fromBank = loadCount - fromInternal;
+
+            removalPool[d] = poolCount - fromInternal;
+            internalUsed[d] += fromInternal;
+            bankUsed[d] += fromBank;
+          });
+        }
+      });
+
+      // ── Step 3: Calculate remaining available per source ──
+      const availableBank: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
+      const availableInternal: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
+
+      DENOMS.forEach((d) => {
+        availableBank[d] = Math.max(0, bankPool[d] - bankUsed[d]);
+        availableInternal[d] = Math.max(0, removalPool[d]); // whatever is left in the pool
+      });
+
       const available = {
         denom_100: availableBank.denom_100 + availableInternal.denom_100,
         denom_200: availableBank.denom_200 + availableInternal.denom_200,
@@ -462,9 +441,9 @@ export default function ATMReplenishment() {
 
       setAvailableCash(available);
       setAvailableTotalAmount(totalAvailable);
-      setAvailableBankCash(availableBank);
+      setAvailableBankCash(availableBank as typeof availableBankCash);
       setAvailableBankTotal(totalAvailableBank);
-      setAvailableInternalCash(availableInternal);
+      setAvailableInternalCash(availableInternal as typeof availableInternalCash);
       setAvailableInternalTotal(totalAvailableInternal);
     } catch (err) {
       console.error("[ATMLoad] Error loading available cash:", err);
@@ -571,7 +550,8 @@ export default function ATMReplenishment() {
 
   /* ---------------- Save ---------------- */
 
-  // Calculate source breakdown for ATM load (bank vs internal sources)
+  // Calculate source breakdown for ATM load (internal pool first, then bank)
+  // Matches the chronological denomination pool logic used in SOA/Dashboard/EOD
   function calculateSourceBreakdown(loadDenoms: typeof denoms) {
     const bankSource = {
       denom_100: 0,
@@ -589,19 +569,19 @@ export default function ATMReplenishment() {
       total_amount: 0,
     };
 
-    // For each denomination, use bank source first, then internal
+    // For each denomination, consume internal (ATM removal) pool first, then bank
     Object.entries(DENOM_VALUES).forEach(([key, value]) => {
       const requiredCount = loadDenoms[key as keyof typeof loadDenoms];
-      const availableBank = availableBankCash[key as keyof typeof availableBankCash];
       const availableInternal = availableInternalCash[key as keyof typeof availableInternalCash];
+      const availableBank = availableBankCash[key as keyof typeof availableBankCash];
 
-      // Use bank source first (up to available)
-      const fromBank = Math.min(requiredCount, availableBank);
-      bankSource[key as keyof typeof bankSource] = fromBank;
-
-      // Use internal source for the remainder
-      const fromInternal = requiredCount - fromBank;
+      // Use internal source first (up to available)
+      const fromInternal = Math.min(requiredCount, availableInternal);
       internalSource[key as keyof typeof internalSource] = fromInternal;
+
+      // Use bank source for the remainder
+      const fromBank = Math.min(requiredCount - fromInternal, availableBank);
+      bankSource[key as keyof typeof bankSource] = fromBank;
     });
 
     // Calculate totals

@@ -84,9 +84,6 @@ export default function CashPickup() {
     denom_500: 0,
     denom_200: 0,
     denom_100: 0,
-    denom_50: 0,
-    denom_20: 0,
-    denom_10: 0,
   });
   const [bankGps, setBankGps] = useState<GPSState>(EMPTY_GPS);
   const [bankPhoto, setBankPhoto] = useState<File | null>(null);
@@ -286,9 +283,6 @@ export default function CashPickup() {
       denom_500: 0,
       denom_200: 0,
       denom_100: 0,
-      denom_50: 0,
-      denom_20: 0,
-      denom_10: 0,
     });
     setBankGps(EMPTY_GPS);
     setBankPhoto(null);
@@ -455,10 +449,7 @@ export default function CashPickup() {
       form.denom_2000 +
       form.denom_500 +
       form.denom_200 +
-      form.denom_100 +
-      form.denom_50 +
-      form.denom_20 +
-      form.denom_10;
+      form.denom_100;
 
     if (totalNotes === 0) {
       setMessage("Enter at least one denomination for bank pickup");
@@ -862,9 +853,6 @@ export default function CashPickup() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {[
-                      ["denom_10", 10],
-                      ["denom_20", 20],
-                      ["denom_50", 50],
                       ["denom_100", 100],
                       ["denom_200", 200],
                       ["denom_500", 500],
