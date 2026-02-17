@@ -1392,7 +1392,7 @@ function CustodianEOD({
 
       {/* ✍️ DIGITAL SIGNATURE - INPUT MODE */}
       {assignment?.status === "submitted" && !assignment.eod_signed && (
-        <div className="mt-6 p-4 bg-white rounded shadow print:hidden">
+        <div className="mt-6 mb-20 p-4 bg-white rounded shadow print:hidden">
           <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
 
           <p className="text-xs text-slate-500 mb-2">
@@ -1444,7 +1444,7 @@ function CustodianEOD({
 
           {/* ================= FULL SCREEN SIGNATURE MODAL ================= */}
           {showSignatureModal && (
-            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center">
+            <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center">
               <div className="bg-white w-full h-full sm:w-[90%] sm:h-[90%] rounded-lg p-4 flex flex-col">
 
                 <div className="flex justify-between items-center mb-2">
@@ -1475,7 +1475,7 @@ function CustodianEOD({
 
                 {sigError && <p className="text-xs text-red-600 mt-2">{sigError}</p>}
 
-                <div className="flex gap-3 mt-3">
+                <div className="flex gap-3 mt-3 mb-2">
                   <button
                     className="btn-secondary"
                     onClick={() => modalSigPadRef.current?.clear()}
@@ -1494,7 +1494,7 @@ function CustodianEOD({
                       setShowSignatureModal(false);
                     }}
                   >
-                    {signing ? "Saving..." : "Sign & Lock EOD"}
+                    Apply Signature
                   </button>
                 </div>
               </div>
