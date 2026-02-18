@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "../../api/supabaseClient";
+import { supabase, invokeEdgeFunction } from "../../api/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import ConfirmationModal from "../../components/ConfirmationModal";
 
@@ -169,70 +169,21 @@ export default function UserOnboarding() {
       
       // Prepare credentials
       const tempPassword = generateTempPassword();
-      let authEmail: string;
-      let storedMobile: string | null = null;
       
-      if (identifierType === "email") {
-        authEmail = formData.email.trim().toLowerCase();
-      } else {
-        // For mobile, generate synthetic email for Supabase auth
-        const cleanMobile = formData.mobileNumber.replace(/\D/g, '');
-        storedMobile = cleanMobile;
-        authEmail = `mobile_${cleanMobile}@system.internal`;
-      }
-      
-      // Step 1: Create user in Supabase Auth using admin API
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: authEmail,
-        password: tempPassword,
-        email_confirm: true,
-        user_metadata: {
-          full_name: formData.fullName.trim(),
-          role: formData.role,
-          login_identifier: identifierType,
-        },
+      // Call Edge Function to create user securely on the server
+      const result = await invokeEdgeFunction('create-user', {
+        email: identifierType === "email" ? formData.email.trim().toLowerCase() : undefined,
+        mobileNumber: identifierType === "mobile" ? formData.mobileNumber : undefined,
+        fullName: formData.fullName.trim(),
+        role: formData.role,
+        tempPassword: tempPassword,
+        identifierType: identifierType,
       });
       
-      if (authError) {
-        console.error("Auth user creation error:", authError);
+      if (!result.success) {
         setMessage({ 
           type: "error", 
-          text: `Failed to create user: ${authError.message}` 
-        });
-        setLoading(false);
-        return;
-      }
-      
-      if (!authData.user) {
-        setMessage({ 
-          type: "error", 
-          text: "User creation failed: No user data returned" 
-        });
-        setLoading(false);
-        return;
-      }
-      
-      // Step 2: Create corresponding profile record
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .insert({
-          id: authData.user.id,
-          email: (identifierType === "email" ? formData.email.trim().toLowerCase() : null) || authEmail,
-          mobile_number: storedMobile,
-          full_name: formData.fullName.trim(),
-          role: formData.role,
-          first_login: true,
-        });
-      
-      if (profileError) {
-        console.error("Profile creation error:", profileError);
-        
-        // Cleanup: Delete auth user if profile creation fails
-        await supabase.auth.admin.deleteUser(authData.user.id);
-        
-        setMessage({ 
-          type: "error", 
-          text: `Profile creation failed: ${profileError.message}. User has been rolled back.` 
+          text: `Failed to create user: ${result.error || 'Unknown error'}` 
         });
         setLoading(false);
         return;
@@ -240,8 +191,8 @@ export default function UserOnboarding() {
       
       // Success: Show credentials to admin
       setGeneratedCredentials({
-        email: identifierType === "email" ? formData.email.trim().toLowerCase() : undefined,
-        mobileNumber: storedMobile,
+        email: result.user.email,
+        mobileNumber: result.user.mobileNumber,
         tempPassword: tempPassword,
         identifierType: identifierType,
       });
