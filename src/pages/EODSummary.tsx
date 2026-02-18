@@ -1425,7 +1425,7 @@ function CustodianEOD({
             <p className="text-xs text-red-600 mt-2">{sigError}</p>
           )}
 
-          <div className="flex gap-3 mt-3">
+          <div className="flex gap-3 mt-3 mb-20">
             <button
               className="btn-secondary"
               onClick={() => sigPadRef.current?.clear()}
@@ -1484,17 +1484,20 @@ function CustodianEOD({
                   </button>
 
                   <button
-                    className="btn-primary"
-                    onClick={() => {
-                      // Copy signature from modal → main canvas
+                    className="btn-primary flex-1"
+                    onClick={async () => {
+                      // Copy signature from modal → main canvas and submit
                       const data = modalSigPadRef.current?.toDataURL();
                       if (data) {
                         sigPadRef.current?.fromDataURL(data);
                       }
                       setShowSignatureModal(false);
+                      // Submit signature immediately
+                      await submitSignature();
                     }}
+                    disabled={signing}
                   >
-                    {signing ? "Saving..." : "Sign & Lock EOD"}
+                    {signing ? "Saving..." : "Apply Signature & Lock EOD"}
                   </button>
                 </div>
               </div>
