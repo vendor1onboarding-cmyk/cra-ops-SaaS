@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import ConfirmationModal from "../../components/ConfirmationModal";
 
 type UserRole = "admin" | "supervisor" | "custodian";
+type LoginIdentifierType = "email" | "mobile";
 
 export default function UserOnboarding() {
   const { profile } = useAuth();
@@ -14,8 +15,10 @@ export default function UserOnboarding() {
   const [confirmMessage, setConfirmMessage] = useState("");
   
   // Form fields
+  const [identifierType, setIdentifierType] = useState<LoginIdentifierType>("email");
   const [formData, setFormData] = useState({
     email: "",
+    mobileNumber: "",
     fullName: "",
     role: "custodian" as UserRole,
   });
@@ -23,7 +26,9 @@ export default function UserOnboarding() {
   // Generated credentials (shown after successful creation)
   const [generatedCredentials, setGeneratedCredentials] = useState<{
     email: string;
+    mobileNumber?: string;
     tempPassword: string;
+    identifierType: LoginIdentifierType;
   } | null>(null);
   
   // Validation errors
@@ -34,11 +39,22 @@ export default function UserOnboarding() {
   function validateForm(): boolean {
     const newErrors: Record<string, string> = {};
     
-    // Email validation
-    if (!formData.email.trim()) {
-      newErrors.email = "Email is required";
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = "Invalid email format";
+    // Email validation (if email is selected)
+    if (identifierType === "email") {
+      if (!formData.email.trim()) {
+        newErrors.email = "Email is required";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+        newErrors.email = "Invalid email format";
+      }
+    }
+    
+    // Mobile number validation (if mobile is selected)
+    if (identifierType === "mobile") {
+      if (!formData.mobileNumber.trim()) {
+        newErrors.mobileNumber = "Mobile number is required";
+      } else if (!/^\d{10}$/.test(formData.mobileNumber.replace(/\D/g, ''))) {
+        newErrors.mobileNumber = "Invalid mobile number (must be 10 digits)";
+      }
     }
     
     // Full name validation
@@ -87,22 +103,40 @@ export default function UserOnboarding() {
   
   /* ---------------- Check for Duplicate User ---------------- */
   
-  async function checkDuplicateUser(): Promise<boolean> {
-    const trimmedEmail = formData.email.trim().toLowerCase();
-    
-    // Check if user already exists in profiles
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("email", trimmedEmail)
-      .maybeSingle();
-    
-    if (error) {
-      console.error("Duplicate check error:", error);
-      return false;
+  async function checkDuplicateUser(): Promise<{ isDuplicate: boolean; field?: string }> {
+    if (identifierType === "email") {
+      const trimmedEmail = formData.email.trim().toLowerCase();
+      
+      // Check if user already exists in profiles
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("email", trimmedEmail)
+        .maybeSingle();
+      
+      if (error) {
+        console.error("Duplicate check error:", error);
+        return { isDuplicate: false };
+      }
+      
+      return { isDuplicate: !!data, field: "email" };
+    } else {
+      // Mobile number duplicate check
+      const cleanMobile = formData.mobileNumber.replace(/\D/g, '');
+      
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("mobile_number", cleanMobile)
+        .maybeSingle();
+      
+      if (error) {
+        console.error("Duplicate check error:", error);
+        return { isDuplicate: false };
+      }
+      
+      return { isDuplicate: !!data, field: "mobile_number" };
     }
-    
-    return !!data; // Returns true if duplicate found
   }
   
   /* ---------------- Create User via Supabase Auth API ---------------- */
@@ -121,31 +155,41 @@ export default function UserOnboarding() {
     setLoading(true);
     
     try {
-      // Business validation: Check for duplicate email
-      const isDuplicate = await checkDuplicateUser();
-      if (isDuplicate) {
+      // Business validation: Check for duplicate
+      const dupResult = await checkDuplicateUser();
+      if (dupResult.isDuplicate) {
+        const fieldLabel = dupResult.field === "email" ? 'email' : "mobile number";
         setMessage({ 
           type: "error", 
-          text: `User with email "${formData.email.trim()}" already exists` 
+          text: `User with this ${fieldLabel} already exists` 
         });
         setLoading(false);
         return;
       }
       
-      // Generate temporary password
+      // Prepare credentials
       const tempPassword = generateTempPassword();
-      const trimmedEmail = formData.email.trim().toLowerCase();
+      let authEmail: string;
+      let storedMobile: string | null = null;
+      
+      if (identifierType === "email") {
+        authEmail = formData.email.trim().toLowerCase();
+      } else {
+        // For mobile, generate synthetic email for Supabase auth
+        const cleanMobile = formData.mobileNumber.replace(/\D/g, '');
+        storedMobile = cleanMobile;
+        authEmail = `mobile_${cleanMobile}@system.internal`;
+      }
       
       // Step 1: Create user in Supabase Auth using admin API
-      // Note: This requires admin privileges and service role key
-      // For production, this should be done via a secure backend endpoint
       const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: trimmedEmail,
+        email: authEmail,
         password: tempPassword,
-        email_confirm: true, // Auto-confirm email
+        email_confirm: true,
         user_metadata: {
           full_name: formData.fullName.trim(),
           role: formData.role,
+          login_identifier: identifierType,
         },
       });
       
@@ -172,11 +216,12 @@ export default function UserOnboarding() {
       const { error: profileError } = await supabase
         .from("profiles")
         .insert({
-          id: authData.user.id, // Use same ID as auth.users
-          email: trimmedEmail,
+          id: authData.user.id,
+          email: (identifierType === "email" ? formData.email.trim().toLowerCase() : null) || authEmail,
+          mobile_number: storedMobile,
           full_name: formData.fullName.trim(),
           role: formData.role,
-          first_login: true, // Flag for mandatory password reset
+          first_login: true,
         });
       
       if (profileError) {
@@ -195,8 +240,10 @@ export default function UserOnboarding() {
       
       // Success: Show credentials to admin
       setGeneratedCredentials({
-        email: trimmedEmail,
+        email: identifierType === "email" ? formData.email.trim().toLowerCase() : undefined,
+        mobileNumber: storedMobile,
         tempPassword: tempPassword,
+        identifierType: identifierType,
       });
       
       setMessage({ 
@@ -225,9 +272,11 @@ export default function UserOnboarding() {
   function handleReset() {
     setFormData({
       email: "",
+      mobileNumber: "",
       fullName: "",
       role: "custodian",
     });
+    setIdentifierType("email");
     setErrors({});
     setMessage(null);
     setGeneratedCredentials(null);
@@ -262,25 +311,92 @@ export default function UserOnboarding() {
       <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
         <h4 className="text-md font-semibold text-slate-800">Create New User</h4>
         
-        {/* Email */}
+        {/* Login Identifier Type Selector */}
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-2">
-            Email (Username) <span className="text-red-500">*</span>
+            Login Identifier Type <span className="text-red-500">*</span>
           </label>
-          <input
-            type="email"
-            className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
-              errors.email ? "border-red-500" : "border-slate-300"
-            }`}
-            placeholder="e.g., john.doe@example.com"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            disabled={loading}
-          />
-          {errors.email && (
-            <p className="text-xs text-red-600 mt-1">{errors.email}</p>
-          )}
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="identifierType"
+                value="email"
+                checked={identifierType === "email"}
+                onChange={(e) => {
+                  setIdentifierType(e.target.value as LoginIdentifierType);
+                  setErrors({});
+                }}
+                className="w-4 h-4"
+              />
+              <span className="text-sm text-slate-700">Email</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="identifierType"
+                value="mobile"
+                checked={identifierType === "mobile"}
+                onChange={(e) => {
+                  setIdentifierType(e.target.value as LoginIdentifierType);
+                  setErrors({});
+                }}
+                className="w-4 h-4"
+              />
+              <span className="text-sm text-slate-700">Mobile Number</span>
+            </label>
+          </div>
         </div>
+        
+        {/* Email Input */}
+        {identifierType === "email" && (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Email (Username) <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="email"
+              className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
+                errors.email ? "border-red-500" : "border-slate-300"
+              }`}
+              placeholder="e.g., john.doe@example.com"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              disabled={loading}
+            />
+            {errors.email && (
+              <p className="text-xs text-red-600 mt-1">{errors.email}</p>
+            )}
+          </div>
+        )}
+        
+        {/* Mobile Number Input */}
+        {identifierType === "mobile" && (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Mobile Number (Username) <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="tel"
+              className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
+                errors.mobileNumber ? "border-red-500" : "border-slate-300"
+              }`}
+              placeholder="e.g., 9876543210"
+              value={formData.mobileNumber}
+              onChange={(e) => {
+                // Allow only digits
+                const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
+                setFormData({ ...formData, mobileNumber: cleaned });
+              }}
+              maxLength={10}
+              disabled={loading}
+            />
+            {errors.mobileNumber && (
+              <p className="text-xs text-red-600 mt-1">{errors.mobileNumber}</p>
+            )}
+            <p className="text-xs text-slate-500 mt-1">10-digit mobile number</p>
+          </div>
+        )}
         
         {/* Full Name */}
         <div>
@@ -363,20 +479,40 @@ export default function UserOnboarding() {
               </p>
               
               <div className="space-y-3">
-                <div className="bg-white rounded-lg p-3 border border-amber-200">
-                  <div className="text-xs font-semibold text-slate-600 mb-1">Username (Email)</div>
-                  <div className="flex items-center justify-between gap-2">
-                    <code className="text-sm font-mono text-slate-800 break-all">
-                      {generatedCredentials.email}
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(generatedCredentials.email)}
-                      className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded text-xs font-semibold transition-colors"
-                    >
-                      Copy
-                    </button>
+                {/* Email or Mobile Identifier */}
+                {generatedCredentials.identifierType === "email" && generatedCredentials.email && (
+                  <div className="bg-white rounded-lg p-3 border border-amber-200">
+                    <div className="text-xs font-semibold text-slate-600 mb-1">Username (Email)</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <code className="text-sm font-mono text-slate-800 break-all">
+                        {generatedCredentials.email}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(generatedCredentials.email || "")}
+                        className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded text-xs font-semibold transition-colors"
+                      >
+                        Copy
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
+                
+                {generatedCredentials.identifierType === "mobile" && generatedCredentials.mobileNumber && (
+                  <div className="bg-white rounded-lg p-3 border border-amber-200">
+                    <div className="text-xs font-semibold text-slate-600 mb-1">Username (Mobile Number)</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <code className="text-sm font-mono text-slate-800 break-all">
+                        {generatedCredentials.mobileNumber}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(generatedCredentials.mobileNumber || "")}
+                        className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded text-xs font-semibold transition-colors"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="bg-white rounded-lg p-3 border border-amber-200">
                   <div className="text-xs font-semibold text-slate-600 mb-1">Temporary Password</div>
@@ -425,10 +561,11 @@ export default function UserOnboarding() {
       <div className="bg-slate-50 border border-slate-200 rounded-lg p-5">
         <h4 className="text-md font-semibold text-slate-800 mb-3">📋 User Onboarding Process</h4>
         <ol className="text-sm text-slate-600 space-y-2 ml-5 list-decimal">
-          <li>Admin creates user with email, name, and role</li>
+          <li>Admin selects login identifier type (Email or Mobile Number)</li>
+          <li>Admin creates user with chosen identifier, name, and role</li>
           <li>System generates secure temporary password (12 characters)</li>
           <li>Admin shares credentials securely with new user</li>
-          <li>User logs in with temporary credentials</li>
+          <li>User logs in with chosen identifier and temporary password</li>
           <li>System forces password reset on first login</li>
           <li>User sets permanent password and gains full access</li>
           <li>User can change password anytime from settings</li>
@@ -437,16 +574,15 @@ export default function UserOnboarding() {
         <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-xs text-blue-900 font-semibold mb-1">💡 Best Practices</p>
           <ul className="text-xs text-blue-800 space-y-1 ml-4 list-disc">
-            <li>Use official company email addresses</li>
-            <li>Verify email spelling before creating user</li>
+            <li><strong>Email:</strong> Use official company email addresses for corporate users</li>
+            <li><strong>Mobile:</strong> Use 10-digit mobile number for field custodians or mobile-first users</li>
+            <li>Verify identifier spelling/format before creating user</li>
             <li>Share credentials via secure communication only</li>
-            <li>Instruct user to change password immediately</li>
+            <li>Instruct user to change password immediately on first login</li>
             <li>Assign lowest necessary role (follow principle of least privilege)</li>
           </ul>
         </div>
       </div>
-    </div>
-  );
 
       <ConfirmationModal
         open={showConfirm}
@@ -458,4 +594,6 @@ export default function UserOnboarding() {
           handleReset();
         }}
       />
+    </div>
+  );
 }
