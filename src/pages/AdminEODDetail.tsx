@@ -34,6 +34,7 @@ export default function AdminEODDetail() {
 
   const id = Number(assignmentId);
 
+  // ========== STATE HOOKS (TOP) ==========
   const [loading, setLoading] = useState(true);
   const [assignment, setAssignment] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -55,7 +56,7 @@ export default function AdminEODDetail() {
     travel: [],
   });
 
-  /* ---------------- Load Data ---------------- */
+  // ========== EFFECT HOOKS ==========
   useEffect(() => {
     if (!id || isNaN(id)) {
       setLoading(false);
@@ -148,37 +149,7 @@ export default function AdminEODDetail() {
     load();
   }, [id]);
 
-  if (loading) {
-    return (
-      <AppLayout>
-        <div className="container">Loading EOD details…</div>
-      </AppLayout>
-    );
-  }
-
-  if (!assignment) {
-    return (
-      <AppLayout>
-        <div className="container">
-          <div className="text-red-600 mb-4">
-            <p className="font-semibold">Assignment not found.</p>
-            <p className="text-sm mt-2">
-              {!id || isNaN(id) 
-                ? "Invalid assignment ID in URL." 
-                : `No assignment found for ID: ${id}`}
-            </p>
-            <button
-              onClick={() => navigate("/admin/approvals")}
-              className="btn-primary text-xs mt-3"
-            >
-              ← Back to Approvals
-            </button>
-          </div>
-        </div>
-      </AppLayout>
-    );
-  }
-
+  // ========== MEMO HOOKS (MUST BE BEFORE CONDITIONAL RETURNS) ==========
   const extractInternalSources = (pickup: any) =>
     pickup?.internal_source_metadata?.sources || [];
 
@@ -191,7 +162,7 @@ export default function AdminEODDetail() {
       (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
     );
 
-    // FLOW 1: BANK CASH ONLY (affects Cash-in-Hand)
+    // FLOW 1: BANK CASH ONLY
     const bankPick = (data.cashPickups || []).reduce((sum: number, row: any) => {
       const source = row.pickup_source || "BANK";
       if (source === "ATM_INTERNAL") return sum;
@@ -271,17 +242,13 @@ export default function AdminEODDetail() {
     };
   }, [data.adjustments, data.cashPickups, data.atmLoads]);
 
-  // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
   const totalPicked = bankPicked;
   const totalLoaded = bankLoaded;
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
 
   const siteMap = useMemo(
-    () =>
-      new Map(
-        (data.routeSites || []).map((r: any) => [r.site?.id, r.site])
-      ),
+    () => new Map((data.routeSites || []).map((r: any) => [r.site?.id, r.site])),
     [data.routeSites]
   );
 
@@ -448,6 +415,38 @@ export default function AdminEODDetail() {
       return { ...row, balance: running };
     });
   }, [printRows]);
+
+  // ========== CONDITIONAL EARLY RETURNS (AFTER ALL HOOKS) ==========
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="container">Loading EOD details…</div>
+      </AppLayout>
+    );
+  }
+
+  if (!assignment) {
+    return (
+      <AppLayout>
+        <div className="container">
+          <div className="text-red-600 mb-4">
+            <p className="font-semibold">Assignment not found.</p>
+            <p className="text-sm mt-2">
+              {!id || isNaN(id) 
+                ? "Invalid assignment ID in URL." 
+                : `No assignment found for ID: ${id}`}
+            </p>
+            <button
+              onClick={() => navigate("/admin/approvals")}
+              className="btn-primary text-xs mt-3"
+            >
+              ← Back to Approvals
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   /* ---------------- Render ---------------- */
   return (
