@@ -105,6 +105,10 @@ export default function DenominationPlan() {
   const [bankPlans, setBankPlans] = useState<Record<string, DenomPlan>>({});
   const [existingBankPlans, setExistingBankPlans] = useState<Record<string, DenomPlan>>({});
 
+  // ATM Removal planning (local only – not persisted to DB)
+  const [atmRemovalPlan, setAtmRemovalPlan] = useState<DenomPlan>({ ...EMPTY_PLAN });
+  const [showAtmRemoval, setShowAtmRemoval] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [submitLocked, setSubmitLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -317,6 +321,8 @@ export default function DenominationPlan() {
     setBankToAdd("");
     setSelectedBanks([]);
     setBankPlans({});
+    setAtmRemovalPlan({ ...EMPTY_PLAN });
+    setShowAtmRemoval(false);
     setSubmitLocked(false);
   }
 
@@ -411,6 +417,30 @@ export default function DenominationPlan() {
       return sum + planTotal(plan);
     }, 0);
   }, [selectedBanks, bankPlans]);
+
+  // Per-denomination bank totals (for discrepancy check)
+  const aggregatedBankDenoms = useMemo(() => {
+    return [100, 200, 500, 2000].reduce((acc: Record<string, number>, d) => {
+      acc[`denom_${d}`] = selectedBanks.reduce((sum, bankId) => {
+        return sum + (((bankPlans[bankId] || EMPTY_PLAN) as any)[`denom_${d}`] || 0);
+      }, 0);
+      return acc;
+    }, {});
+  }, [selectedBanks, bankPlans]);
+
+  // Discrepancy: planned load vs combined source (bank + ATM removal), per denomination
+  const discrepancies = useMemo(() => {
+    return [100, 200, 500, 2000]
+      .map((d) => {
+        const planned = (aggregatedSiteDenoms as any)[`denom_${d}`] || 0;
+        const bankAvail = aggregatedBankDenoms[`denom_${d}`] || 0;
+        const atmAvail = (atmRemovalPlan as any)[`denom_${d}`] || 0;
+        const available = bankAvail + atmAvail;
+        const diff = planned - available;
+        return { denom: d, planned, available, bankAvail, atmAvail, diff };
+      })
+      .filter((r) => r.diff !== 0);
+  }, [aggregatedSiteDenoms, aggregatedBankDenoms, atmRemovalPlan]);
 
   // --------------------------------------------------
   // UI
@@ -668,7 +698,7 @@ export default function DenominationPlan() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">
-                      Total Planned (All Banks)
+                      Total Withdrawal (All Banks)
                     </p>
                     <p className="text-xs text-slate-600 mt-1">
                       Consolidated withdrawal plan across banks.
@@ -678,6 +708,144 @@ export default function DenominationPlan() {
                     ₹{aggregatedBankTotal.toLocaleString("en-IN")}
                   </span>
                 </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+                  {[100, 200, 500, 2000].map((d) => (
+                    <div key={d} className="rounded-md border border-emerald-200 bg-white px-3 py-2">
+                      <div className="text-xs text-slate-500">₹{d}</div>
+                      <div className="text-sm font-semibold text-emerald-800">
+                        {aggregatedBankDenoms[`denom_${d}`] || 0} notes
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        ₹{((aggregatedBankDenoms[`denom_${d}`] || 0) * d).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── ATM REMOVAL PLANNING ── */}
+            <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+              <button
+                type="button"
+                onClick={() => setShowAtmRemoval((v) => !v)}
+                className="w-full flex items-center justify-between text-left"
+              >
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800">ATM Removal Planning</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Cash removed from ATMs that will be reused for today's loads.
+                  </p>
+                </div>
+                <span className="text-slate-400 text-xl leading-none">{showAtmRemoval ? "▲" : "▼"}</span>
+              </button>
+
+              {showAtmRemoval && (
+                <div className="space-y-4 pt-2 border-t border-slate-100">
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                    ℹ️ Enter the denomination-wise cash being removed from ATMs and added back to your available pool.
+                    This amount is <strong>not saved</strong> — it is used only for planning discrepancy checks.
+                  </div>
+
+                  <DenominationFields
+                    values={{
+                      denom_100: atmRemovalPlan.denom_100,
+                      denom_200: atmRemovalPlan.denom_200,
+                      denom_500: atmRemovalPlan.denom_500,
+                      denom_2000: atmRemovalPlan.denom_2000,
+                    }}
+                    onChange={(name, value) =>
+                      setAtmRemovalPlan((prev) => ({ ...prev, [name]: value }))
+                    }
+                  />
+
+                  {planTotal(atmRemovalPlan) > 0 && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-orange-700 font-semibold">ATM Removal Total</p>
+                          <p className="text-xs text-slate-500 mt-0.5">Cash recovered from ATMs for redistribution.</p>
+                        </div>
+                        <span className="text-lg font-bold text-orange-700">
+                          ₹{planTotal(atmRemovalPlan).toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── DISCREPANCY ALERT ── */}
+            {selectedSites.length > 0 && (selectedBanks.length > 0 || planTotal(atmRemovalPlan) > 0) && (
+              <div className={`rounded-lg border p-5 ${
+                discrepancies.length === 0
+                  ? "bg-green-50 border-green-200"
+                  : "bg-red-50 border-red-200"
+              }`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className={`text-sm font-semibold ${
+                      discrepancies.length === 0 ? "text-green-800" : "text-red-800"
+                    }`}>
+                      {discrepancies.length === 0
+                        ? "✅ Source matches planned load"
+                        : `⚠️ Denomination Discrepancy Detected (${discrepancies.length} denomination${discrepancies.length > 1 ? "s" : ""})`}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Planned Load vs Available Source (Bank Withdrawal + ATM Removal)
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-xs text-slate-500">Combined Source</div>
+                    <div className="text-sm font-bold text-slate-800">
+                      ₹{(aggregatedBankTotal + planTotal(atmRemovalPlan)).toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                </div>
+
+                {discrepancies.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    {discrepancies.map(({ denom, planned, available, bankAvail, atmAvail, diff }) => (
+                      <div
+                        key={denom}
+                        className={`rounded-md border px-4 py-3 ${
+                          diff > 0
+                            ? "bg-red-100 border-red-300"
+                            : "bg-yellow-50 border-yellow-200"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-bold text-slate-800">₹{denom}</span>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                            diff > 0
+                              ? "bg-red-200 text-red-800"
+                              : "bg-yellow-200 text-yellow-800"
+                          }`}>
+                            {diff > 0 ? `Short by ${diff} notes` : `Excess by ${Math.abs(diff)} notes`}
+                          </span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                          <div>
+                            <span className="block text-slate-400">Planned Load</span>
+                            <span className="font-semibold">{planned} notes</span>
+                          </div>
+                          <div>
+                            <span className="block text-slate-400">Bank</span>
+                            <span className="font-semibold">{bankAvail} notes</span>
+                          </div>
+                          <div>
+                            <span className="block text-slate-400">ATM Removal</span>
+                            <span className="font-semibold">{atmAvail} notes</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-xs text-slate-500 mt-1 italic">
+                      This is a non-blocking warning. You can still save the plan.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
