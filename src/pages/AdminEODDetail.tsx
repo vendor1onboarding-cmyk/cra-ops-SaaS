@@ -57,7 +57,10 @@ export default function AdminEODDetail() {
 
   /* ---------------- Load Data ---------------- */
   useEffect(() => {
-    if (!id) return;
+    if (!id || isNaN(id)) {
+      setLoading(false);
+      return;
+    }
 
     async function load() {
       setLoading(true);
@@ -156,7 +159,22 @@ export default function AdminEODDetail() {
   if (!assignment) {
     return (
       <AppLayout>
-        <div className="container text-red-600">Assignment not found.</div>
+        <div className="container">
+          <div className="text-red-600 mb-4">
+            <p className="font-semibold">Assignment not found.</p>
+            <p className="text-sm mt-2">
+              {!id || isNaN(id) 
+                ? "Invalid assignment ID in URL." 
+                : `No assignment found for ID: ${id}`}
+            </p>
+            <button
+              onClick={() => navigate("/admin/approvals")}
+              className="btn-primary text-xs mt-3"
+            >
+              ← Back to Approvals
+            </button>
+          </div>
+        </div>
       </AppLayout>
     );
   }
