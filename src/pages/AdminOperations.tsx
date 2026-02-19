@@ -4,11 +4,13 @@ import { AppLayout } from "../components/Layout";
 import ATMSiteOnboarding from "./admin/ATMSiteOnboarding";
 import ATMSiteUpdate from "./admin/ATMSiteUpdate";
 import UserOnboarding from "./admin/UserOnboarding";
+import PasswordReset from "./admin/PasswordReset";
 
 type AdminAction = 
   | "atm-site-onboarding"
   | "atm-site-update"
   | "user-management"
+  | "password-reset"
   | "bank-account-onboarding"
   | null;
 
@@ -35,9 +37,15 @@ const ADMIN_ACTIONS: ActionOption[] = [
   },
   {
     id: "user-management",
-    label: "User Management",
-    description: "Create new users and manage user accounts",
+    label: "Create User",
+    description: "Create new user accounts with email or mobile number",
     icon: "👤",
+  },
+  {
+    id: "password-reset",
+    label: "Reset Password",
+    description: "Generate temporary password for users who forgot their password",
+    icon: "🔑",
   },
   {
     id: "bank-account-onboarding",
@@ -120,9 +128,10 @@ export default function AdminOperations() {
         {selectedAction === "atm-site-onboarding" && <ATMSiteOnboarding />}
         {selectedAction === "atm-site-update" && <ATMSiteUpdate />}
         {selectedAction === "user-management" && <UserOnboarding />}
+        {selectedAction === "password-reset" && <PasswordReset />}
 
         {/* Placeholder for future actions */}
-        {selectedAction && selectedAction !== "atm-site-onboarding" && selectedAction !== "atm-site-update" && selectedAction !== "user-management" && (
+        {selectedAction && selectedAction !== "atm-site-onboarding" && selectedAction !== "atm-site-update" && selectedAction !== "user-management" && selectedAction !== "password-reset" && (
           <section className="bg-white border border-slate-200 rounded-lg p-5">
             <div className="text-center text-slate-500 text-sm">
               This feature is coming soon.
