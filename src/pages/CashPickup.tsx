@@ -212,40 +212,64 @@ export default function CashPickup() {
       return;
     }
 
-    async function loadPlannedDenoms() {
+    async function loadPlannedDenomsWithATMRemoval() {
       setPlannedLoading(true);
       setPlannedError(null);
 
-      const { data, error } = await supabase
+      // Fetch bank denomination plan
+      const { data: bankData, error: bankError } = await supabase
         .from("bank_denomination_plans")
         .select("denom_2000, denom_500, denom_200, denom_100")
         .eq("assignment_id", assignmentId)
         .eq("bank_account_id", selectedBankId)
         .maybeSingle();
 
-      if (error) {
-        console.warn("[CashPickup] Failed to load bank plan:", error);
-        setPlannedError("Failed to load planned denominations");
+      // Fetch ATM removal plans for this assignment
+      let atmRemovalPlans: any[] = [];
+      let atmRemovalError = null;
+      try {
+        const { data, error } = await supabase
+          .from("atm_removal_plans")
+          .select("denom_100, denom_200, denom_500, denom_2000")
+          .eq("assignment_id", assignmentId);
+        if (error) {
+          atmRemovalError = error;
+        } else {
+          atmRemovalPlans = data || [];
+        }
+      } catch (err) {
+        atmRemovalError = err;
+      }
+
+      if (bankError || atmRemovalError) {
+        console.warn("[CashPickup] Failed to load bank plan or ATM removal:", bankError, atmRemovalError);
+        setPlannedError("Failed to load planned denominations or ATM removal");
         setPlannedDenoms(null);
         setPlannedLoading(false);
         return;
       }
 
-      if (data) {
-        setPlannedDenoms({
-          denom_100: data.denom_100 || 0,
-          denom_200: data.denom_200 || 0,
-          denom_500: data.denom_500 || 0,
-          denom_2000: data.denom_2000 || 0,
-        });
-      } else {
-        setPlannedDenoms(null);
-      }
+      // Sum bank plan
+      const totals = {
+        denom_100: bankData?.denom_100 || 0,
+        denom_200: bankData?.denom_200 || 0,
+        denom_500: bankData?.denom_500 || 0,
+        denom_2000: bankData?.denom_2000 || 0,
+      };
 
+      // Sum ATM removal plans
+      atmRemovalPlans.forEach((plan: any) => {
+        totals.denom_100 += plan.denom_100 || 0;
+        totals.denom_200 += plan.denom_200 || 0;
+        totals.denom_500 += plan.denom_500 || 0;
+        totals.denom_2000 += plan.denom_2000 || 0;
+      });
+
+      setPlannedDenoms(totals);
       setPlannedLoading(false);
     }
 
-    loadPlannedDenoms();
+    loadPlannedDenomsWithATMRemoval();
   }, [assignmentId, selectedBankId]);
 
   // --------------------------------------------------

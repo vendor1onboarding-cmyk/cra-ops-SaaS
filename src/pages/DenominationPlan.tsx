@@ -105,6 +105,9 @@ export default function DenominationPlan() {
   const [bankPlans, setBankPlans] = useState<Record<string, DenomPlan>>({});
   const [existingBankPlans, setExistingBankPlans] = useState<Record<string, DenomPlan>>({});
 
+  // Persisted ATM removal plan (one row per assignment)
+  const [existingAtmRemovalPlan, setExistingAtmRemovalPlan] = useState<DenomPlan | null>(null);
+
   // ATM Removal planning (local only – not persisted to DB)
   const [atmRemovalPlan, setAtmRemovalPlan] = useState<DenomPlan>({ ...EMPTY_PLAN });
   const [showAtmRemoval, setShowAtmRemoval] = useState(false);
@@ -256,6 +259,29 @@ export default function DenominationPlan() {
     loadExistingBankPlans();
   }, [assignmentId]);
 
+  // Load existing ATM removal plan
+  useEffect(() => {
+    if (!assignmentId) return;
+
+    async function loadAtmRemovalPlan() {
+      const { data } = await supabase
+        .from("atm_removal_plans")
+        .select("*")
+        .eq("assignment_id", assignmentId)
+        .maybeSingle();
+
+      if (data) {
+        const plan = normalizePlan(data);
+        setExistingAtmRemovalPlan(plan);
+        setAtmRemovalPlan(plan);
+        // Auto-expand if there is persisted data
+        if (planTotal(plan) > 0) setShowAtmRemoval(true);
+      }
+    }
+
+    loadAtmRemovalPlan();
+  }, [assignmentId]);
+
   // --------------------------------------------------
   // Plan manipulation
   // --------------------------------------------------
@@ -332,9 +358,10 @@ export default function DenominationPlan() {
 
     const siteCount = selectedSites.length;
     const bankCount = selectedBanks.length;
+    const hasAtmRemoval = planTotal(atmRemovalPlan) > 0;
 
-    if (siteCount === 0 && bankCount === 0) {
-      setMessage("Add at least one site or bank to save a plan.");
+    if (siteCount === 0 && bankCount === 0 && !hasAtmRemoval) {
+      setMessage("Add at least one site, bank, or ATM removal entry to save a plan.");
       return;
     }
 
@@ -343,6 +370,7 @@ export default function DenominationPlan() {
 
     let siteError: string | null = null;
     let bankError: string | null = null;
+    let atmRemovalError: string | null = null;
 
     if (siteCount > 0) {
       const siteRows = selectedSites.map((siteId) => ({
@@ -376,17 +404,45 @@ export default function DenominationPlan() {
       }
     }
 
-    if (siteError || bankError) {
-      setMessage([siteError, bankError].filter(Boolean).join(". "));
+    // Always upsert ATM removal plan (one row per assignment, all-zeros if not used)
+    {
+      const atmRow = {
+        assignment_id: assignmentId,
+        denom_2000: atmRemovalPlan.denom_2000,
+        denom_500: atmRemovalPlan.denom_500,
+        denom_200: atmRemovalPlan.denom_200,
+        denom_100: atmRemovalPlan.denom_100,
+        denom_50: atmRemovalPlan.denom_50,
+        denom_20: atmRemovalPlan.denom_20,
+        denom_10: atmRemovalPlan.denom_10,
+        remarks: atmRemovalPlan.remarks,
+        has_source_report: atmRemovalPlan.has_source_report,
+      };
+
+      const { error } = await supabase
+        .from("atm_removal_plans")
+        .upsert(atmRow, { onConflict: "assignment_id" });
+
+      if (error) {
+        atmRemovalError = "Failed to save ATM removal plan";
+      } else {
+        setExistingAtmRemovalPlan({ ...atmRemovalPlan });
+      }
+    }
+
+    const errors = [siteError, bankError, atmRemovalError].filter(Boolean);
+    if (errors.length) {
+      setMessage(errors.join(". "));
       setLoading(false);
       return;
     }
 
     setSubmitLocked(true);
-    setConfirmMessage(
-      `Denomination plan saved for ${siteCount} site${siteCount === 1 ? "" : "s"}` +
-        ` and ${bankCount} bank${bankCount === 1 ? "" : "s"}.`
-    );
+    const parts: string[] = [];
+    if (siteCount > 0) parts.push(`${siteCount} site${siteCount === 1 ? "" : "s"}`);
+    if (bankCount > 0) parts.push(`${bankCount} bank${bankCount === 1 ? "" : "s"}`);
+    if (hasAtmRemoval) parts.push("ATM removal");
+    setConfirmMessage(`Denomination plan saved — ${parts.join(", ")}.`);
     setShowConfirm(true);
     setLoading(false);
   }
@@ -744,7 +800,12 @@ export default function DenominationPlan() {
                 <div className="space-y-4 pt-2 border-t border-slate-100">
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                     ℹ️ Enter the denomination-wise cash being removed from ATMs and added back to your available pool.
-                    This amount is <strong>not saved</strong> — it is used only for planning discrepancy checks.
+                    This is saved with your plan for audit visibility.
+                    {existingAtmRemovalPlan && planTotal(existingAtmRemovalPlan) > 0 && (
+                      <span className="ml-1 font-semibold text-green-700">
+                        (Previously saved — ₹{planTotal(existingAtmRemovalPlan).toLocaleString("en-IN")})
+                      </span>
+                    )}
                   </div>
 
                   <DenominationFields

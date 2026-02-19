@@ -317,8 +317,32 @@ export default function ATMReplenishment() {
         console.warn("[ATMLoad] Failed to fetch exchanges:", exchangeError);
       }
 
+
       // ── Step 1: Build bank pickup pool (all non-ATM_INTERNAL pickups) ──
       const bankPool: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
+      // ── Step 1a: Fetch ATM removal plans and sum with bank plans ──
+      let atmRemovalPlans: any[] = [];
+      try {
+        const { data: atmRemovalData, error: atmRemovalError } = await supabase
+          .from("atm_removal_plans")
+          .select("denom_100, denom_200, denom_500, denom_2000")
+          .eq("assignment_id", assignmentId);
+        if (atmRemovalError) {
+          console.warn("[ATMLoad] Failed to fetch ATM removal plans:", atmRemovalError);
+        } else {
+          atmRemovalPlans = atmRemovalData || [];
+        }
+      } catch (err) {
+        console.warn("[ATMLoad] Error fetching ATM removal plans:", err);
+      }
+
+      // Sum ATM removal plans
+      const atmRemovalPool: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
+      atmRemovalPlans.forEach((plan: any) => {
+        DENOMS.forEach((d) => {
+          atmRemovalPool[d] += plan[d] || 0;
+        });
+      });
 
       (pickups || []).forEach((p: any) => {
         const source = p.pickup_source || "BANK";
@@ -335,6 +359,9 @@ export default function ATMReplenishment() {
           }
         }
       });
+
+      // Add ATM removal plan pool to bank pool for available calculation
+      DENOMS.forEach((d) => { bankPool[d] += atmRemovalPool[d]; });
 
       // Ensure no negatives in bank pool
       DENOMS.forEach((d) => { bankPool[d] = Math.max(0, bankPool[d]); });

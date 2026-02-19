@@ -180,26 +180,45 @@ export default function DenominationExchange() {
       return;
     }
 
-    async function loadAvailableFromBank() {
+    async function loadAvailableFromBankAndATMRemoval() {
       setAvailableFromLoading(true);
       setAvailableFromError(null);
 
-      const { data, error: pickupError } = await supabase
+      // Fetch bank pickups
+      const { data: bankData, error: pickupError } = await supabase
         .from("cash_pickups")
         .select("denom_2000, denom_500, denom_200, denom_100")
         .eq("assignment_id", assignmentId)
         .eq("bank_name", selectedFromBank.bank_name);
 
-      if (pickupError) {
-        console.warn("Failed to load bank pickups:", pickupError);
+      // Fetch ATM removal plans for this assignment
+      let atmRemovalPlans: any[] = [];
+      let atmRemovalError = null;
+      try {
+        const { data, error } = await supabase
+          .from("atm_removal_plans")
+          .select("denom_100, denom_200, denom_500, denom_2000")
+          .eq("assignment_id", assignmentId);
+        if (error) {
+          atmRemovalError = error;
+        } else {
+          atmRemovalPlans = data || [];
+        }
+      } catch (err) {
+        atmRemovalError = err;
+      }
+
+      if (pickupError || atmRemovalError) {
+        console.warn("Failed to load bank pickups or ATM removal plans:", pickupError, atmRemovalError);
         setAvailableFromDenoms(null);
         setAvailableFromTotal(0);
-        setAvailableFromError("Unable to load picked denominations for this bank.");
+        setAvailableFromError("Unable to load picked denominations for this bank or ATM removal.");
         setAvailableFromLoading(false);
         return;
       }
 
-      const totals = (data || []).reduce(
+      // Sum bank pickups
+      const totals = (bankData || []).reduce(
         (acc: Denoms, row: any) => {
           acc.denom_100 += row.denom_100 || 0;
           acc.denom_200 += row.denom_200 || 0;
@@ -210,12 +229,20 @@ export default function DenominationExchange() {
         { ...EMPTY_DENOMS }
       );
 
+      // Sum ATM removal plans
+      atmRemovalPlans.forEach((plan: any) => {
+        totals.denom_100 += plan.denom_100 || 0;
+        totals.denom_200 += plan.denom_200 || 0;
+        totals.denom_500 += plan.denom_500 || 0;
+        totals.denom_2000 += plan.denom_2000 || 0;
+      });
+
       setAvailableFromDenoms(totals);
       setAvailableFromTotal(denomTotal(totals));
       setAvailableFromLoading(false);
     }
 
-    loadAvailableFromBank();
+    loadAvailableFromBankAndATMRemoval();
   }, [assignmentId, selectedFromBank?.bank_name]);
 
   const canSubmit =
