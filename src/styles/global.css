@@ -476,6 +476,70 @@ tbody tr:last-child td {
     color: #64748b;
   }
 
+  /* ── Enhanced mobile print support ── */
+  /* Mobile devices printing should use full width efficiently */
+  @page {
+    margin: 8mm !important;
+  }
+
+  /* Better table cell overflow handling */
+  .print-statement-table td {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    padding: 1mm 1.5mm !important;
+    vertical-align: middle !important;
+  }
+
+  .print-statement-table td:nth-child(8) {
+    white-space: normal !important;
+    word-break: break-word !important;
+    line-height: 1.3 !important;
+  }
+
+  /* Enhanced signature section for mobile print */
+  .print-only .signature-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10mm !important;
+    margin-top: 8mm !important;
+  }
+
+  .print-only .signature-item {
+    text-align: center !important;
+  }
+
+  .print-only .signature-item .border-b {
+    margin: 0 auto 2mm auto !important;
+    width: 40mm !important;
+  }
+
+  /* Font size adjustments for mobile print */
+  @media print and (max-width: 576px) {
+    .print-only h1 { font-size: 12pt !important; }
+    .print-only h2 { font-size: 11pt !important; }
+    .print-only h3 { font-size: 9pt !important; }
+    .print-statement-table { font-size: 7pt !important; }
+    .print-only .kpi-card { font-size: 7pt !important; }
+  }
+
+  /* Ensure footer elements stay together */
+  .print-only footer,
+  .print-only .border-t.pt-4 {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    display: block !important;
+  }
+
+  /* ── Print date/time formatting ── */
+  .print-only time,
+  .print-only .text-slate-500 {
+    font-size: 7.5pt !important;
+    color: #64748b !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   /* Ensure nothing overflows the page */
   * {
     max-width: 100% !important;

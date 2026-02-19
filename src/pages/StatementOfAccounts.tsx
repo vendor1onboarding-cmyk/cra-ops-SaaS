@@ -366,13 +366,6 @@ export default function StatementOfAccounts() {
   const printStatementRows = useMemo(() => {
     if (!printTransactions) return [];
 
-    console.log("[SOA Print] printTransactions:", {
-      cashPickups: printTransactions.cashPickups?.length || 0,
-      atmLoads: printTransactions.atmLoads?.length || 0,
-      excessCash: printTransactions.excessCash?.length || 0,
-      adjustments: printTransactions.adjustments?.length || 0,
-    });
-
     const routeSiteMap = new Map<number, any>();
     const assignmentSiteLabels = new Map<number, string>();
     (printTransactions.routeSites || []).forEach((row: any) => {
@@ -504,17 +497,6 @@ export default function StatementOfAccounts() {
         const creditAmount = denomTotal > 0
           ? denomTotal
           : Number(c.total_amount || c.expected_amount || 0);
-
-        console.log("[SOA Print] Processing cash pickup:", {
-          assignment_id: c.assignment_id,
-          pickup_source: c.pickup_source,
-          isInternal,
-          creditAmount,
-          bank_name: c.bank_name,
-          total_amount: c.total_amount,
-          expected_amount: c.expected_amount,
-          denomTotal,
-        });
 
         const internalSources = c.internal_source_metadata?.sources || [];
         const internalTotal = internalSources.reduce(
@@ -1795,14 +1777,14 @@ export default function StatementOfAccounts() {
               <p className="mt-1">Name & Date</p>
             </div>
 
-            <div className="text-right">
+            <div className="sm:text-right">
               <p className="font-semibold">Supervisor / Bank Officer</p>
-              <div className="mt-6 border-b w-48 ml-auto"></div>
+              <div className="mt-6 border-b w-48 sm:ml-auto"></div>
               <p className="mt-1">Name, Seal & Date</p>
             </div>
           </div>
 
-          <p className="mt-6 text-[10px] text-slate-500">
+          <p className="mt-6 text-[9px] sm:text-[10px] text-slate-500">
             This is a system-generated report from Sruthi CRA Ops.
             Any discrepancy must be reported within RBI-prescribed timelines.
           </p>

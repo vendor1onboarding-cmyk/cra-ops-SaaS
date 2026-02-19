@@ -1040,29 +1040,29 @@ export default function AdminEODDetail() {
 
       {/* PRINT FOOTER – SIGNATURES */}
       <div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
-        <div className="grid grid-cols-2 gap-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-12">
           <div>
             <p className="font-semibold">Custodian Signature</p>
             <div className="mt-6 border-b w-48"></div>
             <p className="mt-1">Name & Date</p>
           </div>
-          <div className="text-right">
+          <div className="sm:text-right">
             <p className="font-semibold">Admin / Supervisor</p>
-            <div className="mt-6 border-b w-48 ml-auto"></div>
+            <div className="mt-6 border-b w-48 sm:ml-auto"></div>
             <p className="mt-1">Name, Seal & Date</p>
           </div>
         </div>
-        <div className="mt-4 flex justify-between">
+        <div className="mt-4 flex flex-col sm:flex-row justify-between gap-2 sm:gap-0">
           <div>
             <div className="font-semibold">Sruthi CRA Ops</div>
-            <div>Cash Replenishment & ATM Operations</div>
+            <div className="text-[10px] sm:text-xs">Cash Replenishment & ATM Operations</div>
           </div>
-          <div className="text-right">
-            <div>Generated: {new Date().toLocaleDateString("en-IN")}</div>
-            <div>Confidential – Internal Use Only</div>
+          <div className="sm:text-right">
+            <div className="text-[10px] sm:text-xs">Generated: {new Date().toLocaleDateString("en-IN")}</div>
+            <div className="text-[10px] sm:text-xs">Confidential – Internal Use Only</div>
           </div>
         </div>
-        <p className="mt-2 text-[10px] text-slate-500">
+        <p className="mt-2 text-[9px] sm:text-[10px] text-slate-500">
           This is a system-generated report from Sruthi CRA Ops. Any discrepancy must be reported within RBI-prescribed timelines.
         </p>
       </div>

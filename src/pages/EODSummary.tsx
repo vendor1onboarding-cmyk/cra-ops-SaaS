@@ -1527,17 +1527,17 @@ function CustodianEOD({
 
       {/* PRINT FOOTER */}
       <div className="print-only mt-10 pt-4 border-t text-xs text-slate-600">
-        <div className="flex justify-between">
+        <div className="flex flex-col sm:flex-row justify-between gap-2 sm:gap-0">
           <div>
             <div className="font-semibold">Sruthi CRA Ops</div>
-            <div>Cash Replenishment & ATM Operations</div>
+            <div className="text-[10px] sm:text-xs">Cash Replenishment & ATM Operations</div>
           </div>
-          <div className="text-right">
-            <div>Generated: {new Date().toLocaleDateString("en-IN")}</div>
-            <div>Confidential – Internal Use Only</div>
+          <div className="sm:text-right">
+            <div className="text-[10px] sm:text-xs">Generated: {new Date().toLocaleDateString("en-IN")}</div>
+            <div className="text-[10px] sm:text-xs">Confidential – Internal Use Only</div>
           </div>
         </div>
-        <div className="mt-2 text-[10px] text-slate-500">
+        <div className="mt-2 text-[9px] sm:text-[10px] text-slate-500">
           This EOD report is system-generated and digitally signed. Any discrepancy must be reported within the prescribed timeline.
         </div>
       </div>
