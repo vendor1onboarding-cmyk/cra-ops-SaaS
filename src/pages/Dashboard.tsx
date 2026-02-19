@@ -1060,7 +1060,7 @@ const [monthlyKm, setMonthlyKm] = useState(0);
   );
 }
 
-function Stat({ label, value, highlight }: any) {
+export function Stat({ label, value, highlight }: any) {
   return (
     <div
       className={`rounded-lg border p-3 text-center border-l-4 ${
