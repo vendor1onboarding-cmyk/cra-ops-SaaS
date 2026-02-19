@@ -179,97 +179,97 @@ export default function AdminEODDetail() {
     );
   }
 
-  const exchanges = (data.adjustments || []).filter(
-    (a: any) => a.adjustment_type === "EXCHANGE"
-  );
-  const transfers = (data.adjustments || []).filter(
-    (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
-  );
-
   const extractInternalSources = (pickup: any) =>
     pickup?.internal_source_metadata?.sources || [];
 
-  // FLOW 1: BANK CASH ONLY (affects Cash-in-Hand)
-  const bankPicked = (data.cashPickups || []).reduce((sum: number, row: any) => {
-    const source = row.pickup_source || "BANK";
-    if (source === "ATM_INTERNAL") return sum;
-    const metaSources = extractInternalSources(row);
-    const metaTotal = metaSources.reduce(
-      (acc: number, s: any) => acc + Number(s.total_amount || 0),
-      0
+  const { exchanges, transfers, bankPicked, bankLoaded, adminLoadAlloc } = useMemo(() => {
+    // Filter adjustments
+    const exch = (data.adjustments || []).filter(
+      (a: any) => a.adjustment_type === "EXCHANGE"
     );
-    return sum + Math.max(denomTotal(row) - metaTotal, 0);
-  }, 0);
+    const trans = (data.adjustments || []).filter(
+      (a: any) => a.adjustment_type === "INTER_SITE_TRANSFER"
+    );
 
-  // FLOW 2: INTERNAL ATM TRANSFER tracking
-  const internalPicked = (data.cashPickups || []).reduce((sum: number, row: any) => {
-    const source = row.pickup_source || "BANK";
-    if (source !== "ATM_INTERNAL") return sum;
-    return sum + denomTotal(row);
-  }, 0);
+    // FLOW 1: BANK CASH ONLY (affects Cash-in-Hand)
+    const bankPick = (data.cashPickups || []).reduce((sum: number, row: any) => {
+      const source = row.pickup_source || "BANK";
+      if (source === "ATM_INTERNAL") return sum;
+      const metaSources = extractInternalSources(row);
+      const metaTotal = metaSources.reduce(
+        (acc: number, s: any) => acc + Number(s.total_amount || 0),
+        0
+      );
+      return sum + Math.max(denomTotal(row) - metaTotal, 0);
+    }, 0);
 
-  // ── Chronological denomination matching ──
-  type AdminCashEvt = { kind: "pickup" | "load"; ts: number; raw: any };
-  const adminCashEvents: AdminCashEvt[] = [];
+    // ── Chronological denomination matching ──
+    type AdminCashEvt = { kind: "pickup" | "load"; ts: number; raw: any };
+    const adminCashEvents: AdminCashEvt[] = [];
 
-  (data.cashPickups || []).forEach((p: any) => {
-    const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
-    adminCashEvents.push({ kind: "pickup", ts, raw: p });
-  });
-  (data.atmLoads || []).forEach((l: any) => {
-    const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
-    adminCashEvents.push({ kind: "load", ts, raw: l });
-  });
+    (data.cashPickups || []).forEach((p: any) => {
+      const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
+      adminCashEvents.push({ kind: "pickup", ts, raw: p });
+    });
+    (data.atmLoads || []).forEach((l: any) => {
+      const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
+      adminCashEvents.push({ kind: "load", ts, raw: l });
+    });
 
-  adminCashEvents.sort((a, b) => {
-    const diff = a.ts - b.ts;
-    if (diff !== 0) return diff;
-    return (a.kind === "pickup" ? 0 : 1) - (b.kind === "pickup" ? 0 : 1);
-  });
+    adminCashEvents.sort((a, b) => {
+      const diff = a.ts - b.ts;
+      if (diff !== 0) return diff;
+      return (a.kind === "pickup" ? 0 : 1) - (b.kind === "pickup" ? 0 : 1);
+    });
 
-  const adminRemovalPool: Record<number, number> = { 100: 0, 200: 0, 500: 0, 2000: 0 };
-  let adminBankLoaded = 0;
-  let adminInternalLoaded = 0;
-  const adminLoadAlloc = new Map<any, { bankAmount: number; internalAmount: number }>();
+    const adminRemovalPool: Record<number, number> = { 100: 0, 200: 0, 500: 0, 2000: 0 };
+    let adminBankLoad = 0;
+    const adminLoadAllocMap = new Map<any, { bankAmount: number; internalAmount: number }>();
 
-  adminCashEvents.forEach((evt) => {
-    if (evt.kind === "pickup") {
-      const p = evt.raw;
-      const source = p.pickup_source || "BANK";
-      if (source === "ATM_INTERNAL") {
-        DENOM_ORDER.forEach((d) => {
-          adminRemovalPool[d] += (p[`denom_${d}`] || 0);
-        });
-      } else {
-        const metaSources = extractInternalSources(p);
-        metaSources.forEach((s: any) => {
+    adminCashEvents.forEach((evt) => {
+      if (evt.kind === "pickup") {
+        const p = evt.raw;
+        const source = p.pickup_source || "BANK";
+        if (source === "ATM_INTERNAL") {
           DENOM_ORDER.forEach((d) => {
-            adminRemovalPool[d] += Number(s.denominations?.[`denom_${d}`] || 0);
+            adminRemovalPool[d] += (p[`denom_${d}`] || 0);
           });
+        } else {
+          const metaSources = extractInternalSources(p);
+          metaSources.forEach((s: any) => {
+            DENOM_ORDER.forEach((d) => {
+              adminRemovalPool[d] += Number(s.denominations?.[`denom_${d}`] || 0);
+            });
+          });
+        }
+      } else {
+        const l = evt.raw;
+        let loadBank = 0;
+        let loadInternal = 0;
+
+        DENOM_ORDER.forEach((d) => {
+          const loadCount = (l[`denom_${d}`] || 0) as number;
+          const poolCount = adminRemovalPool[d] || 0;
+          const matched = Math.min(loadCount, poolCount);
+
+          loadInternal += matched * d;
+          loadBank += (loadCount - matched) * d;
+          adminRemovalPool[d] = poolCount - matched;
         });
+
+        adminBankLoad += loadBank;
+        adminLoadAllocMap.set(l, { bankAmount: loadBank, internalAmount: loadInternal });
       }
-    } else {
-      const l = evt.raw;
-      let loadBank = 0;
-      let loadInternal = 0;
+    });
 
-      DENOM_ORDER.forEach((d) => {
-        const loadCount = (l[`denom_${d}`] || 0) as number;
-        const poolCount = adminRemovalPool[d] || 0;
-        const matched = Math.min(loadCount, poolCount);
-
-        loadInternal += matched * d;
-        loadBank += (loadCount - matched) * d;
-        adminRemovalPool[d] = poolCount - matched;
-      });
-
-      adminBankLoaded += loadBank;
-      adminInternalLoaded += loadInternal;
-      adminLoadAlloc.set(l, { bankAmount: loadBank, internalAmount: loadInternal });
-    }
-  });
-
-  const bankLoaded = adminBankLoaded;
+    return {
+      exchanges: exch,
+      transfers: trans,
+      bankPicked: bankPick,
+      bankLoaded: adminBankLoad,
+      adminLoadAlloc: adminLoadAllocMap,
+    };
+  }, [data.adjustments, data.cashPickups, data.atmLoads]);
 
   // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
   const totalPicked = bankPicked;
@@ -277,8 +277,12 @@ export default function AdminEODDetail() {
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
 
-  const siteMap = new Map(
-    (data.routeSites || []).map((r: any) => [r.site?.id, r.site])
+  const siteMap = useMemo(
+    () =>
+      new Map(
+        (data.routeSites || []).map((r: any) => [r.site?.id, r.site])
+      ),
+    [data.routeSites]
   );
 
   const normalizeUtcDate = (value?: string | null) =>
