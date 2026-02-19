@@ -1043,7 +1043,16 @@ export default function AdminEODDetail() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-12">
           <div>
             <p className="font-semibold">Custodian Signature</p>
-            <div className="mt-6 border-b w-48"></div>
+            {assignment?.eod_signature_url ? (
+              <img
+                src={assignment.eod_signature_url}
+                alt="Custodian Signature"
+                className="mt-2 h-12 w-auto object-contain"
+                style={{ maxHeight: "48px", maxWidth: "180px" }}
+              />
+            ) : (
+              <div className="mt-6 border-b w-48"></div>
+            )}
             <p className="mt-1">Name & Date</p>
           </div>
           <div className="sm:text-right">

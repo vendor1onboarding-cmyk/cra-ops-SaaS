@@ -362,9 +362,45 @@ tbody tr:last-child td {
   }
 
   .print-statement-table th {
-    background: #f1f5f9 !important;
-    font-weight: 600;
+    background: #1e3a5f !important;
+    color: #ffffff !important;
+    font-weight: 700;
     text-align: left;
+    border: 0.5pt solid #1e3a5f !important;
+    border-bottom: 1.5pt solid #0f2540 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-statement-table thead th {
+    border-bottom: 1.5pt solid #0f2540 !important;
+  }
+
+  .print-statement-table td,
+  .print-statement-table tbody tr {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  .print-only table tbody tr,
+  .print-only table td {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  .print-only table tbody tr:nth-child(even),
+  .print-only table tbody tr:nth-child(odd) {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  .print-only table tfoot tr,
+  .print-only table tfoot td {
+    background: #f1f5f9 !important;
+    background-color: #f1f5f9 !important;
+    border-top: 1.5pt solid #1e3a5f !important;
+    font-weight: 700 !important;
+    border-bottom: 1.5pt solid #1e3a5f !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -374,7 +410,7 @@ tbody tr:last-child td {
   .print-statement-table td:nth-child(1) { width: 9%; } /* Date */
 
   .print-statement-table th:nth-child(2),
-  .print-statement-table td:nth-child(2) { width: 7%; } /* Time */
+  .print-statement-table td:nth-child(2) { width: 9%; } /* Time */
 
   .print-statement-table th:nth-child(3),
   .print-statement-table td:nth-child(3) { width: 16%; } /* Type */
@@ -392,7 +428,7 @@ tbody tr:last-child td {
   .print-statement-table td:nth-child(7) { width: 12%; text-align: right; font-weight: 500; } /* Balance */
 
   .print-statement-table th:nth-child(8),
-  .print-statement-table td:nth-child(8) { width: 20%; } /* Remarks */
+  .print-statement-table td:nth-child(8) { width: 18%; } /* Remarks */
 
   /* Row stability */
   .print-statement-row {
@@ -402,8 +438,12 @@ tbody tr:last-child td {
 
   /* ── Print header section ── */
   .print-only.mb-4 {
-    margin-bottom: 3mm !important;
-    padding-bottom: 2mm !important;
+    margin-bottom: 4mm !important;
+    padding: 3mm 4mm !important;
+    background: #ffffff !important;
+    border-bottom: 2pt solid #1e3a5f !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .print-only h1 {
@@ -467,10 +507,20 @@ tbody tr:last-child td {
     width: 50mm !important;
   }
 
-  /* ── Footer ── */
-  .print-only .border-t {
-    border-top: 0.5pt solid #cbd5e1 !important;
-    padding-top: 3mm;
+  /* ── Footer – signature section
+     The footer div carries BOTH classes: print-only AND border-t
+     so use a combined selector (no space) ── */
+  .print-only.border-t,
+  .print-only > .border-t {
+    border-top: 2pt solid #1e3a5f !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    padding: 5mm 4mm 3mm 4mm !important;
+    margin-top: 8mm !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   /* Page number */
@@ -497,6 +547,20 @@ tbody tr:last-child td {
     white-space: nowrap !important;
     padding: 1mm 1.5mm !important;
     vertical-align: middle !important;
+  }
+
+  .print-statement-table td:nth-child(2) {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+  }
+
+  .print-statement-table td:nth-child(4) {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
   }
 
   .print-statement-table td:nth-child(8) {
@@ -552,6 +616,42 @@ tbody tr:last-child td {
   * {
     max-width: 100% !important;
     overflow: visible !important;
+  }
+
+  /* Ensure html/body is white – stops colored page-end bleeds */
+  html, body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  /* Wipe ALL section / card colored backgrounds to white in print.
+     Only the table thead, tfoot, alerts are allowed color. */
+  .bg-slate-50,
+  .bg-slate-100,
+  .bg-slate-200,
+  .bg-gray-50,
+  .bg-gray-100,
+  .bg-gray-200,
+  .bg-white,
+  .bg-blue-50,
+  .bg-indigo-50,
+  .bg-green-50,
+  .bg-yellow-50,
+  .rounded,
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-md,
+  .border.rounded,
+  .bg-white.rounded,
+  .bg-white.rounded-lg,
+  .bg-white.p-4,
+  .bg-white.shadow,
+  .bg-white.p-4.rounded,
+  .bg-white.rounded.shadow,
+  .bg-white.p-5,
+  .bg-white.rounded-xl {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
   }
 
   /* Remove shadows, box-shadows, and border-radius for cleaner print */

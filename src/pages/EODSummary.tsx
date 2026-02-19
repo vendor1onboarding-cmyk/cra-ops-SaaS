@@ -589,6 +589,8 @@ function CustodianEOD({
   const status = assignment?.status || "open";
   const isEditable = status === "open" || status === "rejected";
   const canSubmit = isEditable && !assignment?.eod_signed;
+  const custodianName =
+    profile?.full_name || assignment?.custodian?.full_name || "—";
 
   const normalizeUtcDate = (value?: string | null) =>
     value ? parseUTCDate(value) : null;
@@ -916,9 +918,7 @@ function CustodianEOD({
           <div className="text-right text-xs">
             <p className="font-semibold">EOD Report</p>
             <p>Date: {assignment?.assignment_date}</p>
-            {profile?.full_name && (
-              <p>Custodian: {profile.full_name}</p>
-            )}
+            <p>Custodian: {custodianName}</p>
           </div>
         </div>
       </div>
@@ -1358,9 +1358,9 @@ function CustodianEOD({
         />
       </div>
 
-      {/* PRINT SIGNATURE */}
+      {/* PRINT SIGNATURE – hidden; signature now embedded in the print footer below */}
       {assignment?.eod_signature_url && (
-        <div className="print-only mt-8 border-t pt-4">
+        <div className="print:hidden mt-8 border-t pt-4">
           <div className="text-xs font-semibold text-slate-700 mb-2">
             Custodian Signature
           </div>
@@ -1528,8 +1528,31 @@ function CustodianEOD({
       )}
 
       {/* PRINT FOOTER */}
-      <div className="print-only mt-10 pt-4 border-t text-xs text-slate-600">
-        <div className="flex flex-col sm:flex-row justify-between gap-2 sm:gap-0">
+      <div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
+        {/* Signature grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-12 mb-6">
+          <div>
+            <p className="font-semibold">Custodian Signature</p>
+            {assignment?.eod_signature_url ? (
+              <img
+                src={assignment.eod_signature_url}
+                alt="Custodian Signature"
+                className="mt-2 h-12 w-auto object-contain"
+                style={{ maxHeight: "48px", maxWidth: "180px" }}
+              />
+            ) : (
+              <div className="mt-6 border-b w-48"></div>
+            )}
+            <p className="mt-1">{profile?.full_name || ""} &nbsp; {assignment?.assignment_date || ""}</p>
+          </div>
+          <div className="sm:text-right">
+            <p className="font-semibold">Supervisor / Bank Officer</p>
+            <div className="mt-6 border-b w-48 sm:ml-auto"></div>
+            <p className="mt-1">Name, Seal & Date</p>
+          </div>
+        </div>
+        {/* Info bar */}
+        <div className="flex flex-col sm:flex-row justify-between gap-2 sm:gap-0 border-t pt-3">
           <div>
             <div className="font-semibold">Sruthi CRA Ops</div>
             <div className="text-[10px] sm:text-xs">Cash Replenishment & ATM Operations</div>

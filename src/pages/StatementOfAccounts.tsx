@@ -63,6 +63,7 @@ export default function StatementOfAccounts() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [custodianSignatureUrl, setCustodianSignatureUrl] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "open" | "submitted" | "approved" | "rejected"
   >("ALL");
@@ -205,12 +206,18 @@ export default function StatementOfAccounts() {
             if (assignmentIds.length > 0) {
               const { data: assignments } = await supabase
                 .from("assignments")
-                .select("id, status")
+                .select("id, status, eod_signature_url, eod_signed")
                 .in("id", assignmentIds);
 
               const statusMap = new Map(
                 (assignments || []).map((a: any) => [a.id, a.status])
               );
+
+              // Embed custodian signature for custodian view (most recent signed)
+              if (!isAdmin) {
+                const signed = (assignments || []).find((a: any) => a.eod_signed && a.eod_signature_url);
+                setCustodianSignatureUrl(signed?.eod_signature_url || null);
+              }
 
               rows = rows.map((row: any) => {
                 const sources = sourceMap.get(row.assignment_id ?? row.soa_id);
@@ -1773,7 +1780,16 @@ export default function StatementOfAccounts() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-12">
             <div>
               <p className="font-semibold">Custodian Signature</p>
-              <div className="mt-6 border-b w-48"></div>
+              {custodianSignatureUrl ? (
+                <img
+                  src={custodianSignatureUrl}
+                  alt="Custodian Signature"
+                  className="mt-2 h-12 w-auto object-contain"
+                  style={{ maxHeight: "48px", maxWidth: "180px" }}
+                />
+              ) : (
+                <div className="mt-6 border-b w-48"></div>
+              )}
               <p className="mt-1">Name & Date</p>
             </div>
 

@@ -619,7 +619,7 @@ loadTravelKPI();
             </div>
           </div>
           {/* KPI */}
-          <div className="bg-white rounded shadow">
+          <div className="bg-white rounded shadow border border-slate-200">
             <button
               onClick={() => setKpiOpen(!kpiOpen)}
               className="w-full flex justify-between px-4 py-3 font-semibold print:hidden"
@@ -644,14 +644,14 @@ loadTravelKPI();
 				
 {profile?.role === "custodian" && (
   <>
-    <div className="bg-white rounded-xl shadow p-4 border-l-4 border-indigo-600">
-      <div className="text-xs text-slate-500 flex items-center gap-1"> 🚗 Today KM</div>
-      <div className="text-lg font-semibold text-slate-800">{todayKm.toFixed(2)} km</div>
+    <div className="bg-indigo-50 rounded-lg border border-indigo-200 border-l-4 border-l-indigo-500 p-3 text-center">
+      <div className="font-bold text-lg text-indigo-800">{todayKm.toFixed(2)} km</div>
+      <div className="text-xs text-slate-500 flex items-center justify-center gap-1">🚗 Today KM</div>
     </div>
 
-    <div className="bg-white rounded-xl shadow p-4 border-l-4 border-indigo-600">
-      <div className="text-xs text-slate-500 flex items-center gap-1">🚗 This Month KM</div>
-      <div className="text-lg font-semibold text-slate-800">{monthlyKm.toFixed(2)} km</div>
+    <div className="bg-indigo-50 rounded-lg border border-indigo-200 border-l-4 border-l-indigo-500 p-3 text-center">
+      <div className="font-bold text-lg text-indigo-800">{monthlyKm.toFixed(2)} km</div>
+      <div className="text-xs text-slate-500 flex items-center justify-center gap-1">🚗 This Month KM</div>
     </div>
   </>
 )}
@@ -662,7 +662,7 @@ loadTravelKPI();
 		  
 		  {/* ATM Completion Progress */}
 {totalATMs > 0 && (
-  <div className="bg-white rounded shadow p-4 mb-4">
+  <div className="bg-white rounded shadow p-4 mb-4 border border-slate-200">
     <div className="flex justify-between text-sm mb-2">
       <span className="font-semibold">ATMs Loaded Today</span>
       <span className="text-slate-600">
@@ -692,15 +692,15 @@ loadTravelKPI();
 
           {/* DENOMINATION-WISE CASH POSITION */}
           {denomSummary && (
-            <div className="bg-white rounded shadow p-4">
-              <h3 className="font-semibold mb-3">
+            <div className="bg-white rounded shadow p-4 border border-slate-200">
+              <h3 className="font-semibold mb-3 pl-3 border-l-4 border-l-slate-400">
                 Denomination-wise Cash Position
               </h3>
 
               {/* Desktop table */}
               <div className="hidden sm:block print:block overflow-x-auto">
-                <table className="w-full text-sm border">
-                  <thead className="bg-slate-100">
+                <table className="w-full text-sm border print-statement-table">
+                  <thead>
                     <tr>
                       <th className="border p-2">Denom</th>
                       <th className="border p-2 text-right">Picked</th>
@@ -744,8 +744,8 @@ loadTravelKPI();
           )}
 
           {internalTransfers.length > 0 && (
-            <div className="bg-white rounded shadow p-4">
-              <h3 className="font-semibold mb-3">
+            <div className="bg-white rounded shadow p-4 border border-slate-200">
+              <h3 className="font-semibold mb-3 pl-3 border-l-4 border-l-slate-400">
                 Internal ATM Transfers (Source)
               </h3>
 
@@ -821,13 +821,13 @@ loadTravelKPI();
 
           {/* Loaded ATMs (only show loaded, remove pending) */}
           {loadedBySite.length > 0 && (
-            <div className="bg-white rounded shadow p-4 hidden sm:block print:block">
-              <h3 className="font-semibold mb-3">
+            <div className="bg-white rounded shadow p-4 hidden sm:block print:block border border-slate-200">
+              <h3 className="font-semibold mb-3 pl-3 border-l-4 border-l-slate-400">
                 Loaded ATMs – Denomination Details
               </h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm border">
-                  <thead className="bg-slate-100">
+                <table className="w-full text-sm border print-statement-table">
+                  <thead>
                     <tr>
                       <th className="border p-2 text-left">ATM</th>
                       {DENOMS.map(d => (
@@ -891,8 +891,17 @@ loadTravelKPI();
   <div className="grid grid-cols-2 gap-12">
     <div>
       <p className="font-semibold">Custodian Signature</p>
-      <div className="mt-6 border-b w-48"></div>
-      <p className="mt-1">Name & Date</p>
+      {assignment?.eod_signature_url ? (
+        <img
+          src={assignment.eod_signature_url}
+          alt="Custodian Signature"
+          className="mt-2 h-12 w-auto object-contain"
+          style={{ maxHeight: "48px", maxWidth: "180px" }}
+        />
+      ) : (
+        <div className="mt-6 border-b w-48"></div>
+      )}
+      <p className="mt-1">{profile?.full_name ? `${profile.full_name}` : "Name & Date"}</p>
     </div>
 
     <div className="text-right">
@@ -916,16 +925,16 @@ loadTravelKPI();
 function Stat({ label, value, highlight }: any) {
   return (
     <div
-      className={`rounded p-3 text-center ${
+      className={`rounded-lg border p-3 text-center border-l-4 ${
         highlight === "warn"
-          ? "bg-yellow-100"
+          ? "bg-yellow-50 border-yellow-200 border-l-yellow-400"
           : highlight === "ok"
-          ? "bg-green-100"
-          : "bg-slate-50"
+          ? "bg-green-50 border-green-200 border-l-green-500"
+          : "bg-slate-50 border-slate-200 border-l-indigo-400"
       }`}
     >
       <div className="font-bold text-lg">{value}</div>
-      <div className="text-xs">{label}</div>
+      <div className="text-xs text-slate-500">{label}</div>
     </div>
   );
 }
