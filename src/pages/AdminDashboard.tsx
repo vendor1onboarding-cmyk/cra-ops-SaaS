@@ -177,7 +177,7 @@ export default function AdminDashboard() {
                   {eods.map((eod, idx) => (
                     <tr
                       key={eod.id}
-                      className={`border-b border-slate-100 hover:bg-blue-50/40 transition-colors ${idx === eods.length - 1 ? "border-b-0" : ""}`}
+                      className={`border-b border-slate-100 hover:bg-blue-50/40 print:hover:bg-transparent transition-colors ${idx === eods.length - 1 ? "border-b-0" : ""}`}
                     >
                       <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{formatISTDate(eod.assignment_date, "short")}</td>
                       <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{eod.custodian?.full_name || "—"}</td>

@@ -340,6 +340,7 @@ export default function EODSummary() {
 
       {!loading && profile?.role === "custodian" && (
         <CustodianEOD
+          profile={profile}
           assignment={assignment}
           routeSites={routeSites}
           taskSummary={taskSummary}
@@ -391,6 +392,7 @@ export default function EODSummary() {
 // Custodian UI
 // --------------------------------------------------
 function CustodianEOD({
+  profile,
   assignment,
   routeSites,
   taskSummary,
@@ -914,8 +916,8 @@ function CustodianEOD({
           <div className="text-right text-xs">
             <p className="font-semibold">EOD Report</p>
             <p>Date: {assignment?.assignment_date}</p>
-            {assignment?.custodian_id && (
-              <p>Custodian: {assignment?.custodian_id}</p>
+            {profile?.full_name && (
+              <p>Custodian: {profile.full_name}</p>
             )}
           </div>
         </div>

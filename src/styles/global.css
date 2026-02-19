@@ -317,6 +317,14 @@ tbody tr:last-child td {
 
   thead {
     display: table-header-group; /* Repeat header on every page */
+    background-color: #f1f5f9 !important; /* bg-slate-100 */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Table body rows should have NO background color in print */
+  tbody tr {
+    background-color: transparent !important;
   }
 
   tr {
