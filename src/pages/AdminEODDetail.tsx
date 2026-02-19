@@ -174,6 +174,25 @@ export default function AdminEODDetail() {
       return sum + Math.max(denomTotal(row) - metaTotal, 0);
     }, 0);
 
+    // FLOW 2: INTERNAL ATM TRANSFER tracking
+    const internalPickedFromRows = (data.cashPickups || []).reduce((sum: number, row: any) => {
+      const source = row.pickup_source || "BANK";
+      if (source !== "ATM_INTERNAL") return sum;
+      return sum + denomTotal(row);
+    }, 0);
+
+    const internalPickedFromMeta = (data.cashPickups || []).reduce((sum: number, row: any) => {
+      const source = row.pickup_source || "BANK";
+      if (source === "ATM_INTERNAL") return sum;
+      const metaSources = extractInternalSources(row);
+      return sum + metaSources.reduce(
+        (acc: number, s: any) => acc + Number(s.total_amount || 0),
+        0
+      );
+    }, 0);
+
+    const internalPick = internalPickedFromRows + internalPickedFromMeta;
+
     // ── Chronological denomination matching ──
     type AdminCashEvt = { kind: "pickup" | "load"; ts: number; raw: any };
     const adminCashEvents: AdminCashEvt[] = [];
@@ -195,6 +214,7 @@ export default function AdminEODDetail() {
 
     const adminRemovalPool: Record<number, number> = { 100: 0, 200: 0, 500: 0, 2000: 0 };
     let adminBankLoad = 0;
+    let adminInternalLoad = 0;
     const adminLoadAllocMap = new Map<any, { bankAmount: number; internalAmount: number }>();
 
     adminCashEvents.forEach((evt) => {
@@ -229,6 +249,7 @@ export default function AdminEODDetail() {
         });
 
         adminBankLoad += loadBank;
+        adminInternalLoad += loadInternal;
         adminLoadAllocMap.set(l, { bankAmount: loadBank, internalAmount: loadInternal });
       }
     });
@@ -238,6 +259,8 @@ export default function AdminEODDetail() {
       transfers: trans,
       bankPicked: bankPick,
       bankLoaded: adminBankLoad,
+      internalPicked: internalPick,
+      internalLoaded: adminInternalLoad,
       adminLoadAlloc: adminLoadAllocMap,
     };
   }, [data.adjustments, data.cashPickups, data.atmLoads]);
@@ -246,6 +269,10 @@ export default function AdminEODDetail() {
   const totalLoaded = bankLoaded;
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
+
+  // Internal transfer totals
+  const internalTransferTotal = Math.max(internalPicked, internalLoaded);
+  const netInternalTransfer = internalPicked - internalLoaded;
 
   const siteMap = useMemo(
     () => new Map((data.routeSites || []).map((r: any) => [r.site?.id, r.site])),
@@ -257,6 +284,40 @@ export default function AdminEODDetail() {
 
   const getAtmLabel = (site?: any) =>
     site?.site_code || site?.atm_id || site?.bank_name || "-";
+
+  // Separate pickups by type for display
+  const bankPickupRows = useMemo(
+    () => (data.cashPickups || []).filter((row: any) => (row.pickup_source || "BANK") !== "ATM_INTERNAL"),
+    [data.cashPickups]
+  );
+
+  const atmPickupRows = useMemo(
+    () => (data.cashPickups || []).filter((row: any) => (row.pickup_source || "BANK") === "ATM_INTERNAL"),
+    [data.cashPickups]
+  );
+
+  const internalPickupSources = useMemo(
+    () =>
+      bankPickupRows.flatMap((row: any) => {
+        const metaSources = extractInternalSources(row);
+        return metaSources.map((s: any) => ({
+          site: siteMap.get(s.site_id),
+          denoms: s.denominations,
+          total_amount: s.total_amount,
+          pickup_time: row.pickup_time,
+        }));
+      }),
+    [bankPickupRows, siteMap]
+  );
+
+  const internalLoadRows = useMemo(
+    () =>
+      (data.atmLoads || []).filter((row: any) => {
+        const alloc = adminLoadAlloc.get(row);
+        return (alloc?.internalAmount || 0) > 0;
+      }),
+    [data.atmLoads, adminLoadAlloc]
+  );
 
   const printRows = useMemo(() => {
     const rows: Array<{
@@ -529,86 +590,160 @@ export default function AdminEODDetail() {
         </Section>
 
         <Section title="EOD Report Summary">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-            <div className="bg-slate-50 border border-slate-200 rounded p-3">
-              <div className="text-xs text-slate-600">Cash Picked</div>
-              <div className="font-semibold">₹{totalPicked.toLocaleString("en-IN")}</div>
+          <div className="bg-white border border-slate-200 rounded-lg p-4 text-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Bank Cash Picked</span>
+              <span className="font-semibold text-slate-900">
+                ₹{bankPicked.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded p-3">
-              <div className="text-xs text-slate-600">Cash Loaded</div>
-              <div className="font-semibold">₹{totalLoaded.toLocaleString("en-IN")}</div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Bank Cash Loaded</span>
+              <span className="font-semibold text-slate-900">
+                ₹{bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
             </div>
-            <div className={`rounded p-3 border ${closingUnbalanced ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
-              <div className="text-xs text-slate-600">Cash in Hand (Expected 0)</div>
-              <div className="font-semibold">
-                ₹{cashInHand.toLocaleString("en-IN")}
-              </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">ATM Cash Picked (Internal Credit)</span>
+              <span className="font-semibold text-slate-900">
+                ₹{internalPicked.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">ATM Cash Loaded (Internal Debit)</span>
+              <span className="font-semibold text-slate-900">
+                ₹{internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Internal Transfer Net (Expected 0)</span>
+              <span
+                className={`px-2 py-1 rounded text-xs font-semibold ${
+                  Math.abs(netInternalTransfer) >= 0.01
+                    ? "bg-amber-100 text-amber-900"
+                    : "bg-emerald-100 text-emerald-900"
+                }`}
+              >
+                ₹{netInternalTransfer.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Cash in Hand (Bank Net)</span>
+              <span
+                className={`px-2 py-1 rounded text-xs font-semibold ${
+                  closingUnbalanced
+                    ? "bg-amber-100 text-amber-900"
+                    : "bg-emerald-100 text-emerald-900"
+                }`}
+              >
+                ₹{cashInHand.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
             </div>
           </div>
         </Section>
 
-          <Section title="Cash Pickups (Detailed)">
-        {data.cashPickups.map((c: any, i: number) => {
-    const total =
-      (c.denom_100 || 0) * 100 +
-      (c.denom_200 || 0) * 200 +
-      (c.denom_500 || 0) * 500 +
-      (c.denom_2000 || 0) * 2000;
+        <Section title="Bank Cash Picked">
+          {bankPickupRows.length === 0 && (
+            <div className="text-xs text-slate-500">No bank pickups recorded.</div>
+          )}
+          {bankPickupRows.map((c: any, i: number) => {
+            const total = denomTotal(c);
+            return (
+              <div key={i} className="border rounded p-3 mb-3">
+                <div className="font-medium">
+                  {c.bank_name} {c.branch && `– ${c.branch}`}
+                </div>
+                <div className="text-xs text-slate-600">
+                  Pickup Time: {formatIST(c.pickup_time)}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                  {DENOM_ORDER.map((d) => (
+                    <div key={d}>{c[`denom_${d}`] || 0} × ₹{d}</div>
+                  ))}
+                </div>
+                <div className="mt-2 font-semibold">
+                  Total: ₹{total.toLocaleString("en-IN")}
+                </div>
+                {c.slip_url && (
+                  <a
+                    href={c.slip_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-blue-600 underline mt-1 inline-block"
+                  >
+                    View Pickup Slip
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </Section>
 
-    return (
-      <div key={i} className="border rounded p-3 mb-3">
-        <div className="font-medium">
-          {c.bank_name} {c.branch && `– ${c.branch}`}
-        </div>
+        <Section title="ATM Cash Picked (Internal)">
+          {atmPickupRows.length === 0 && internalPickupSources.length === 0 && (
+            <div className="text-xs text-slate-500">No internal pickups recorded.</div>
+          )}
 
-        <div className="text-xs text-slate-600">
-          Pickup Time:
-          {" "}
-          {formatIST(c.pickup_time)}
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-          {DENOM_ORDER.map((d) => (
-            <div key={d}>{c[`denom_${d}`] || 0} × ₹{d}</div>
+          {atmPickupRows.map((c: any, i: number) => (
+            <div key={`atm-${i}`} className="border rounded p-3 mb-3 text-xs">
+              <div className="font-medium">
+                {formatSite(siteMap.get(c.source_site_id) || c.site)}
+              </div>
+              <div className="text-slate-500">
+                Pickup Time: {formatIST(c.pickup_time)}
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {DENOM_ORDER.map((d) => (
+                  <div key={d}>{c[`denom_${d}`] || 0} × ₹{d}</div>
+                ))}
+              </div>
+              <div className="mt-2 font-semibold">
+                Total: ₹{denomTotal(c).toLocaleString("en-IN")}
+              </div>
+            </div>
           ))}
-        </div>
 
-        <div className="mt-2 font-semibold">
-          Total Picked: ₹{total}
-        </div>
+          {internalPickupSources.map((s: any, i: number) => (
+            <div key={`meta-${i}`} className="border rounded p-3 mb-3 text-xs">
+              <div className="font-medium">{formatSite(s.site)}</div>
+              {s.pickup_time && (
+                <div className="text-slate-500">
+                  Pickup Time: {formatIST(s.pickup_time)}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {DENOM_ORDER.map((d) => (
+                  <div key={d}>{s.denoms?.[`denom_${d}`] || 0} × ₹{d}</div>
+                ))}
+              </div>
+              <div className="mt-2 font-semibold">
+                Total: ₹{(s.total_amount || 0).toLocaleString("en-IN")}
+              </div>
+            </div>
+          ))}
+        </Section>
 
-        {c.slip_url && (
-          <a
-            href={c.slip_url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-blue-600 underline mt-1 inline-block"
-          >
-            View Pickup Slip
-          </a>
-        )}
-      </div>
-    );
-  })}
-</Section>
-
-
-        <Section title="ATM Replenishments (Detailed)">
-          {data.atmLoads.map((a: any, i: number) => (
-            <div key={i} className="border rounded p-3 mb-2">
+        <Section title="ATM Loads">
+          {(data.atmLoads || []).length === 0 && (
+            <div className="text-xs text-slate-500">No loads recorded.</div>
+          )}
+          {(data.atmLoads || []).map((a: any, i: number) => (
+            <div key={i} className="border rounded p-3 mb-3 text-xs">
               <div className="font-medium">{formatSite(a.site)}</div>
-              <div className="text-xs text-slate-600">Load Time: {formatIST(a.time_in || a.load_time)}</div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+              <div className="text-slate-500">Load Time: {formatIST(a.time_in || a.load_time)}</div>
+              {(adminLoadAlloc.get(a)?.internalAmount || 0) > 0 && (
+                <div className="text-[10px] text-amber-700 mt-1">
+                  Internal source used: ₹{(adminLoadAlloc.get(a)?.internalAmount || 0).toLocaleString("en-IN")} from ATM removal pool
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 mt-2">
                 {DENOM_ORDER.map((d) => (
                   <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
                 ))}
               </div>
-
               <div className="mt-2 font-semibold">
-                Total Loaded: ₹{denomTotal(a)}
+                Total: ₹{denomTotal(a).toLocaleString("en-IN")}
               </div>
-
               {a.closing_balance != null && (
                 <div className="text-xs text-slate-600">
                   Closing Balance: ₹{a.closing_balance}
@@ -616,6 +751,77 @@ export default function AdminEODDetail() {
               )}
             </div>
           ))}
+        </Section>
+
+        <Section title="Internal Transfers (Neutral)">
+          {atmPickupRows.length === 0 && internalPickupSources.length === 0 && internalLoadRows.length === 0 && (
+            <div className="text-xs text-slate-500">No internal transfers recorded.</div>
+          )}
+
+          {(atmPickupRows.length > 0 || internalPickupSources.length > 0) && (
+            <div className="mb-4">
+              <div className="text-xs font-semibold text-slate-600 mb-2">
+                Source ATM → Internal Pool (Removal)
+              </div>
+              {atmPickupRows.map((c: any, i: number) => (
+                <div key={`src-${i}`} className="border rounded p-3 mb-2 text-xs">
+                  <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
+                  <div className="font-medium">
+                    {formatSite(siteMap.get(c.source_site_id) || c.site)}
+                  </div>
+                  <div className="text-slate-500">Pickup Time: {formatIST(c.pickup_time)}</div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {DENOM_ORDER.map((d) => (
+                      <div key={d}>{c[`denom_${d}`] || 0} × ₹{d}</div>
+                    ))}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{denomTotal(c).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+
+              {internalPickupSources.map((s: any, i: number) => (
+                <div key={`src-meta-${i}`} className="border rounded p-3 mb-2 text-xs">
+                  <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
+                  <div className="font-medium">{formatSite(s.site)}</div>
+                  {s.pickup_time && (
+                    <div className="text-slate-500">Pickup Time: {formatIST(s.pickup_time)}</div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {DENOM_ORDER.map((d) => (
+                      <div key={d}>{s.denoms?.[`denom_${d}`] || 0} × ₹{d}</div>
+                    ))}
+                  </div>
+                  <div className="mt-2 font-semibold">
+                    Total: ₹{(s.total_amount || 0).toLocaleString("en-IN")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {internalLoadRows.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-slate-600 mb-2">
+                Internal Pool → Destination ATM (Load)
+              </div>
+              {internalLoadRows.map((a: any, i: number) => {
+                const alloc = adminLoadAlloc.get(a);
+                const internalAmt = alloc?.internalAmount || 0;
+                return (
+                  <div key={`dest-${i}`} className="border rounded p-3 mb-2 text-xs">
+                    <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
+                    <div className="font-medium">{formatSite(a.site)}</div>
+                    <div className="text-slate-500">Load Time: {formatIST(a.time_in)}</div>
+                    <div className="mt-2 font-semibold">
+                      ATM Removal Used: ₹{internalAmt.toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Section>
 
         <Section title="Inter-Site Transfers">
