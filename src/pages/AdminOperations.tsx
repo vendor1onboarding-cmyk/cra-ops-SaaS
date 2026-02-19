@@ -5,12 +5,14 @@ import ATMSiteOnboarding from "./admin/ATMSiteOnboarding";
 import ATMSiteUpdate from "./admin/ATMSiteUpdate";
 import UserOnboarding from "./admin/UserOnboarding";
 import PasswordReset from "./admin/PasswordReset";
+import DeleteUser from "./admin/DeleteUser";
 
 type AdminAction = 
   | "atm-site-onboarding"
   | "atm-site-update"
   | "user-management"
   | "password-reset"
+  | "delete-user"
   | "bank-account-onboarding"
   | null;
 
@@ -46,6 +48,12 @@ const ADMIN_ACTIONS: ActionOption[] = [
     label: "Reset Password",
     description: "Generate temporary password for users who forgot their password",
     icon: "🔑",
+  },
+  {
+    id: "delete-user",
+    label: "Delete User",
+    description: "Permanently remove user accounts from the system",
+    icon: "🗑️",
   },
   {
     id: "bank-account-onboarding",
@@ -129,9 +137,10 @@ export default function AdminOperations() {
         {selectedAction === "atm-site-update" && <ATMSiteUpdate />}
         {selectedAction === "user-management" && <UserOnboarding />}
         {selectedAction === "password-reset" && <PasswordReset />}
+        {selectedAction === "delete-user" && <DeleteUser />}
 
         {/* Placeholder for future actions */}
-        {selectedAction && selectedAction !== "atm-site-onboarding" && selectedAction !== "atm-site-update" && selectedAction !== "user-management" && selectedAction !== "password-reset" && (
+        {selectedAction && selectedAction !== "atm-site-onboarding" && selectedAction !== "atm-site-update" && selectedAction !== "user-management" && selectedAction !== "password-reset" && selectedAction !== "delete-user" && (
           <section className="bg-white border border-slate-200 rounded-lg p-5">
             <div className="text-center text-slate-500 text-sm">
               This feature is coming soon.
