@@ -88,120 +88,124 @@ const [monthlyKm, setMonthlyKm] = useState(0);
     .select("km_covered")
     .eq("custodian_id", profile.id)
     .eq("status", "completed")
-    .gte("start_time", `${today}T00:00:00`)
-    .lte("start_time", `${today}T23:59:59`);
+          {/* DENOMINATION PLANNING DETAILS */}
+          {(bankDenomPlansForDisplay?.length > 0 || atmRemovalForDisplay) && (
+            <div className="bg-white rounded shadow border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setDenomPlanOpen((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 font-semibold text-slate-800 print:hidden"
+              >
+                <span>📋 Denomination Planning Details</span>
+                <span className="text-slate-400 text-lg leading-none">{denomPlanOpen ? "▲" : "▼"}</span>
+              </button>
 
-  const todayTotal =
-    todayLogs?.reduce(
-      (sum, r) => sum + (Number(r.km_covered) || 0),
-      0
-    ) || 0;
+              {/* Always visible in print */}
+              <div className={denomPlanOpen ? "block" : "hidden print:block"}>
+                <div className="divide-y divide-slate-100">
 
-  setTodayKm(todayTotal);
+                  {/* Bank Withdrawal sub-section */}
+                  {Array.isArray(bankDenomPlansForDisplay) && bankDenomPlansForDisplay.length > 0 ? (
+                    <div className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => setBankPlanSubOpen((v) => !v)}
+                        className="w-full flex items-center justify-between text-sm font-semibold text-emerald-700 mb-2 print:hidden"
+                      >
+                        <span>🏦 Bank Withdrawal Planning</span>
+                        <span className="text-slate-400">{bankPlanSubOpen ? "▲" : "▼"}</span>
+                      </button>
+                      <p className="text-xs font-semibold text-emerald-700 mb-2 hidden print:block">🏦 Bank Withdrawal Planning</p>
 
-  // Monthly KM
-  const { data: monthLogs } = await supabase
-    .from("travel_logs")
-    .select("km_covered")
-    .eq("custodian_id", profile.id)
-    .eq("status", "completed")
-    .gte("start_time", `${monthStart}T00:00:00`);
+                      <div className={bankPlanSubOpen ? "block" : "hidden print:block"}>
+                        <div className="space-y-3">
+                          {bankDenomPlansForDisplay.map((bp: any) => {
+                            const bankTotal = [100, 200, 500, 2000].reduce(
+                              (s, d) => s + (bp?.[`denom_${d}`] || 0) * d, 0
+                            );
+                            return (
+                              <div key={bp?.bank_account_id || bp?.id} className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-800">
+                                      {bp?.bank?.bank_name || "Bank"}
+                                    </p>
+                                    <p className="text-xs text-slate-500">{bp?.bank?.account_number || ""}</p>
+                                  </div>
+                                  <span className="text-sm font-bold text-emerald-700">
+                                    ₹{bankTotal.toLocaleString("en-IN")}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                  {[100, 200, 500, 2000].map((d) => (
+                                    <div key={d} className="rounded border border-emerald-200 bg-white px-2 py-1.5 text-center">
+                                      <div className="text-[10px] text-slate-400">₹{d}</div>
+                                      <div className="text-sm font-semibold text-slate-700">{bp?.[`denom_${d}`] || 0}</div>
+                                      <div className="text-[10px] text-slate-400">
+                                        ₹{((bp?.[`denom_${d}`] || 0) * d).toLocaleString("en-IN")}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-3 text-xs text-slate-400">No bank withdrawal planning data available.</div>
+                  )}
 
-  const monthTotal =
-    monthLogs?.reduce(
-      (sum, r) => sum + (Number(r.km_covered) || 0),
-      0
-    ) || 0;
+                  {/* ATM Removal sub-section */}
+                  {atmRemovalForDisplay ? (() => {
+                    const atmTotal = [100, 200, 500, 2000].reduce(
+                      (s, d) => s + (atmRemovalForDisplay?.[`denom_${d}`] || 0) * d, 0
+                    );
+                    if (atmTotal === 0) return null;
+                    return (
+                      <div className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setAtmRemovalSubOpen((v) => !v)}
+                          className="w-full flex items-center justify-between text-sm font-semibold text-orange-700 mb-2 print:hidden"
+                        >
+                          <span>🏧 ATM Removal Planning</span>
+                          <span className="text-slate-400">{atmRemovalSubOpen ? "▲" : "▼"}</span>
+                        </button>
+                        <p className="text-xs font-semibold text-orange-700 mb-2 hidden print:block">🏧 ATM Removal Planning</p>
 
-  setMonthlyKm(monthTotal);
-}
+                        <div className={atmRemovalSubOpen ? "block" : "hidden print:block"}>
+                          <div className="rounded-lg border border-orange-100 bg-orange-50 p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs text-slate-500">Cash recovered from ATMs for redistribution</p>
+                              <span className="text-sm font-bold text-orange-700">
+                                ₹{atmTotal.toLocaleString("en-IN")}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {[100, 200, 500, 2000].map((d) => (
+                                <div key={d} className="rounded border border-orange-200 bg-white px-2 py-1.5 text-center">
+                                  <div className="text-[10px] text-slate-400">₹{d}</div>
+                                  <div className="text-sm font-semibold text-slate-700">{atmRemovalForDisplay?.[`denom_${d}`] || 0}</div>
+                                  <div className="text-[10px] text-slate-400">
+                                    ₹{((atmRemovalForDisplay?.[`denom_${d}`] || 0) * d).toLocaleString("en-IN")}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })() : (
+                    <div className="px-4 py-3 text-xs text-slate-400">No ATM removal planning data available.</div>
+                  )}
 
-loadTravelKPI();
-
-	
-  }, [profile]);
-
-
-  async function loadDashboard() {
-    setLoading(true);
-    const today = getISTDateString();
-
-    const { data: assign } = await supabase
-      .from("assignments")
-      .select("*")
-      .eq("custodian_id", profile.id)
-      .eq("assignment_date", today)
-      .in("status", ["open", "submitted", "rejected", "approved"])
-	  .order("created_at", { ascending: false })
-	  .limit(1)
-	  .maybeSingle();
-
-    if (!assign) {
-      setAssignment(null);
-      setExchangeCount(0);
-      setInternalTransferTotal(0);
-      setInternalTransfers([]);
-
-      // Fetch last assignment (fallback view)
-      const { data: last } = await supabase
-        .from("assignments")
-        .select("id, assignment_date, status")
-        .eq("custodian_id", profile.id)
-        .order("assignment_date", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (last) {
-        setLastAssignment(last);
-        const [{ count: sitesCount }, { count: loadsCount }] = await Promise.all([
-          supabase
-            .from("route_sites")
-            .select("id", { count: "exact", head: true })
-            .eq("assignment_id", last.id),
-          supabase
-            .from("atm_replenishments")
-            .select("id", { count: "exact", head: true })
-            .eq("assignment_id", last.id),
-        ]);
-
-        setLastAssignmentSitesCount(sitesCount || 0);
-        setLastAssignmentLoadsCount(loadsCount || 0);
-      } else {
-        setLastAssignment(null);
-        setLastAssignmentSitesCount(0);
-        setLastAssignmentLoadsCount(0);
-      }
-
-      setLoading(false);
-      return;
-    }
-
-    setAssignment(assign);
-
-    const [rs, ls, cps, dp, ops, bdp, arp] = await Promise.all([
-      supabase
-        .from("route_sites")
-        .select("*, site:site_id(bank_name,address,site_code)")
-        .eq("assignment_id", assign.id),
-      supabase.from("atm_replenishments").select("*").eq("assignment_id", assign.id),
-      supabase.from("cash_pickups").select("*").eq("assignment_id", assign.id),
-      supabase.from("denomination_plans").select("*").eq("assignment_id", assign.id),
-      supabase
-        .from("soa_adjustments")
-        .select("id, adjustment_type, exchange_metadata")
-        .eq("assignment_id", assign.id)
-        .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"]),
-      supabase
-        .from("bank_denomination_plans")
-        .select("*, bank:bank_account_id(bank_name, account_number)")
-        .eq("assignment_id", assign.id),
-      supabase
-        .from("atm_removal_plans")
-        .select("*")
-        .eq("assignment_id", assign.id)
-        .maybeSingle(),
-    ]);
-
+                </div>
+              </div>
+            </div>
+          )}
     setRouteSites(rs.data || []);
     setLoads(ls.data || []);
     setPickups(cps.data || []);
