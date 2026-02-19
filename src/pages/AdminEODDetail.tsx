@@ -153,7 +153,7 @@ export default function AdminEODDetail() {
   const extractInternalSources = (pickup: any) =>
     pickup?.internal_source_metadata?.sources || [];
 
-  const { exchanges, transfers, bankPicked, bankLoaded, adminLoadAlloc } = useMemo(() => {
+  const { exchanges, transfers, bankPicked, bankLoaded, internalPicked, internalLoaded, adminLoadAlloc } = useMemo(() => {
     // Filter adjustments
     const exch = (data.adjustments || []).filter(
       (a: any) => a.adjustment_type === "EXCHANGE"
