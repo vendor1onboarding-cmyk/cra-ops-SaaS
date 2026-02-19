@@ -430,10 +430,15 @@ export default function UserOnboarding() {
               </p>
               
               <div className="space-y-3">
-                {/* Email or Mobile Identifier */}
-                {generatedCredentials.identifierType === "email" && generatedCredentials.email && (
+                {/* Username - Always show the login email */}
+                {generatedCredentials.email && (
                   <div className="bg-white rounded-lg p-3 border border-amber-200">
-                    <div className="text-xs font-semibold text-slate-600 mb-1">Username (Email)</div>
+                    <div className="text-xs font-semibold text-slate-600 mb-1">
+                      Login Username
+                      {generatedCredentials.identifierType === "mobile" && (
+                        <span className="ml-1 text-amber-700">(System Generated)</span>
+                      )}
+                    </div>
                     <div className="flex items-center justify-between gap-2">
                       <code className="text-sm font-mono text-slate-800 break-all">
                         {generatedCredentials.email}
@@ -445,12 +450,18 @@ export default function UserOnboarding() {
                         Copy
                       </button>
                     </div>
+                    {generatedCredentials.identifierType === "mobile" && (
+                      <p className="text-xs text-amber-700 mt-2">
+                        ℹ️ For mobile-based users, this system-generated email is used for login
+                      </p>
+                    )}
                   </div>
                 )}
                 
+                {/* Mobile Number - Show separately for mobile users */}
                 {generatedCredentials.identifierType === "mobile" && generatedCredentials.mobileNumber && (
                   <div className="bg-white rounded-lg p-3 border border-amber-200">
-                    <div className="text-xs font-semibold text-slate-600 mb-1">Username (Mobile Number)</div>
+                    <div className="text-xs font-semibold text-slate-600 mb-1">Mobile Number (Reference Only)</div>
                     <div className="flex items-center justify-between gap-2">
                       <code className="text-sm font-mono text-slate-800 break-all">
                         {generatedCredentials.mobileNumber}

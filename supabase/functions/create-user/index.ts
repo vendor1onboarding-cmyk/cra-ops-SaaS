@@ -19,12 +19,14 @@ serve(async (req) => {
     // Get the authorization header from the request
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
+      console.error('Missing authorization header');
       throw new Error('Missing authorization header');
     }
 
     // Extract token from "Bearer {token}" format
     const token = authHeader.replace('Bearer ', '').trim();
     if (!token) {
+      console.error('Missing bearer token in authorization header');
       throw new Error('Missing bearer token');
     }
 
@@ -33,23 +35,22 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
+    console.log('Initializing Supabase clients...');
+
     // Admin client for all operations (service role key has full access)
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Create a client with the anon key but use the Authorization header with the token
-    // This allows getUser() to use the token from the Authorization header
-    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: { Authorization: authHeader },
-      },
-    });
-
-    // Get the authenticated user using the token from the Authorization header
-    const { data: { user }, error: userError } = await supabaseAuth.auth.getUser();
+    // Verify the JWT token using the admin client
+    // The admin client can verify any token without needing Authorization header
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    
     if (userError || !user) {
-      console.error('Auth error:', userError?.message);
+      console.error('Token verification failed:', userError?.message || 'No user found');
+      console.error('Token (first 20 chars):', token.substring(0, 20) + '...');
       throw new Error('Unauthorized: Invalid or expired token');
     }
+
+    console.log('Token verified successfully for user:', user.id);
 
     // Check if user is admin
     const { data: profile, error: profileError } = await supabaseAdmin
@@ -164,7 +165,7 @@ serve(async (req) => {
         success: true,
         user: {
           id: authData.user.id,
-          email: identifierType === 'email' ? authEmail : undefined,
+          email: authEmail,  // Always return the actual auth email (for both email and mobile users)
           mobileNumber: storedMobile,
           identifierType: identifierType,
         },
