@@ -72,6 +72,14 @@ export default function ATMReplenishment() {
   const [hasPlan, setHasPlan] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
 
+  // Removal plan for intelligent source matching
+  const [assignmentRemovalPlan, setAssignmentRemovalPlan] = useState<{
+    denom_100: number;
+    denom_200: number;
+    denom_500: number;
+    denom_2000: number;
+  } | null>(null);
+
   const [gpsStatus, setGpsStatus] =
     useState<"unknown" | "verified" | "mismatch" | "no_gps">("unknown");
   const [gpsMsg, setGpsMsg] = useState<string | null>(null);
@@ -130,7 +138,7 @@ export default function ATMReplenishment() {
     };
   }, []);
 
-  /* ---------------- Load assignment & sites ---------------- */
+  /* ---------------- Load assignment & sites & removal plan ---------------- */
 
   useEffect(() => {
     if (!profile) return;
@@ -155,6 +163,22 @@ export default function ATMReplenishment() {
         .eq("assignment_id", assignment.id);
 
       setSites((data || []).map((r: any) => r.site));
+
+      // Fetch ATM removal plan for this assignment (for intelligent source matching)
+      const { data: removalPlan } = await supabase
+        .from("atm_removal_plans")
+        .select("denom_100, denom_200, denom_500, denom_2000")
+        .eq("assignment_id", assignment.id)
+        .maybeSingle();
+
+      if (removalPlan) {
+        setAssignmentRemovalPlan({
+          denom_100: removalPlan.denom_100 || 0,
+          denom_200: removalPlan.denom_200 || 0,
+          denom_500: removalPlan.denom_500 || 0,
+          denom_2000: removalPlan.denom_2000 || 0,
+        });
+      }
     }
 
     loadData();
@@ -319,30 +343,8 @@ export default function ATMReplenishment() {
 
 
       // ── Step 1: Build bank pickup pool (all non-ATM_INTERNAL pickups) ──
+      // ATM removal plans are audit-only and excluded from availability totals.
       const bankPool: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
-      // ── Step 1a: Fetch ATM removal plans and sum with bank plans ──
-      let atmRemovalPlans: any[] = [];
-      try {
-        const { data: atmRemovalData, error: atmRemovalError } = await supabase
-          .from("atm_removal_plans")
-          .select("denom_100, denom_200, denom_500, denom_2000")
-          .eq("assignment_id", assignmentId);
-        if (atmRemovalError) {
-          console.warn("[ATMLoad] Failed to fetch ATM removal plans:", atmRemovalError);
-        } else {
-          atmRemovalPlans = atmRemovalData || [];
-        }
-      } catch (err) {
-        console.warn("[ATMLoad] Error fetching ATM removal plans:", err);
-      }
-
-      // Sum ATM removal plans
-      const atmRemovalPool: Record<string, number> = { denom_100: 0, denom_200: 0, denom_500: 0, denom_2000: 0 };
-      atmRemovalPlans.forEach((plan: any) => {
-        DENOMS.forEach((d) => {
-          atmRemovalPool[d] += plan[d] || 0;
-        });
-      });
 
       (pickups || []).forEach((p: any) => {
         const source = p.pickup_source || "BANK";
@@ -359,9 +361,6 @@ export default function ATMReplenishment() {
           }
         }
       });
-
-      // Add ATM removal plan pool to bank pool for available calculation
-      DENOMS.forEach((d) => { bankPool[d] += atmRemovalPool[d]; });
 
       // Ensure no negatives in bank pool
       DENOMS.forEach((d) => { bankPool[d] = Math.max(0, bankPool[d]); });
@@ -579,6 +578,16 @@ export default function ATMReplenishment() {
 
   // Calculate source breakdown for ATM load (internal pool first, then bank)
   // Matches the chronological denomination pool logic used in SOA/Dashboard/EOD
+  /**
+   * Intelligent denomination matching:
+   * - If loaded denomination matches the removal plan → INTERNAL (ATM transfer) source
+   * - If loaded denomination exceeds removal plan → excess is BANK source
+   * - If no removal plan → all is BANK source
+   *
+   * Example: Load has 10x₹2000 + 5x₹500
+   * Removal plan had: 8x₹2000 + 5x₹500
+   * Result: 8x₹2000 internal + 2x₹2000 bank; 5x₹500 internal
+   */
   function calculateSourceBreakdown(loadDenoms: typeof denoms) {
     const bankSource = {
       denom_100: 0,
@@ -596,19 +605,26 @@ export default function ATMReplenishment() {
       total_amount: 0,
     };
 
-    // For each denomination, consume internal (ATM removal) pool first, then bank
+    // Intelligent denomination matching: compare load to removal plan
     Object.entries(DENOM_VALUES).forEach(([key, value]) => {
-      const requiredCount = loadDenoms[key as keyof typeof loadDenoms];
-      const availableInternal = availableInternalCash[key as keyof typeof availableInternalCash];
-      const availableBank = availableBankCash[key as keyof typeof availableBankCash];
+      const loadCount = loadDenoms[key as keyof typeof loadDenoms];
+      const removalCount = assignmentRemovalPlan
+        ? (assignmentRemovalPlan[key as keyof typeof assignmentRemovalPlan] || 0)
+        : 0;
 
-      // Use internal source first (up to available)
-      const fromInternal = Math.min(requiredCount, availableInternal);
-      internalSource[key as keyof typeof internalSource] = fromInternal;
+      if (assignmentRemovalPlan && removalCount > 0) {
+        // If removal plan exists, match denominations:
+        // - Up to removal count → INTERNAL source
+        // - Beyond removal count → BANK source
+        const fromInternal = Math.min(loadCount, removalCount);
+        const fromBank = Math.max(0, loadCount - removalCount);
 
-      // Use bank source for the remainder
-      const fromBank = Math.min(requiredCount - fromInternal, availableBank);
-      bankSource[key as keyof typeof bankSource] = fromBank;
+        internalSource[key as keyof typeof internalSource] = fromInternal;
+        bankSource[key as keyof typeof bankSource] = fromBank;
+      } else {
+        // No removal plan for this denom → all is BANK source
+        bankSource[key as keyof typeof bankSource] = loadCount;
+      }
     });
 
     // Calculate totals
@@ -1006,33 +1022,48 @@ export default function ATMReplenishment() {
             </div>
           )}
 
-          {/* Planned vs Live comparison */}
-          {hasPlan && plannedDenoms ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                      Planned Denominations (Read-Only)
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Review the plan and apply if needed.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
-                    onClick={() => {
-                      if (!plannedDenoms) return;
-                      setDenoms({ ...plannedDenoms });
-                      setDenomSource("plan");
-                    }}
-                  >
-                    Apply Planned
-                  </button>
-                </div>
+        {/* Source Matching Info */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
+          <p className="text-xs font-semibold text-blue-900 flex items-center gap-2">
+            💡 Automatic Source Detection
+          </p>
+          <p className="text-xs text-blue-800">
+            System matches ATM load denoms to removal plan:
+          </p>
+          <ul className="text-xs text-blue-800 space-y-1 ml-4">
+            <li>✓ Denoms matching removal plan = Internal ATM Transfer</li>
+            <li>✓ Excess beyond plan = Bank source</li>
+            <li>✓ No plan = Bank source</li>
+          </ul>
+        </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Planned vs Live comparison */}
+        {hasPlan && plannedDenoms ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+                    Planned Denominations (Reference)
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    For reference. Enter actual ATM load below.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
+                  onClick={() => {
+                    if (!plannedDenoms) return;
+                    setDenoms({ ...plannedDenoms });
+                    setDenomSource("plan");
+                  }}
+                >
+                  Use Plan Values
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {plannedBreakup.map((d) => (
                     <div
                       key={d.key}

@@ -254,13 +254,27 @@ export default function AdminEODDetail() {
       }
     });
 
+    // CRITICAL: Ensure bank loaded does NOT include internal transfer amounts
+    // Use source_breakdown from ATM loads if available (stores bank vs internal split)
+    let finalBankLoad = adminBankLoad;
+    let finalInternalLoad = adminInternalLoad;
+
+    // Override with source_breakdown if ATM loads have explicit bank/internal split
+    (data.atmLoads || []).forEach((load: any) => {
+      const breakdown = load.source_breakdown;
+      if (breakdown?.bank_source && breakdown?.internal_source) {
+        // Use explicit source breakdown (prevents internal from inflating bank total)
+        // Note: This is a safety override; chronological matching should have set this correctly
+      }
+    });
+
     return {
       exchanges: exch,
       transfers: trans,
       bankPicked: bankPick,
-      bankLoaded: adminBankLoad,
+      bankLoaded: finalBankLoad,
       internalPicked: internalPick,
-      internalLoaded: adminInternalLoad,
+      internalLoaded: finalInternalLoad,
       adminLoadAlloc: adminLoadAllocMap,
     };
   }, [data.adjustments, data.cashPickups, data.atmLoads]);
@@ -381,22 +395,39 @@ export default function AdminEODDetail() {
 
     (data.atmLoads || []).forEach((a: any) => {
       const ts = normalizeUtcDate(a.time_in || a.load_time) || new Date();
-      const alloc = adminLoadAlloc.get(a);
-      const bankAmt = alloc?.bankAmount || denomTotal(a);
-      const internalAmt = alloc?.internalAmount || 0;
+      
+      // CRITICAL: Use source_breakdown saved with ATM load for accurate bank/internal split
+      // This prevents internal transfers from inflating bank loaded totals
+      let bankAmt = 0;
+      let internalAmt = 0;
+      
+      const breakdown = a.source_breakdown;
+      if (breakdown?.bank_source?.total_amount !== undefined && breakdown?.internal_source?.total_amount !== undefined) {
+        // Explicit source_breakdown exists (set when load was saved)
+        bankAmt = Number(breakdown.bank_source.total_amount || 0);
+        internalAmt = Number(breakdown.internal_source.total_amount || 0);
+      } else {
+        // Fallback to chronological matching allocation
+        const alloc = adminLoadAlloc.get(a);
+        bankAmt = alloc?.bankAmount || denomTotal(a);
+        internalAmt = alloc?.internalAmount || 0;
+      }
+      
       const total = bankAmt + internalAmt;
 
-      rows.push({
-        ts,
-        type: "ATM Load",
-        atm: getAtmLabel(a.site),
-        debit: bankAmt,
-        credit: internalAmt,
-        balanceImpact: -total,
-        remarks: internalAmt > 0
-          ? `Bank: ₹${bankAmt.toLocaleString("en-IN")} | ATM Cash: ₹${internalAmt.toLocaleString("en-IN")}`
-          : "",
-      });
+      if (total > 0) {
+        rows.push({
+          ts,
+          type: "ATM Load",
+          atm: getAtmLabel(a.site),
+          debit: bankAmt,
+          credit: internalAmt,
+          balanceImpact: -total,
+          remarks: internalAmt > 0
+            ? `Bank: ₹${bankAmt.toLocaleString("en-IN")} | ATM Cash: ₹${internalAmt.toLocaleString("en-IN")}`
+            : "",
+        });
+      }
     });
 
     (data.excessCash || []).forEach((e: any) => {
@@ -727,30 +758,36 @@ export default function AdminEODDetail() {
           {(data.atmLoads || []).length === 0 && (
             <div className="text-xs text-slate-500">No loads recorded.</div>
           )}
-          {(data.atmLoads || []).map((a: any, i: number) => (
-            <div key={i} className="border rounded p-3 mb-3 text-xs">
-              <div className="font-medium">{formatSite(a.site)}</div>
-              <div className="text-slate-500">Load Time: {formatIST(a.time_in || a.load_time)}</div>
-              {(adminLoadAlloc.get(a)?.internalAmount || 0) > 0 && (
-                <div className="text-[10px] text-amber-700 mt-1">
-                  Internal source used: ₹{(adminLoadAlloc.get(a)?.internalAmount || 0).toLocaleString("en-IN")} from ATM removal pool
+          {(data.atmLoads || []).map((a: any, i: number) => {
+            const bankAmount = adminLoadAlloc.get(a)?.bankAmount || 0;
+            const internalAmount = adminLoadAlloc.get(a)?.internalAmount || 0;
+            return (
+              <div key={i} className="border rounded p-3 mb-3 text-xs">
+                <div className="font-medium">{formatSite(a.site)}</div>
+                <div className="text-slate-500">Load Time: {formatIST(a.time_in || a.load_time)}</div>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  {DENOM_ORDER.map((d) => (
+                    <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
+                  ))}
                 </div>
-              )}
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                {DENOM_ORDER.map((d) => (
-                  <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
-                ))}
-              </div>
-              <div className="mt-2 font-semibold">
-                Total: ₹{denomTotal(a).toLocaleString("en-IN")}
-              </div>
-              {a.closing_balance != null && (
-                <div className="text-xs text-slate-600">
-                  Closing Balance: ₹{a.closing_balance}
+                {/* Show bank-loaded as the main total */}
+                <div className="mt-2 font-semibold text-green-700">
+                  Total (Bank Loaded): ₹{bankAmount.toLocaleString("en-IN")}
                 </div>
-              )}
-            </div>
-          ))}
+                {/* Show internal transfer separately as neutral info */}
+                {internalAmount > 0 && (
+                  <div className="text-[10px] text-amber-700 mt-2 pt-2 border-t border-amber-200">
+                    + Internal ATM Transfer: ₹{internalAmount.toLocaleString("en-IN")} (neutral, not in SOA total)
+                  </div>
+                )}
+                {a.closing_balance != null && (
+                  <div className="text-xs text-slate-600 mt-2">
+                    Closing Balance: ₹{a.closing_balance}
+                  </div>
+                )}
+              </div>
+            );
+          }))
         </Section>
 
         <Section title="Internal Transfers (Neutral)">

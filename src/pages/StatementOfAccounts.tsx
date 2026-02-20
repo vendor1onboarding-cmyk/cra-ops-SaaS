@@ -223,13 +223,11 @@ export default function StatementOfAccounts() {
                 const sources = sourceMap.get(row.assignment_id ?? row.soa_id);
                 const bankPicked = row.bank_picked ?? row.cash_picked;
                 const internalPicked = row.internal_picked ?? 0;
-                const rawCashLoaded = Number(row.cash_loaded || 0);
-                const internalLoaded = Number(row.internal_loaded ?? sources?.internal ?? 0);
-                const bankLoaded = Number(
-                  row.bank_loaded ??
-                    sources?.bank ??
-                    Math.max(rawCashLoaded - internalLoaded, 0)
-                );
+                // CRITICAL: Use sources from v_atm_load_sources (aggregated source_breakdown)
+                // These values come from summing bank_source.total_amount and internal_source.total_amount
+                // across all ATM loads for this assignment, ensuring proper separation
+                const bankLoaded = sources?.bank ?? Number(row.bank_loaded ?? 0);
+                const internalLoaded = sources?.internal ?? Number(row.internal_loaded ?? 0);
                 return {
                   ...row,
                   status: statusMap.get(row.assignment_id ?? row.soa_id),
@@ -613,18 +611,20 @@ export default function StatementOfAccounts() {
         const totalLoaded = loadBankAmount + loadInternalAmount;
 
         if (totalLoaded > 0) {
-          // Single row per site: debit-only. Internal ATM transfers remain neutral.
+          // CRITICAL: Debit shows only bank-loaded (affects closing balance)
+          // Internal transfers are neutral: -₹X (removal) + ₹X (load) = ₹0
+          // Remarks show breakdown for audit trail
           transactionRows.push({
             assignment_id: a.assignment_id,
             assignment_date: assignmentDate,
             ts,
             type: "ATM Load",
             atm: loadSiteLabel,
-            debit: loadBankAmount + loadInternalAmount,
+            debit: loadBankAmount, // Only bank affects balance, internal is neutral
             credit: 0,
-            balanceImpact: -totalLoaded,
+            balanceImpact: -loadBankAmount, // Only bank-loaded reduces cash balance
             remarks: loadInternalAmount > 0
-              ? `Bank: \u20B9${loadBankAmount.toLocaleString("en-IN")} | ATM Cash: \u20B9${loadInternalAmount.toLocaleString("en-IN")}`
+              ? `Bank: ₹${loadBankAmount.toLocaleString("en-IN")} | Internal ATM Transfer: ₹${loadInternalAmount.toLocaleString("en-IN")} (neutral)`
               : "",
           });
         }
@@ -1103,19 +1103,24 @@ export default function StatementOfAccounts() {
           )}
         </div>
 
-          {/* ===== Load Source Breakdown Info ===== */}
-          {!loading && viewMode === "summary" && summaryTotals.internalLoaded > 0 && (
+          {/* ===== Load Source Breakdown & Internal Movement Info ===== */}
+          {!loading && viewMode === "summary" && (summaryTotals.bankLoaded > 0 || summaryTotals.internalLoaded > 0) && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h3 className="text-sm font-semibold text-blue-900 mb-2">
-              💡 Cash Load Breakdown
+              💡 Cash Flow Summary (Month-End)
             </h3>
             <div className="text-xs text-blue-800 space-y-1">
-              <p className="font-medium">Total Bank Cash Loaded: ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
-              <p className="ml-4">├─ From Bank: ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-green-700">(included in SOA)</span></p>
-              <p className="ml-4">└─ Internal Transfers: ₹{summaryTotals.internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-slate-700">(neutral - already accounted)</span></p>
+              <p className="font-medium text-green-700">✓ Total ATM Cash Loaded (SOA): ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+              <p className="ml-4 text-slate-600">From Bank withdrawals → Affects Closing Balance</p>
+              {summaryTotals.internalLoaded > 0 && (
+                <>
+                  <p className="font-medium mt-2 text-blue-700">⟷ Internal ATM Transfers (Neutral): ₹{summaryTotals.internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                  <p className="ml-4 text-slate-600">Movement between ATMs → Net Impact = 0 (not in SOA KPI)</p>
+                </>
+              )}
             </div>
-            <p className="text-xs text-blue-700 mt-2 italic">
-              Internal ATM transfers do not affect vendor reconciliation. They represent cash moved between sites.
+            <p className="text-xs text-blue-700 mt-3 italic border-t border-blue-200 pt-2">
+              Internal transfers: Same amount removed from one ATM + loaded to another = cancels out. Visible for audit, not counted in month-end totals.
             </p>
           </div>
         )}
@@ -1142,10 +1147,11 @@ export default function StatementOfAccounts() {
               color="green"
             />
             <KPI
-              label="ATM Loaded"
+              label="Internal ATM Movement"
               value={summaryTotals.internalLoaded}
               subtext="₹"
               color="slate"
+              highlight={false}
             />
             {showAllowance ? (
               <KPI
@@ -1285,8 +1291,8 @@ export default function StatementOfAccounts() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-slate-500">ATM Loaded</p>
-                              <p className="font-semibold text-slate-700">
+                              <p className="text-slate-500">Internal Movement</p>
+                              <p className="font-semibold text-blue-700">
                                 ₹{(r.internal_loaded ?? 0).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
@@ -1356,7 +1362,7 @@ export default function StatementOfAccounts() {
                             Bank Loaded
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                            ATM Loaded
+                            Internal Movement
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
                             KM
@@ -1410,11 +1416,11 @@ export default function StatementOfAccounts() {
                                   minimumFractionDigits: 2,
                                 })}
                               </td>
-                              <td className="px-4 py-3 text-right text-slate-700">
+                              <td className="px-4 py-3 text-right text-blue-700 font-medium">
                                 {(r.internal_loaded ?? 0) > 0
-                                  ? (r.internal_loaded ?? 0).toLocaleString("en-IN", {
+                                  ? `(+${(r.internal_loaded ?? 0).toLocaleString("en-IN", {
                                       minimumFractionDigits: 2,
-                                    })
+                                    })})`
                                   : "-"}
                               </td>
                               <td className="px-4 py-3 text-right text-slate-900">

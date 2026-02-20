@@ -418,6 +418,8 @@ function CustodianEOD({
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [showSignatureConfirm, setShowSignatureConfirm] = useState(false);
   const [signatureConfirmMessage, setSignatureConfirmMessage] = useState("");
+  const [signaturePreviewUrl, setSignaturePreviewUrl] = useState<string | null>(null);
+  const [showSignaturePreview, setShowSignaturePreview] = useState(false);
 
   const cashPickups = eodDetails?.cashPickups || [];
   const atmLoads = eodDetails?.atmLoads || [];
@@ -540,10 +542,11 @@ function CustodianEOD({
   });
 
   const bankLoaded = totalBankLoaded;
+  const internalLoaded = totalInternalLoaded;
 
   // Internal transfer net MUST be zero (showing max for visibility only)
-  const internalTransferTotal = Math.max(internalPicked, totalInternalLoaded);
-  const netInternalTransfer = internalPicked - totalInternalLoaded;
+  const internalTransferTotal = Math.max(internalPicked, internalLoaded);
+  const netInternalTransfer = internalPicked - internalLoaded;
 
   // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
   // Internal transfers are neutral and do NOT impact Cash-in-Hand
@@ -662,33 +665,37 @@ function CustodianEOD({
 
     (atmLoads || []).forEach((a: any) => {
       const ts = normalizeUtcDate(a.time_in) || new Date();
-      const alloc = loadAllocations.get(a);
-      const bankSourceAmount = alloc?.bankAmount || 0;
-      const internalSourceAmount = alloc?.internalAmount || 0;
-      const total = denomTotal(a);
       
-      if (bankSourceAmount > 0 || internalSourceAmount > 0) {
-        const totalLoaded = bankSourceAmount + internalSourceAmount;
+      // CRITICAL: Use source_breakdown saved with ATM load for accurate bank/internal split
+      // This overrides the chronological matching to ensure internal transfers don't inflate bank total
+      let bankSourceAmount = 0;
+      let internalSourceAmount = 0;
+      
+      const breakdown = a.source_breakdown;
+      if (breakdown?.bank_source?.total_amount !== undefined && breakdown?.internal_source?.total_amount !== undefined) {
+        // Explicit source_breakdown exists (set when load was saved)
+        bankSourceAmount = Number(breakdown.bank_source.total_amount || 0);
+        internalSourceAmount = Number(breakdown.internal_source.total_amount || 0);
+      } else {
+        // Fallback to chronological matching allocation
+        const alloc = loadAllocations.get(a);
+        bankSourceAmount = alloc?.bankAmount || 0;
+        internalSourceAmount = alloc?.internalAmount || 0;
+      }
+      
+      const total = bankSourceAmount + internalSourceAmount;
+      
+      if (total > 0) {
         rows.push({
           ts,
           type: "ATM Load",
           atm: getAtmLabel(a.site),
           debit: bankSourceAmount,
           credit: internalSourceAmount,
-          balanceImpact: -totalLoaded,
+          balanceImpact: -total,
           remarks: internalSourceAmount > 0
             ? `Bank: ₹${bankSourceAmount.toLocaleString("en-IN")} | ATM Cash: ₹${internalSourceAmount.toLocaleString("en-IN")}`
             : "",
-        });
-      } else if (bankPicked > 0) {
-        rows.push({
-          ts,
-          type: "ATM Load",
-          atm: getAtmLabel(a.site),
-          debit: total,
-          credit: 0,
-          balanceImpact: -total,
-          remarks: "",
         });
       }
     });
@@ -963,7 +970,7 @@ function CustodianEOD({
         </table>
       </div>
 
-      <div className="print:hidden">
+      <div className="print:hidden pb-24 sm:pb-20">
         <div className="space-y-2">
         <h2 className="text-lg font-semibold text-primary">
           End of Day Summary
@@ -1027,6 +1034,34 @@ function CustodianEOD({
           {assignment?.status === "rejected" && assignment.rejection_reason && (
             <div className="bg-red-50 border border-red-200 p-3 rounded text-sm text-red-700">
               <strong>Rejected:</strong> {assignment.rejection_reason}
+            </div>
+          )}
+
+          {/* ✅ APPROVED EOD - SIGNATURE DISPLAY (PROMINENT) */}
+          {assignment?.eod_signed && (
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">✓</span>
+                <h3 className="font-bold text-lg text-green-900">EOD Signed & Locked</h3>
+              </div>
+              <p className="text-sm text-green-800">
+                Signed on: <span className="font-semibold">{formatIST(assignment.eod_signed_at)}</span>
+              </p>
+              {assignment.eod_signature_url && (
+                <div className="border-2 border-green-200 rounded-lg bg-white p-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-600">Custodian Signature:</p>
+                  <img
+                    src={assignment.eod_signature_url}
+                    alt="Custodian Signature"
+                    className="h-20 w-auto object-contain"
+                  />
+                </div>
+              )}
+              <div className="bg-green-100 border border-green-300 rounded px-3 py-2">
+                <p className="text-xs text-green-800">
+                  📋 This EOD is finalized and embedded in the PDF. You can now print and download the complete report.
+                </p>
+              </div>
             </div>
           )}
 
@@ -1178,25 +1213,31 @@ function CustodianEOD({
               {atmLoads.length === 0 && (
                 <div className="text-xs text-slate-500">No loads recorded.</div>
               )}
-              {atmLoads.map((a: any, i: number) => (
-                <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
-                  <div className="font-medium">{formatSite(a.site)}</div>
-                  <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
-                  {(loadAllocations.get(a)?.internalAmount || 0) > 0 && (
-                    <div className="text-[10px] text-amber-700 mt-1">
-                      Internal source used: ₹{(loadAllocations.get(a)?.internalAmount || 0).toLocaleString("en-IN")} from ATM removal pool
+              {atmLoads.map((a: any, i: number) => {
+                const bankAmount = loadAllocations.get(a)?.bankAmount || 0;
+                const internalAmount = loadAllocations.get(a)?.internalAmount || 0;
+                return (
+                  <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
+                    <div className="font-medium">{formatSite(a.site)}</div>
+                    <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      {DENOM_ORDER.map((d) => (
+                        <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
+                      ))}
                     </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    {DENOM_ORDER.map((d) => (
-                      <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
-                    ))}
+                    {/* Show bank-loaded as the main total */}
+                    <div className="mt-2 font-semibold text-green-700">
+                      Total (Bank Loaded): ₹{bankAmount.toLocaleString("en-IN")}
+                    </div>
+                    {/* Show internal transfer separately as neutral info */}
+                    {internalAmount > 0 && (
+                      <div className="text-[10px] text-amber-700 mt-2 pt-2 border-t border-amber-200">
+                        + Internal ATM Transfer: ₹{internalAmount.toLocaleString("en-IN")} (neutral, not in SOA total)
+                      </div>
+                    )}
                   </div>
-                  <div className="mt-2 font-semibold">
-                    Total: ₹{denomTotal(a).toLocaleString("en-IN")}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </Section>
 
             <Section title="Internal Transfers (Neutral)">
@@ -1358,55 +1399,24 @@ function CustodianEOD({
         />
       </div>
 
-      {/* PRINT SIGNATURE – hidden; signature now embedded in the print footer below */}
-      {assignment?.eod_signature_url && (
-        <div className="print:hidden mt-8 border-t pt-4">
-          <div className="text-xs font-semibold text-slate-700 mb-2">
-            Custodian Signature
-          </div>
-          <img
-            src={assignment.eod_signature_url}
-            alt="EOD Signature"
-            className="h-24 w-auto"
-          />
-        </div>
-      )}
+      {/* PRINT SIGNATURE – embedded in footer; shown prominently above for signed EODs */}
 
-      {/* ✍️ DIGITAL SIGNATURE - READ ONLY (SIGNED) */}
-      {assignment?.eod_signed && (
-        <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded shadow print:hidden">
-          <h3 className="font-semibold mb-2 text-green-800">✍️ Signed EOD</h3>
-          <p className="text-xs text-slate-600 mb-4">
-            Signed on: {formatIST(assignment.eod_signed_at)}
-          </p>
-          {assignment.eod_signature_url && (
-            <div className="border rounded bg-white p-2">
-              <img
-                src={assignment.eod_signature_url}
-                alt="EOD Signature"
-                className="w-full h-auto max-h-60 object-contain"
-              />
-              <p className="text-xs text-slate-500 text-center mt-2">Signature (Read-only)</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ✍️ DIGITAL SIGNATURE - INPUT MODE */}
+      {/* ✍️ DIGITAL SIGNATURE - INPUT MODE - MOBILE OPTIMIZED */}
       {assignment?.status === "submitted" && !assignment.eod_signed && (
-        <div className="mt-6 mb-20 p-4 bg-white rounded shadow print:hidden">
-          <h3 className="font-semibold mb-2">✍️ Custodian Signature</h3>
+        <div className="mt-6 mb-24 sm:mb-20 p-4 sm:p-5 bg-white rounded-lg shadow-md print:hidden">
+          <h3 className="font-bold text-lg sm:text-base mb-3">✍️ Custodian Signature</h3>
 
-          <p className="text-xs text-slate-500 mb-2">
+          <p className="text-sm sm:text-xs text-slate-600 mb-4 leading-relaxed">
             Please sign to confirm today’s cash operations are accurate.
           </p>
 
-          {/* Preview / Tap to expand */}
+          {/* Preview / Tap to expand - MOBILE OPTIMIZED */}
           <div
-            className="border rounded bg-slate-50 cursor-pointer"
+            className="border-2 border-dashed border-slate-300 rounded-lg bg-slate-50 cursor-pointer hover:bg-slate-100 transition active:scale-95"
             onClick={() => setShowSignatureModal(true)}
+            style={{ minHeight: '160px' }}
           >
-            <div ref={previewCanvasWrapRef} className="h-36 sm:h-44">
+            <div ref={previewCanvasWrapRef} className="h-40 sm:h-44">
               <SignatureCanvas
                 ref={sigPadRef}
                 penColor="black"
@@ -1418,44 +1428,47 @@ function CustodianEOD({
                 }}
               />
             </div>
-            <p className="text-center text-xs text-slate-500 py-1">
-              Tap to sign (full screen)
+            <p className="text-center text-sm sm:text-xs text-slate-500 py-2 font-medium">
+              🔍 Tap to sign (full screen)
             </p>
           </div>
 
           {sigError && (
-            <p className="text-xs text-red-600 mt-2">{sigError}</p>
+            <p className="text-sm text-red-600 mt-3 bg-red-50 p-2 rounded">{sigError}</p>
           )}
 
-          <div className="flex gap-3 mt-3 mb-20">
+          <div className="flex gap-2 sm:gap-3 mt-4 mb-20">
             <button
-              className="btn-secondary"
+              className="btn-secondary py-3 sm:py-2 text-sm font-bold"
               onClick={() => sigPadRef.current?.clear()}
+              style={{ minHeight: '44px' }}
             >
               Clear
             </button>
 
             <button
-              className="btn-primary"
+              className="btn-primary py-3 sm:py-2 text-sm font-bold"
               onClick={submitSignature}
               disabled={signing}
+              style={{ minHeight: '44px' }}
             >
-              {signing ? "Saving..." : "Sign & Lock EOD"}
+              {signing ? "⏳ Saving..." : "✓ Sign & Lock EOD"}
             </button>
           </div>
 
-          {/* ================= FULL SCREEN SIGNATURE MODAL ================= */}
+          {/* ================= FULL SCREEN SIGNATURE MODAL - MOBILE OPTIMIZED ================= */}
           {showSignatureModal && (
-            <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center">
-              <div className="bg-white w-full h-full sm:w-[90%] sm:h-[90%] rounded-lg p-4 flex flex-col">
+            <div className="fixed inset-0 z-[60] bg-black/80 flex items-end sm:items-center justify-center">
+              <div className="bg-white w-full sm:rounded-lg rounded-t-2xl sm:w-[90%] sm:h-[90%] h-[95vh] p-4 sm:p-5 flex flex-col safe-area-inset-b">
 
-                <div className="flex justify-between items-center mb-2">
-                  <h3 className="font-semibold text-lg">✍️ Sign Here</h3>
+                <div className="flex justify-between items-center mb-3 sm:mb-4">
+                  <h3 className="font-bold text-lg sm:text-xl">✍️ Sign Here</h3>
                   <button
-                    className="text-sm text-red-600"
+                    className="text-red-600 hover:text-red-700 font-bold text-xl sm:text-2xl leading-none ml-2"
                     onClick={() => setShowSignatureModal(false)}
+                    style={{ minHeight: '44px', minWidth: '44px' }}
                   >
-                    Close ✖
+                    ✖
                   </button>
                 </div>
 
@@ -1477,29 +1490,31 @@ function CustodianEOD({
 
                 {sigError && <p className="text-xs text-red-600 mt-2">{sigError}</p>}
 
-                <div className="flex gap-3 mt-3 mb-2">
+                <div className="flex gap-2 sm:gap-3 mt-4 sm:mt-3 mb-2">
                   <button
-                    className="btn-secondary"
+                    className="btn-secondary py-3 sm:py-2 text-sm"
                     onClick={() => modalSigPadRef.current?.clear()}
+                    style={{ minHeight: '44px' }}
                   >
                     Clear
                   </button>
 
                   <button
-                    className="btn-primary flex-1"
-                    onClick={async () => {
-                      // Copy signature from modal → main canvas and submit
+                    className="btn-primary flex-1 py-3 sm:py-2 text-sm font-bold"
+                    onClick={() => {
+                      // Show preview before final submission
                       const data = modalSigPadRef.current?.toDataURL();
                       if (data) {
-                        sigPadRef.current?.fromDataURL(data);
+                        setSignaturePreviewUrl(data);
+                        setShowSignaturePreview(true);
+                      } else {
+                        setSigError("Please sign before proceeding.");
                       }
-                      setShowSignatureModal(false);
-                      // Submit signature immediately
-                      await submitSignature();
                     }}
                     disabled={signing}
+                    style={{ minHeight: '44px' }}
                   >
-                    {signing ? "Saving..." : "Apply Signature & Lock EOD"}
+                    {signing ? "⏳ Processing..." : "✓ Next: Review"}
                   </button>
                 </div>
               </div>
@@ -1508,21 +1523,161 @@ function CustodianEOD({
         </div>
       )}
 
-      {/* Sticky Print/PDF Action */}
+      {/* ✍️ SIGNATURE PREVIEW & CONFIRMATION MODAL - MOBILE OPTIMIZED */}
+      {showSignaturePreview && signaturePreviewUrl && (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-end sm:items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-lg sm:shadow-2xl max-w-md w-full space-y-4 p-5 sm:p-6 safe-area-inset-b">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-bold text-lg sm:text-xl text-slate-900">✍️ Confirm Signature</h3>
+              <button
+                className="text-slate-400 hover:text-slate-600 text-2xl sm:text-3xl leading-none ml-2"
+                onClick={() => {
+                  setShowSignaturePreview(false);
+                  setSignaturePreviewUrl(null);
+                }}
+                style={{ minHeight: '44px', minWidth: '44px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                Please review your signature carefully. It will be embedded in the EOD report.
+              </p>
+
+              {/* Signature Preview */}
+              <div className="border-2 border-slate-200 rounded-lg bg-slate-50 p-4">
+                <img
+                  src={signaturePreviewUrl}
+                  alt="Signature Preview"
+                  className="w-full h-32 object-contain"
+                />
+                <p className="text-xs text-slate-500 text-center mt-2">Your signature</p>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-xs text-blue-800">
+                  <strong>📝 Note:</strong> Once locked, this signature cannot be changed. Ensure it matches your official signature.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 sm:gap-3 pt-4 sm:pt-3">
+              <button
+                className="btn-secondary flex-1 py-3 sm:py-2 text-sm font-bold"
+                onClick={() => {
+                  setShowSignaturePreview(false);
+                  setSignaturePreviewUrl(null);
+                  // User can redraw in the modal
+                }}
+                style={{ minHeight: '44px' }}
+              >
+                ↶ Retake
+              </button>
+
+              <button
+                className="btn-primary flex-1 py-3 sm:py-2 text-sm font-bold"
+                onClick={async () => {
+                  // Copy signature from preview → main canvas and submit
+                  if (signaturePreviewUrl) {
+                    sigPadRef.current?.fromDataURL(signaturePreviewUrl);
+                  }
+                  setShowSignatureModal(false);
+                  setShowSignaturePreview(false);
+                  // Now submit the signature
+                  setSigning(true);
+                  setSigError(null);
+
+                  if (!assignment?.id) {
+                    setSigError("Assignment ID missing");
+                    setSigning(false);
+                    return;
+                  }
+
+                  try {
+                    // Convert signature to image
+                    const blob = await (await fetch(signaturePreviewUrl!)).blob();
+                    const path = `eod_signature_assignment_${assignment.id}_${Date.now()}.png`;
+
+                    // Upload to Supabase Storage
+                    const { error: uploadError } = await supabase.storage
+                      .from("eod-signatures")
+                      .upload(path, blob, { contentType: "image/png" });
+
+                    if (uploadError) throw uploadError;
+
+                    const { data } = supabase.storage
+                      .from("eod-signatures")
+                      .getPublicUrl(path);
+
+                    // Lock EOD
+                    const { error } = await supabase
+                      .from("assignments")
+                      .update({
+                        eod_signed: true,
+                        eod_signed_at: new Date().toISOString(),
+                        eod_signature_url: data.publicUrl,
+                      })
+                      .eq("id", assignment.id);
+
+                    if (error) throw error;
+
+                    // Update local state
+                    const updatedAssignment = {
+                      ...assignment,
+                      eod_signed: true,
+                      eod_signed_at: new Date().toISOString(),
+                      eod_signature_url: data.publicUrl,
+                    };
+                    
+                    if (onSignatureComplete) {
+                      onSignatureComplete(updatedAssignment);
+                    }
+
+                    setSignatureLocked(true);
+                    setSignatureConfirmMessage("✓ EOD signed and locked successfully. Your signature is now embedded.");
+                    setShowSignatureConfirm(true);
+                    setSignaturePreviewUrl(null);
+                  } catch (err) {
+                    setSigError("Failed to save signature. Please try again.");
+                    console.error("Signature save error:", err);
+                  } finally {
+                    setSigning(false);
+                  }
+                }}
+                disabled={signing}
+                style={{ minHeight: '44px' }}
+              >
+                {signing ? "⏳ Confirming..." : "✓ Confirm & Lock"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sticky Print/PDF Action - Mobile Optimized */}
       {assignment && (
-        <div className="fixed bottom-0 inset-x-0 z-50 bg-white border-t shadow-md print:hidden">
-          <div className="px-4 py-3">
+        <div className="fixed bottom-0 inset-x-0 z-40 bg-gradient-to-t from-white via-white to-transparent border-t shadow-lg print:hidden safe-area-inset-b">
+          <div className="px-3 py-3 sm:px-4 sm:py-3 max-w-4xl mx-auto">
             <button
               onClick={() => window.print()}
               disabled={!assignment.eod_signed}
-              className={`w-full rounded-lg py-2 text-sm font-semibold transition ${
+              className={`w-full rounded-lg py-4 sm:py-3 px-4 text-sm sm:text-base font-bold transition-all active:scale-95 touch-target ${
                 assignment.eod_signed
-                  ? "bg-primary text-white active:scale-95"
-                  : "bg-slate-200 text-slate-500 cursor-not-allowed"
+                  ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:shadow-lg active:from-blue-700 active:to-blue-800"
+                  : "bg-slate-200 text-slate-500 cursor-not-allowed opacity-60"
               }`}
+              style={{ minHeight: '44px' }}
             >
-              {assignment.eod_signed ? "🖨️ Print / PDF" : "Print / PDF (Sign & Lock to enable)"}
+              <span className="inline-block mr-2">🖨️</span>
+              {assignment.eod_signed 
+                ? "Print / Download PDF" 
+                : "Complete signature for Print"}
             </button>
+            {assignment.eod_signed && (
+              <p className="text-xs text-center text-green-700 mt-2.5 font-medium">✓ Signed & ready to print</p>
+            )}
           </div>
         </div>
       )}
