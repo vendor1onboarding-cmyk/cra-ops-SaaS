@@ -223,8 +223,13 @@ export default function StatementOfAccounts() {
                 const sources = sourceMap.get(row.assignment_id ?? row.soa_id);
                 const bankPicked = row.bank_picked ?? row.cash_picked;
                 const internalPicked = row.internal_picked ?? 0;
-                const bankLoaded = row.bank_loaded ?? sources?.bank ?? row.cash_loaded;
-                const internalLoaded = row.internal_loaded ?? sources?.internal ?? 0;
+                const rawCashLoaded = Number(row.cash_loaded || 0);
+                const internalLoaded = Number(row.internal_loaded ?? sources?.internal ?? 0);
+                const bankLoaded = Number(
+                  row.bank_loaded ??
+                    sources?.bank ??
+                    Math.max(rawCashLoaded - internalLoaded, 0)
+                );
                 return {
                   ...row,
                   status: statusMap.get(row.assignment_id ?? row.soa_id),
@@ -345,7 +350,7 @@ export default function StatementOfAccounts() {
     // CRITICAL: Only BANK CASH affects closing balance
     // Internal transfers are neutral and must NOT be included
     const bankPicked = row.bank_picked ?? row.cash_picked;
-    const bankLoaded = row.bank_loaded ?? row.cash_loaded;
+    const bankLoaded = row.bank_loaded ?? 0;
     return bankPicked - bankLoaded;
   };
 
@@ -354,10 +359,10 @@ export default function StatementOfAccounts() {
     return summaryRows.reduce(
       (acc, r) => {
         acc.cashPicked += r.cash_picked;
-        acc.cashLoaded += r.bank_loaded ?? r.cash_loaded;
+        acc.cashLoaded += r.bank_loaded ?? 0;
         acc.bankPicked += r.bank_picked ?? r.cash_picked;
         acc.internalPicked += r.internal_picked ?? 0;
-        acc.bankLoaded += r.bank_loaded ?? r.cash_loaded;
+        acc.bankLoaded += r.bank_loaded ?? 0;
         acc.internalLoaded += r.internal_loaded ?? 0;
         acc.allowance += r.travel_allowance;
         acc.net += getFinalNet(r);
@@ -564,8 +569,8 @@ export default function StatementOfAccounts() {
             ts,
             type: "ATM Cash Removal",
             atm: pickupSiteLabel,
-            debit: 0,
-            credit: -internalTotal,
+            debit: -internalTotal,
+            credit: 0,
             balanceImpact: internalTotal,
             remarks: "",
           });
@@ -608,15 +613,15 @@ export default function StatementOfAccounts() {
         const totalLoaded = loadBankAmount + loadInternalAmount;
 
         if (totalLoaded > 0) {
-          // Single row per site: debit = bank-sourced, credit = ATM-removal-sourced
+          // Single row per site: debit-only. Internal ATM transfers remain neutral.
           transactionRows.push({
             assignment_id: a.assignment_id,
             assignment_date: assignmentDate,
             ts,
             type: "ATM Load",
             atm: loadSiteLabel,
-            debit: loadBankAmount,
-            credit: loadInternalAmount,
+            debit: loadBankAmount + loadInternalAmount,
+            credit: 0,
             balanceImpact: -totalLoaded,
             remarks: loadInternalAmount > 0
               ? `Bank: \u20B9${loadBankAmount.toLocaleString("en-IN")} | ATM Cash: \u20B9${loadInternalAmount.toLocaleString("en-IN")}`
@@ -693,7 +698,7 @@ export default function StatementOfAccounts() {
         const sourceSiteName = adj.transfer_metadata?.source_site_name || "";
         const destinations = adj.transfer_metadata?.destinations || [];
         
-        // Source removal (negative credit - cash leaving)
+        // Source removal (negative debit - cash leaving)
         if (sourceTotal > 0) {
           transactionRows.push({
             assignment_id: adj.assignment_id,
@@ -701,14 +706,14 @@ export default function StatementOfAccounts() {
             ts,
             type: "Inter-site Transfer (Out)",
             atm: sourceSiteName,
-            debit: 0,
-            credit: -sourceTotal,
+            debit: -sourceTotal,
+            credit: 0,
             balanceImpact: -sourceTotal,
             remarks: `Transferred to ${destinations.length} site(s)`,
           });
         }
         
-        // Destination loads (positive credit - cash arriving)
+        // Destination loads (positive debit - cash arriving)
         destinations.forEach((dest: any) => {
           const destAmount = Number(dest.total_amount || 0);
           if (destAmount > 0) {
@@ -718,8 +723,8 @@ export default function StatementOfAccounts() {
               ts,
               type: "Inter-site Transfer (In)",
               atm: dest.site_name || "",
-              debit: 0,
-              credit: destAmount,
+              debit: destAmount,
+              credit: 0,
               balanceImpact: destAmount,
               remarks: `From ${sourceSiteName}`,
             });
@@ -834,7 +839,7 @@ export default function StatementOfAccounts() {
             row.status || "-",
             row.bank_picked ?? row.cash_picked,
             row.internal_picked ?? 0,
-            row.bank_loaded ?? row.cash_loaded,
+            row.bank_loaded ?? 0,
             row.internal_loaded ?? 0,
             row.travel_km,
             ...(showAllowance ? [row.travel_allowance] : []),
@@ -1105,7 +1110,7 @@ export default function StatementOfAccounts() {
               💡 Cash Load Breakdown
             </h3>
             <div className="text-xs text-blue-800 space-y-1">
-              <p className="font-medium">Total Bank Cash Loaded: ₹{summaryTotals.cashLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+              <p className="font-medium">Total Bank Cash Loaded: ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
               <p className="ml-4">├─ From Bank: ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-green-700">(included in SOA)</span></p>
               <p className="ml-4">└─ Internal Transfers: ₹{summaryTotals.internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })} <span className="text-slate-700">(neutral - already accounted)</span></p>
             </div>
@@ -1274,7 +1279,7 @@ export default function StatementOfAccounts() {
                             <div>
                               <p className="text-slate-500">Bank Loaded</p>
                               <p className="font-semibold text-green-700">
-                                ₹{(r.bank_loaded ?? r.cash_loaded).toLocaleString("en-IN", {
+                                ₹{(r.bank_loaded ?? 0).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
                               </p>
@@ -1401,7 +1406,7 @@ export default function StatementOfAccounts() {
                                 })}
                               </td>
                               <td className="px-4 py-3 text-right text-green-700 font-medium">
-                                {(r.bank_loaded ?? r.cash_loaded).toLocaleString("en-IN", {
+                                {(r.bank_loaded ?? 0).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
                               </td>
