@@ -5,6 +5,7 @@ import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { formatIST, formatISTAudit, formatISTDate, formatISTTime, parseUTCDate } from "../utils/time";
+import { SignatureImage, SignatureModal, preloadSignatureImage } from "../components/SignatureImage";
 
 /* ---------------- Utilities ---------------- */
 function formatSite(site: any) {
@@ -608,7 +609,15 @@ export default function AdminEODDetail() {
             EOD Detail – Assignment #{assignment.id}
           </h2>
           <button
-            onClick={() => window.print()}
+            onClick={async () => {
+              // Preload signature image before PDF render
+              if (assignment.eod_signature_url) {
+                console.log('[AdminEODDetail] Preloading signature before print...');
+                await preloadSignatureImage(assignment.eod_signature_url);
+              }
+              // Small delay to ensure image is loaded
+              setTimeout(() => window.print(), 300);
+            }}
             className="btn-secondary text-xs print:hidden"
           >
             🖨️ Print / PDF
@@ -787,7 +796,7 @@ export default function AdminEODDetail() {
                 )}
               </div>
             );
-          }))
+          })}
         </Section>
 
         <Section title="Internal Transfers (Neutral)">
@@ -933,26 +942,12 @@ export default function AdminEODDetail() {
               View Signature
             </button>
 
-            {showSignature && (
-              <div
-                className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 print:hidden"
-                onClick={() => setShowSignature(false)}
-              >
-                <div className="bg-white p-4 rounded shadow max-w-lg w-full">
-                  <img
-                    src={assignment.eod_signature_url}
-                    alt="Signature"
-                    className="w-full border"
-                  />
-                  <div className="text-xs mt-2 text-slate-500">
-                    Signed on{" "}
-                    {new Date(
-                      assignment.eod_signed_at
-                    ).toLocaleString("en-IN")}
-                  </div>
-                </div>
-              </div>
-            )}
+            <SignatureModal
+              open={showSignature}
+              signatureUrl={assignment.eod_signature_url}
+              signedAt={assignment.eod_signed_at}
+              onClose={() => setShowSignature(false)}
+            />
           </Section>
         )}
 
@@ -1079,17 +1074,12 @@ export default function AdminEODDetail() {
       <div className="print-only mt-10 pt-6 border-t text-xs text-slate-700">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-12">
           <div>
-            <p className="font-semibold">Custodian Signature</p>
-            {assignment?.eod_signature_url ? (
-              <img
-                src={assignment.eod_signature_url}
-                alt="Custodian Signature"
-                className="mt-2 h-12 w-auto object-contain"
-                style={{ maxHeight: "48px", maxWidth: "180px" }}
-              />
-            ) : (
-              <div className="mt-6 border-b w-48"></div>
-            )}
+            <SignatureImage
+              src={assignment?.eod_signature_url}
+              size="small"
+              showLabel={true}
+              isPrint={true}
+            />
             <p className="mt-1">Name & Date</p>
           </div>
           <div className="sm:text-right">
