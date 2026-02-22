@@ -658,7 +658,7 @@ loadTravelKPI();
                   label="Internal Transfers"
                   value={`₹${internalTransferTotal.toLocaleString("en-IN")}`}
                 />
-				
+                
 {profile?.role === "custodian" && (
   <>
     <div className="bg-indigo-50 rounded-lg border border-indigo-200 border-l-4 border-l-indigo-500 p-3 text-center">
@@ -719,8 +719,8 @@ loadTravelKPI();
                 <span className="text-slate-400 text-lg leading-none">{denomPlanOpen ? "▲" : "▼"}</span>
               </button>
 
-              {/* Always visible in print */}
-              <div className={denomPlanOpen ? "block" : "hidden print:block"}>
+              {/* Content respects collapse state - affects both screen AND print */}
+              <div className={denomPlanOpen ? "block" : "hidden"}>
                 <div className="divide-y divide-slate-100">
 
                   {/* Bank Withdrawal sub-section */}
@@ -736,7 +736,7 @@ loadTravelKPI();
                       </button>
                       <p className="text-xs font-semibold text-emerald-700 mb-2 hidden print:block">🏦 Bank Withdrawal Planning</p>
 
-                      <div className={bankPlanSubOpen ? "block" : "hidden print:block"}>
+                      <div className={bankPlanSubOpen ? "block" : "hidden"}>
                         <div className="space-y-3">
                           {bankDenomPlansForDisplay.map((bp: any) => {
                             const bankTotal = [100, 200, 500, 2000].reduce(
@@ -792,7 +792,7 @@ loadTravelKPI();
                         </button>
                         <p className="text-xs font-semibold text-indigo-700 mb-2 hidden print:block">📦 ATM Load Planning</p>
 
-                        <div className={atmLoadPlanSubOpen ? "block" : "hidden print:block"}>
+                        <div className={atmLoadPlanSubOpen ? "block" : "hidden"}>
                           <div className="space-y-3">
                             {plans.map((p: any) => {
                               const site = siteMap.get(p.site_id);
@@ -853,7 +853,7 @@ loadTravelKPI();
                         </button>
                         <p className="text-xs font-semibold text-orange-700 mb-2 hidden print:block">🏧 ATM Removal Planning</p>
 
-                        <div className={atmRemovalSubOpen ? "block" : "hidden print:block"}>
+                        <div className={atmRemovalSubOpen ? "block" : "hidden"}>
                           <div className="rounded-lg border border-orange-100 bg-orange-50 p-3">
                             <div className="flex items-center justify-between mb-2">
                               <p className="text-xs text-slate-500">Cash recovered from ATMs for redistribution</p>
