@@ -3,7 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
-import { getISTDateString } from "../utils/time";
+import { getISTDateString, getISTMonthStart } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 const GPS_RADIUS_METERS = 100;
@@ -33,6 +33,9 @@ async function getGPS() {
 export default function ATMExcessCash() {
   const { profile } = useAuth();
 
+  const [activeTab, setActiveTab] = useState<"entry" | "report">("entry");
+  const [excessDate, setExcessDate] = useState(getISTDateString());
+
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
   const [sites, setSites] = useState<any[]>([]);
   const [siteId, setSiteId] = useState<number | null>(null);
@@ -58,25 +61,44 @@ export default function ATMExcessCash() {
   const [saving, setSaving] = useState(false);
   const [submitLocked, setSubmitLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dateNotice, setDateNotice] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState("");
+
+  const [reportFromDate, setReportFromDate] = useState(getISTMonthStart());
+  const [reportToDate, setReportToDate] = useState(getISTDateString());
+  const [reportSiteId, setReportSiteId] = useState<number | "ALL">("ALL");
+  const [reportSites, setReportSites] = useState<any[]>([]);
+  const [reportRows, setReportRows] = useState<any[]>([]);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  const [showReceiptPreview, setShowReceiptPreview] = useState(false);
+  const [reconDrafts, setReconDrafts] = useState<Record<number, string>>({});
+  const [reconSaving, setReconSaving] = useState<Record<number, boolean>>({});
 
   /* ---------------- Load assignment & sites ---------------- */
 
   useEffect(() => {
     if (!profile) return;
 
-    async function loadData() {
-      const today = getISTDateString();
+    async function loadData(selectedDate: string) {
+      setDateNotice(null);
+      setAssignmentId(null);
+      setSites([]);
+      setSiteId(null);
 
       const { data: assignment } = await supabase
         .from("assignments")
         .select("id")
         .eq("custodian_id", profile.id)
-        .eq("assignment_date", today)
+        .eq("assignment_date", selectedDate)
         .single();
 
-      if (!assignment) return;
+      if (!assignment) {
+        setDateNotice("No assignment found for the selected date.");
+        return;
+      }
 
       setAssignmentId(assignment.id);
 
@@ -88,8 +110,20 @@ export default function ATMExcessCash() {
       setSites((data || []).map((r: any) => r.site));
     }
 
-    loadData();
-  }, [profile]);
+    loadData(excessDate);
+  }, [profile, excessDate]);
+
+  useEffect(() => {
+    async function loadReportSites() {
+      const { data } = await supabase
+        .from("sites")
+        .select("id, bank_name, address")
+        .order("bank_name", { ascending: true });
+      setReportSites(data || []);
+    }
+
+    loadReportSites();
+  }, []);
 
   /* ---------------- Save Excess Cash ---------------- */
 
@@ -110,6 +144,23 @@ export default function ATMExcessCash() {
     setGpsLng(null);
     setGpsDistance(null);
     setSubmitLocked(false);
+  }
+
+  function handleExcessDateChange(value: string) {
+    setError(null);
+    setDateNotice(null);
+    const today = getISTDateString();
+    if (value > today) {
+      setError("Excess date cannot be in the future.");
+      return;
+    }
+    setExcessDate(value);
+  }
+
+  function getPublicReceiptUrl(path?: string | null) {
+    if (!path) return null;
+    const { data } = supabase.storage.from("issue-photos").getPublicUrl(path);
+    return data.publicUrl;
   }
 
   async function acquireGPS() {
@@ -169,6 +220,12 @@ export default function ATMExcessCash() {
       return;
     }
 
+    if (!assignmentId) {
+      setError("No assignment found for the selected date.");
+      setSaving(false);
+      return;
+    }
+
     if (totalNotes === 0) {
       setError("Enter at least one excess denomination.");
       setSaving(false);
@@ -218,6 +275,7 @@ export default function ATMExcessCash() {
     const { error } = await supabase.from("atm_excess_cash").insert({
       assignment_id: assignmentId,
       site_id: siteId,
+      excess_date: excessDate,
       ...denoms,
       atm_receipt_url: filePath,
       remarks,
@@ -258,11 +316,106 @@ export default function ATMExcessCash() {
     setShowConfirm(true);
   }
 
+  async function loadReport() {
+    setReportLoading(true);
+    setReportError(null);
+
+    if (reportFromDate > reportToDate) {
+      setReportError("From Date cannot be after To Date.");
+      setReportLoading(false);
+      return;
+    }
+
+    let query = supabase
+      .from("atm_excess_cash")
+      .select(
+        "id, site_id, assignment_id, excess_date, remarks, atm_receipt_url, gps_status, gps_distance_meters, recon_communication_date, created_at, site:site_id(bank_name, address), assignment:assignment_id(assignment_date)"
+      )
+      .gte("excess_date", reportFromDate)
+      .lte("excess_date", reportToDate)
+      .order("excess_date", { ascending: false });
+
+    if (reportSiteId !== "ALL") {
+      query = query.eq("site_id", reportSiteId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      setReportError("Failed to load excess report.");
+      setReportLoading(false);
+      return;
+    }
+
+    const rows = (data || []).map((row: any) => {
+      const receiptUrl = getPublicReceiptUrl(row.atm_receipt_url);
+      return {
+        ...row,
+        receiptUrl,
+      };
+    });
+
+    const draftMap: Record<number, string> = {};
+    rows.forEach((row: any) => {
+      if (row.recon_communication_date) {
+        draftMap[row.id] = row.recon_communication_date;
+      }
+    });
+
+    setReconDrafts(draftMap);
+    setReportRows(rows);
+    setReportLoading(false);
+  }
+
+  async function updateReconDate(id: number) {
+    const value = reconDrafts[id] || "";
+    setReconSaving((prev) => ({ ...prev, [id]: true }));
+
+    const { error } = await supabase
+      .from("atm_excess_cash")
+      .update({ recon_communication_date: value || null })
+      .eq("id", id);
+
+    if (error) {
+      setReportError("Failed to update recon communication date.");
+    }
+
+    setReconSaving((prev) => ({ ...prev, [id]: false }));
+  }
+
   /* ---------------- UI ---------------- */
 
   return (
     <AppLayout>
-      <div className="max-w-2xl mx-auto space-y-5">
+      <div className="max-w-5xl mx-auto space-y-4">
+        <div className="flex gap-2 border-b border-slate-200 pb-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("entry")}
+            className={`px-3 py-1.5 rounded-full text-sm font-semibold ${
+              activeTab === "entry"
+                ? "bg-primary text-white"
+                : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            Excess Entry
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("report")}
+            className={`px-3 py-1.5 rounded-full text-sm font-semibold ${
+              activeTab === "report"
+                ? "bg-primary text-white"
+                : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            Excess Report
+          </button>
+        </div>
+      </div>
+
+      {activeTab === "entry" && (
+        <div className="max-w-2xl mx-auto space-y-5">
         <div>
           <h2 className="text-2xl font-bold text-primary mb-1">
             ATM Excess Cash Entry
@@ -273,6 +426,23 @@ export default function ATMExcessCash() {
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Excess Date <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              value={excessDate}
+              onChange={(e) => handleExcessDateChange(e.target.value)}
+              max={getISTDateString()}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            {dateNotice && (
+              <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded p-2">
+                {dateNotice}
+              </p>
+            )}
+          </div>
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
               ATM Site <span className="text-red-500">*</span>
@@ -432,6 +602,191 @@ export default function ATMExcessCash() {
           </button>
         </div>
       </div>
+      )}
+
+      {activeTab === "report" && (
+        <div className="max-w-5xl mx-auto space-y-5">
+          <div>
+            <h2 className="text-2xl font-bold text-primary mb-1">ATM Excess Report</h2>
+            <p className="text-sm text-slate-600">
+              Historical excess cash entries (not part of SOA)
+            </p>
+          </div>
+
+          <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">From Date</label>
+                <input
+                  type="date"
+                  value={reportFromDate}
+                  onChange={(e) => setReportFromDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">To Date</label>
+                <input
+                  type="date"
+                  value={reportToDate}
+                  onChange={(e) => setReportToDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">ATM Site</label>
+                <select
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm"
+                  value={reportSiteId}
+                  onChange={(e) =>
+                    setReportSiteId(e.target.value === "ALL" ? "ALL" : Number(e.target.value))
+                  }
+                >
+                  <option value="ALL">All Sites</option>
+                  {reportSites.map((s: any) => (
+                    <option key={s.id} value={s.id}>
+                      {s.bank_name} – {s.address}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={loadReport}
+                className="px-4 py-2 rounded-md text-sm font-semibold bg-slate-900 text-white"
+              >
+                {reportLoading ? "Loading..." : "Load Report"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setReportRows([]);
+                  setReportError(null);
+                }}
+                className="px-4 py-2 rounded-md text-sm font-semibold bg-slate-100 text-slate-600"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {reportError && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-lg text-sm">
+              ⚠️ {reportError}
+            </div>
+          )}
+
+          {reportRows.length === 0 && !reportLoading && !reportError && (
+            <div className="text-sm text-slate-500">No excess records for the selected filters.</div>
+          )}
+
+          {reportRows.length > 0 && (
+            <div className="bg-white rounded-lg border border-slate-200 overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead className="bg-slate-100 text-slate-700">
+                  <tr>
+                    <th className="text-left px-3 py-2">Date</th>
+                    <th className="text-left px-3 py-2">ATM Site</th>
+                    <th className="text-left px-3 py-2">Remarks</th>
+                    <th className="text-left px-3 py-2">Receipt Preview</th>
+                    <th className="text-left px-3 py-2">Recon Communication Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportRows.map((row: any) => (
+                    <tr key={row.id} className="border-t">
+                      <td className="px-3 py-2">
+                        {row.excess_date || row.assignment?.assignment_date || "-"}
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.site?.bank_name || "ATM"}
+                        <div className="text-[10px] text-slate-500">
+                          {row.site?.address || ""}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">{row.remarks || "-"}</td>
+                      <td className="px-3 py-2">
+                        {row.receiptUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReceiptPreviewUrl(row.receiptUrl);
+                              setShowReceiptPreview(true);
+                            }}
+                            className="text-primary text-xs font-semibold underline"
+                          >
+                            View Receipt
+                          </button>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            className="border border-slate-300 rounded px-2 py-1 text-xs"
+                            value={reconDrafts[row.id] || ""}
+                            onChange={(e) =>
+                              setReconDrafts((prev) => ({
+                                ...prev,
+                                [row.id]: e.target.value,
+                              }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            onClick={() => updateReconDate(row.id)}
+                            className="px-2 py-1 rounded text-xs bg-slate-900 text-white"
+                            disabled={!!reconSaving[row.id]}
+                          >
+                            {reconSaving[row.id] ? "Saving..." : "Save"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showReceiptPreview && receiptPreviewUrl && (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">ATM Receipt Preview</h3>
+              <button
+                type="button"
+                className="text-slate-400 hover:text-slate-600 text-xl"
+                onClick={() => setShowReceiptPreview(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <img
+              src={receiptPreviewUrl}
+              alt="ATM Receipt"
+              className="w-full max-h-[70vh] object-contain"
+            />
+            <div className="flex justify-end">
+              <a
+                href={receiptPreviewUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-primary underline"
+              >
+                Open in new tab
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmationModal
         open={showConfirm}
