@@ -71,7 +71,19 @@ export function convertISTToUTC(istDate: Date): string {
  * @returns Formatted string with date and time
  */
 export function formatIST(date: string | Date): string {
-  return new Date(date).toLocaleString("en-IN", {
+  if (!date) return "";
+  
+  // Parse UTC date properly if it's a string
+  let dateObj: Date;
+  if (typeof date === "string") {
+    const parsed = parseUTCDate(date);
+    if (!parsed) return "";
+    dateObj = parsed;
+  } else {
+    dateObj = date;
+  }
+  
+  return dateObj.toLocaleString("en-IN", {
     timeZone: IST_TIMEZONE,
     year: "numeric",
     month: "short",
@@ -123,6 +135,25 @@ export function formatISTFromUTC(date: string | Date): string {
 }
 
 /**
+ * Format timestamps that are stored as IST values but encoded as UTC (Z).
+ * Use for ATM load times captured on the client with IST offset applied.
+ */
+export function formatISTFromISTEncodedUTC(date: string | Date): string {
+  if (!date) return "";
+  const parsed = parseUTCDate(date);
+  if (!parsed) return "";
+  return parsed.toLocaleString("en-IN", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+/**
  * Format date only for display (without time)
  * Shows: "26 Jan 2026" or "26/01/2026"
  * Used for: assignment_date, transaction dates, date-only displays
@@ -135,7 +166,18 @@ export function formatISTDate(
   date: string | Date,
   format: "long" | "short" = "long"
 ): string {
-  const dateObj = new Date(date);
+  if (!date) return "";
+  
+  // Parse UTC date properly if it's a string
+  let dateObj: Date;
+  if (typeof date === "string") {
+    const parsed = parseUTCDate(date);
+    if (!parsed) return "";
+    dateObj = parsed;
+  } else {
+    dateObj = date;
+  }
+  
   if (format === "short") {
     return dateObj.toLocaleDateString("en-IN", {
       timeZone: IST_TIMEZONE,
@@ -161,7 +203,19 @@ export function formatISTDate(
  * @returns Formatted time string
  */
 export function formatISTTime(date: string | Date): string {
-  return new Date(date).toLocaleString("en-IN", {
+  if (!date) return "";
+  
+  // Parse UTC date properly if it's a string
+  let dateObj: Date;
+  if (typeof date === "string") {
+    const parsed = parseUTCDate(date);
+    if (!parsed) return "";
+    dateObj = parsed;
+  } else {
+    dateObj = date;
+  }
+  
+  return dateObj.toLocaleString("en-IN", {
     timeZone: IST_TIMEZONE,
     hour: "2-digit",
     minute: "2-digit",
@@ -178,7 +232,19 @@ export function formatISTTime(date: string | Date): string {
  * @returns Formatted audit log string
  */
 export function formatISTAudit(date: string | Date): string {
-  return new Date(date).toLocaleString("en-IN", {
+  if (!date) return "";
+  
+  // Parse UTC date properly if it's a string
+  let dateObj: Date;
+  if (typeof date === "string") {
+    const parsed = parseUTCDate(date);
+    if (!parsed) return "";
+    dateObj = parsed;
+  } else {
+    dateObj = date;
+  }
+  
+  return dateObj.toLocaleString("en-IN", {
     timeZone: IST_TIMEZONE,
     day: "2-digit",
     month: "short",

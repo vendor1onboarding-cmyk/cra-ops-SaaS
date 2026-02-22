@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { formatISTDate } from "../utils/time";
 
 type Assignment = {
   id: number;
@@ -94,7 +95,7 @@ export default function AdminApprovals() {
               <tbody>
                 {assignments.map(a => (
                   <tr key={a.id} className="hover:bg-slate-50">
-                    <td className="p-3 border">{a.assignment_date}</td>
+                    <td className="p-3 border">{formatISTDate(a.assignment_date, "short")}</td>
                     <td className="p-3 border">
                       {a.title || `Assignment #${a.id}`}
                     </td>

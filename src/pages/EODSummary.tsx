@@ -13,6 +13,7 @@ import {
   formatISTDate,
   formatIST,
   formatISTFromUTC,
+  formatISTFromISTEncodedUTC,
   formatISTTime,
   parseUTCDate,
 } from "../utils/time";
@@ -480,11 +481,11 @@ function CustodianEOD({
   const cashEvents: CashEvt[] = [];
 
   cashPickups.forEach((p: any) => {
-    const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
+    const ts = p.pickup_time ? (parseUTCDate(p.pickup_time)?.getTime() ?? 0) : 0;
     cashEvents.push({ kind: "pickup", ts, raw: p });
   });
   atmLoads.forEach((l: any) => {
-    const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
+    const ts = l.time_in ? (parseUTCDate(l.time_in)?.getTime() ?? 0) : 0;
     cashEvents.push({ kind: "load", ts, raw: l });
   });
 
@@ -1231,7 +1232,7 @@ function CustodianEOD({
                 return (
                   <div key={i} className="border rounded p-3 mb-3 bg-white text-xs">
                     <div className="font-medium">{formatSite(a.site)}</div>
-                    <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
+                    <div className="text-slate-500">Load Time: {formatISTFromISTEncodedUTC(a.time_in)}</div>
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       {DENOM_ORDER.map((d) => (
                         <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
@@ -1312,7 +1313,7 @@ function CustodianEOD({
                     <div key={`dest-${i}`} className="border rounded p-3 mb-2 bg-white text-xs">
                       <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
                       <div className="font-medium">{formatSite(a.site)}</div>
-                      <div className="text-slate-500">Load Time: {formatISTFromUTC(a.time_in)}</div>
+                      <div className="text-slate-500">Load Time: {formatISTFromISTEncodedUTC(a.time_in)}</div>
                       <div className="mt-2 font-semibold">
                         ATM Removal Used: ₹{internalAmt.toLocaleString("en-IN")}
                       </div>

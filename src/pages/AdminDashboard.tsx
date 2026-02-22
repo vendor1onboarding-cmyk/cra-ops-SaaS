@@ -120,7 +120,7 @@ export default function AdminDashboard() {
           </div>
           <div className="text-right text-xs">
             <p className="font-semibold">Admin Dashboard Report</p>
-            <p>Date: {new Date().toLocaleDateString("en-IN")}</p>
+            <p>Date: {formatISTDate(new Date(), "short")}</p>
             {profile?.full_name && <p>Admin: {profile.full_name}</p>}
           </div>
         </div>

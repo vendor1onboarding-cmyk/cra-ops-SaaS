@@ -4,7 +4,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
-import { formatIST, formatISTAudit, formatISTDate, formatISTTime, parseUTCDate } from "../utils/time";
+import { formatIST, formatISTAudit, formatISTDate, formatISTFromISTEncodedUTC, formatISTTime, parseUTCDate } from "../utils/time";
 import { SignatureImage, SignatureModal, preloadSignatureImage } from "../components/SignatureImage";
 
 /* ---------------- Utilities ---------------- */
@@ -199,11 +199,11 @@ export default function AdminEODDetail() {
     const adminCashEvents: AdminCashEvt[] = [];
 
     (data.cashPickups || []).forEach((p: any) => {
-      const ts = p.pickup_time ? new Date(p.pickup_time).getTime() : 0;
+      const ts = p.pickup_time ? (parseUTCDate(p.pickup_time)?.getTime() ?? 0) : 0;
       adminCashEvents.push({ kind: "pickup", ts, raw: p });
     });
     (data.atmLoads || []).forEach((l: any) => {
-      const ts = l.time_in ? new Date(l.time_in).getTime() : 0;
+      const ts = l.time_in ? (parseUTCDate(l.time_in)?.getTime() ?? 0) : 0;
       adminCashEvents.push({ kind: "load", ts, raw: l });
     });
 
@@ -773,7 +773,7 @@ export default function AdminEODDetail() {
             return (
               <div key={i} className="border rounded p-3 mb-3 text-xs">
                 <div className="font-medium">{formatSite(a.site)}</div>
-                <div className="text-slate-500">Load Time: {formatIST(a.time_in || a.load_time)}</div>
+                <div className="text-slate-500">Load Time: {formatISTFromISTEncodedUTC(a.time_in || a.load_time)}</div>
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   {DENOM_ORDER.map((d) => (
                     <div key={d}>{a[`denom_${d}`] || 0} × ₹{d}</div>
@@ -859,7 +859,7 @@ export default function AdminEODDetail() {
                   <div key={`dest-${i}`} className="border rounded p-3 mb-2 text-xs">
                     <div className="text-[10px] text-indigo-700 font-semibold mb-1">Internal Transfer (Neutral)</div>
                     <div className="font-medium">{formatSite(a.site)}</div>
-                    <div className="text-slate-500">Load Time: {formatIST(a.time_in)}</div>
+                    <div className="text-slate-500">Load Time: {formatISTFromISTEncodedUTC(a.time_in)}</div>
                     <div className="mt-2 font-semibold">
                       ATM Removal Used: ₹{internalAmt.toLocaleString("en-IN")}
                     </div>
