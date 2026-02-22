@@ -10,6 +10,48 @@ import {
   parseUTCDate,
 } from "../utils/time";
 
+// Print styles for operational settlement report
+const printStyles = `
+  @media print {
+    .print-statement-table {
+      table-layout: fixed;
+      width: 100%;
+      font-size: 11px;
+      border-collapse: collapse;
+    }
+    
+    .print-statement-table th,
+    .print-statement-table td {
+      border: 1px solid #000;
+      padding: 6px 4px;
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+    
+    .print-statement-table th {
+      background-color: #f3f4f6;
+      font-weight: bold;
+      text-align: left;
+    }
+    
+    .print-statement-table td.text-right {
+      text-align: right;
+    }
+    
+    .print-statement-row {
+      page-break-inside: avoid;
+    }
+    
+    .print-only {
+      display: block !important;
+    }
+    
+    .print:hidden {
+      display: none !important;
+    }
+  }
+`;
+
 type SOASummaryRow = {
   soa_id: number;
   assignment_id?: number;
@@ -80,6 +122,17 @@ export default function StatementOfAccounts() {
   const isAdmin = profile?.role === "admin" || profile?.role === "supervisor";
   const showAllowance = isAdmin;
   const bankLogoSrc = `${import.meta.env.BASE_URL}bank-logo.png`;
+
+  // Inject print styles
+  useEffect(() => {
+    const styleTag = document.createElement("style");
+    styleTag.textContent = printStyles;
+    document.head.appendChild(styleTag);
+    
+    return () => {
+      document.head.removeChild(styleTag);
+    };
+  }, []);
 
   useEffect(() => {
     if (!profile) return;
@@ -611,20 +664,21 @@ export default function StatementOfAccounts() {
         const totalLoaded = loadBankAmount + loadInternalAmount;
 
         if (totalLoaded > 0) {
-          // CRITICAL: Debit shows only bank-loaded (affects closing balance)
-          // Internal transfers are neutral: -₹X (removal) + ₹X (load) = ₹0
-          // Remarks show breakdown for audit trail
+          // CRITICAL FIX: Debit includes BOTH bank + internal for running balance
+          // Internal removal increases balance (+₹X), internal load must decrease it (-₹X)
+          // This ensures end-of-day balance = 0 when all internal transfers are matched
+          // Note: This does NOT affect SOA KPI totals (bank_loaded remains bank-only in DB)
           transactionRows.push({
             assignment_id: a.assignment_id,
             assignment_date: assignmentDate,
             ts,
             type: "ATM Load",
             atm: loadSiteLabel,
-            debit: loadBankAmount, // Only bank affects balance, internal is neutral
+            debit: totalLoaded, // Bank + Internal (both reduce running balance)
             credit: 0,
-            balanceImpact: -loadBankAmount, // Only bank-loaded reduces cash balance
+            balanceImpact: -totalLoaded, // Total load reduces cash-in-hand
             remarks: loadInternalAmount > 0
-              ? `Bank: ₹${loadBankAmount.toLocaleString("en-IN")} | Internal ATM Transfer: ₹${loadInternalAmount.toLocaleString("en-IN")} (neutral)`
+              ? `Bank: ₹${loadBankAmount.toLocaleString("en-IN")} | Internal ATM Transfer: ₹${loadInternalAmount.toLocaleString("en-IN")}`
               : "",
           });
         }
@@ -747,12 +801,23 @@ export default function StatementOfAccounts() {
     // - Pickups (Bank/ATM Removal): positive impact (cash entering custody)
     // - ATM Loads: negative impact (total cash leaving, regardless of source)
     // - Excess Cash: excluded (handed over to vendor)
+    // 
+    // OPERATIONAL MODEL: Print ledger represents daily operational settlement.
+    // Running balance starts at 0 each day (opening balance excluded intentionally).
+    // This differs from accounting model where opening balance carries forward.
+    //
+    // FINAL RECONCILIATION: If denomination matching or rounding leaves a residual
+    // balance at assignment end, auto-neutralize with reconciliation row to ensure
+    // operational settlement closes at 0. This maintains print ledger integrity
+    // without affecting database, KPIs, or monthly totals.
     let running = 0;
     let currentAssignment = -1;
-    return sorted.map((row) => {
+    
+    return sorted.flatMap((row, index, array) => {
       if (row.assignment_id !== currentAssignment) {
         currentAssignment = row.assignment_id;
-        running = printTransactions.openingBalances.get(row.assignment_id) || 0;
+        // Operational daily settlement: start fresh at 0 each day
+        running = 0;
       }
       
       // Excess cash is handed over to vendor (India One), so don't include in balance
@@ -761,7 +826,30 @@ export default function StatementOfAccounts() {
         running += row.balanceImpact;
       }
       
-      return { ...row, balance: running };
+      const outputRow = { ...row, balance: running };
+      
+      // Check if this is the last row of the assignment
+      const isLastRowOfAssignment =
+        index === array.length - 1 ||
+        array[index + 1].assignment_id !== row.assignment_id;
+      
+      // If there's a residual balance at end of assignment, add auto-reconciliation row
+      if (isLastRowOfAssignment && Math.abs(running) > 0.5) {
+        const reconciliationRow = {
+          ...outputRow,
+          type: "Reconciliation Adjustment",
+          atm: "",
+          debit: running > 0 ? running : 0,
+          credit: running < 0 ? -running : 0,
+          balanceImpact: -running,
+          balance: 0,
+          remarks: "Auto neutralized to maintain operational settlement = 0",
+        };
+        running = 0;
+        return [outputRow, reconciliationRow];
+      }
+      
+      return [outputRow];
     });
   }, [printTransactions]);
 
@@ -899,7 +987,7 @@ export default function StatementOfAccounts() {
             </div>
 
             <div className="text-right text-xs">
-              <p className="font-semibold">Statement of Accounts Report</p>
+              <p className="font-semibold">Operational Daily Settlement Report</p>
               <p>Period: {fromDate} to {toDate}</p>
               <p>Date: {new Date().toLocaleDateString("en-IN")}</p>
               {profile?.full_name && (
