@@ -36,11 +36,11 @@ export const SignatureImage: React.FC<SignatureImageProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState(src);
 
-  // Size mappings
+  // Size mappings - Professional signature rendering
   const sizeMap = {
-    small: { h: 'h-12', maxH: 'max-h-12', maxW: 'max-w-20' },
-    medium: { h: 'h-20', maxH: 'max-h-20', maxW: 'max-w-48' },
-    large: { h: 'h-32', maxH: 'max-h-32', maxW: 'max-w-96' },
+    small: { h: 'h-40', maxH: 'max-h-40', maxW: 'max-w-64' },      // 160px height, 256px width (mobile-optimized)
+    medium: { h: 'h-56', maxH: 'max-h-56', maxW: 'max-w-2xl' },    // 224px height, 672px width (standard display)
+    large: { h: 'h-72', maxH: 'max-h-72', maxW: 'max-w-4xl' },     // 288px height, 896px width (modal/premium)
   };
   
   const sizes = sizeMap[size];
@@ -248,24 +248,26 @@ export const SignatureImage: React.FC<SignatureImageProps> = ({
   // Success state - image loaded
   return (
     <div className={`space-y-2 ${className}`} style={style}>
-      {showLabel && <p className="text-xs font-semibold text-slate-600 print:text-slate-800 print:text-[8px]">Signature:</p>}
-      {/* Print version: clean professional look, no colors/borders */}
+      {showLabel && <p className="text-xs font-semibold text-slate-600 print:text-slate-800 print:text-[10px]">Signature:</p>}
+      {/* Print version: clean professional look, no colors/borders - maintains full size for professional rendering */}
       <div className="hidden print:block">
         <img
           src={imageUrl}
           alt={alt}
           onLoad={handleImageLoad}
           onError={handleImageError}
-          className={`${sizes.h} ${sizes.maxH} ${sizes.maxW} object-contain print:max-w-48 print:max-h-20`}
+          className={`${sizes.h} ${sizes.maxH} ${sizes.maxW} object-contain`}
           style={{
             ...style,
             display: 'block',
+            maxWidth: '100%',
+            height: 'auto',
           }}
         />
       </div>
       
-      {/* Screen version: colorful with validation message */}
-      <div className="print:hidden border-2 border-green-300 rounded-lg bg-gradient-to-br from-green-50 to-emerald-50 p-3 shadow-sm">
+      {/* Screen version: colorful with validation message - larger for mobile readability */}
+      <div className="print:hidden border-2 border-green-300 rounded-lg bg-gradient-to-br from-green-50 to-emerald-50 p-4 shadow-sm">
         <img
           src={imageUrl}
           alt={alt}
@@ -275,9 +277,11 @@ export const SignatureImage: React.FC<SignatureImageProps> = ({
           style={{
             ...style,
             display: 'block',
+            maxWidth: '100%',
+            height: 'auto',
           }}
         />
-        <p className="text-xs text-green-700 text-center mt-2 font-medium">✓ Signature verified & secured</p>
+        <p className="text-xs text-green-700 text-center mt-3 font-medium">✓ Signature verified & secured</p>
       </div>
     </div>
   );
@@ -296,30 +300,34 @@ export const SignatureModal: React.FC<{
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 print:hidden"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 print:hidden p-4"
       onClick={onClose}
     >
-      <div className="bg-white p-4 rounded shadow max-w-lg w-full space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full space-y-4 p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-lg">Signature</h3>
+          <h3 className="font-bold text-xl">Custodian Signature</h3>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 text-2xl leading-none"
+            className="text-slate-400 hover:text-slate-600 text-3xl leading-none flex-shrink-0"
             style={{ minHeight: '44px', minWidth: '44px' }}
           >
             ✕
           </button>
         </div>
 
-        <SignatureImage 
-          src={signatureUrl} 
-          size="large"
-          showLabel={false}
-        />
+        {/* Signature with proper spacing and professional styling */}
+        <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-lg p-6 flex items-center justify-center min-h-[400px]">
+          <SignatureImage 
+            src={signatureUrl} 
+            size="large"
+            showLabel={false}
+          />
+        </div>
 
         {signedAt && (
-          <div className="text-xs text-slate-500">
-            Signed on: {new Date(signedAt).toLocaleString("en-IN")}
+          <div className="text-sm text-slate-600 border-t pt-4">
+            <p className="font-semibold">Signed on:</p>
+            <p>{new Date(signedAt).toLocaleString("en-IN")}</p>
           </div>
         )}
       </div>

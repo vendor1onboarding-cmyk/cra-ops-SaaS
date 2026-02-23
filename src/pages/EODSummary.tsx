@@ -1063,7 +1063,7 @@ function CustodianEOD({
               {assignment.eod_signature_url && (
                 <SignatureImage
                   src={assignment.eod_signature_url}
-                  size="medium"
+                  size="large"
                   showLabel={true}
                   onLoadError={(error) => {
                     console.warn('[EODSummary] Signature load warning:', error);

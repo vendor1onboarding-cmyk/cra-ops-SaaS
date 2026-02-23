@@ -1076,7 +1076,7 @@ export default function AdminEODDetail() {
           <div>
             <SignatureImage
               src={assignment?.eod_signature_url}
-              size="small"
+              size="medium"
               showLabel={true}
               isPrint={true}
             />
