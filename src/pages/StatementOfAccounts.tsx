@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -88,12 +89,37 @@ type SOADetailedRow = {
   full_name?: string;
 };
 
+type AdjustmentDetail = {
+  id: number;
+  adjustment_type: string;
+  adjustment_amount: number;
+  reason: string;
+  reference?: string;
+  exchange_metadata?: any;
+  transfer_metadata?: any;
+  created_at: string;
+};
+
 export default function StatementOfAccounts() {
+  const location = useLocation();
   const { profile } = useAuth();
-  const [viewMode, setViewMode] = useState<"summary" | "detailed">("summary");
+
+  // Read initial filter values from URL query params (only on first mount)
+  function getInitialFromQuery(param: string, fallback: string) {
+    const params = new URLSearchParams(location.search);
+    return params.get(param) || fallback;
+  }
+
+  const [viewMode, setViewMode] = useState<"summary" | "detailed">(() => {
+    const v = getInitialFromQuery("view", "summary");
+    return v === "detailed" ? "detailed" : "summary";
+  });
   const [summaryRows, setSummaryRows] = useState<SOASummaryRow[]>([]);
   const [detailedRows, setDetailedRows] = useState<SOADetailedRow[]>([]);
   const [loadSourceData, setLoadSourceData] = useState<Map<number, { bank: number; internal: number }>>(new Map());
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [adjustmentDetails, setAdjustmentDetails] = useState<Map<number, AdjustmentDetail[]>>(new Map());
+  const [loadingAdjustments, setLoadingAdjustments] = useState<Set<number>>(new Set());
   const [printTransactions, setPrintTransactions] = useState<{
     cashPickups: any[];
     atmLoads: any[];
@@ -109,15 +135,14 @@ export default function StatementOfAccounts() {
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "open" | "submitted" | "approved" | "rejected"
   >("ALL");
-  const [custodianFilter, setCustodianFilter] = useState("ALL");
+  const [custodianFilter, setCustodianFilter] = useState(() => getInitialFromQuery("custodian", "ALL"));
   const [custodianOptions, setCustodianOptions] = useState<
     { id: string; full_name: string }[]
   >([]);
 
-  // Initialize dates based on IST timezone
-  // These are used for database queries (stored in DATE format, not timestamps)
-  const [fromDate, setFromDate] = useState(getISTMonthStart());
-  const [toDate, setToDate] = useState(getISTDateString());
+  // Initialize dates based on IST timezone or URL
+  const [fromDate, setFromDate] = useState(() => getInitialFromQuery("from", getISTMonthStart()));
+  const [toDate, setToDate] = useState(() => getInitialFromQuery("to", getISTDateString()));
 
   const isAdmin = profile?.role === "admin" || profile?.role === "supervisor";
   const showAllowance = isAdmin;
@@ -320,9 +345,9 @@ export default function StatementOfAccounts() {
                       .in("assignment_id", assignmentIds),
                     supabase
                       .from("soa_adjustments")
-                      .select("assignment_id, adjustment_type, exchange_metadata, transfer_metadata, created_at")
+                      .select("assignment_id, adjustment_type, exchange_metadata, transfer_metadata, created_at, custodian_confirmed, custodian_confirmed_at, custodian_signature_url")
                       .in("assignment_id", assignmentIds)
-                      .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"]),
+                      .or(`and(adjustment_type.in.(EXCHANGE,INTER_SITE_TRANSFER)),and(exchange_metadata->>type.eq.ADMIN_CORRECTION,custodian_confirmed.eq.true)`),
                     supabase
                       .from("v_soa_detailed")
                       .select("assignment_id, opening_balance")
@@ -396,6 +421,42 @@ export default function StatementOfAccounts() {
 
   const getClosingBalance = (row: SOADetailedRow) =>
     row.opening_balance - row.total_loads;
+
+  const toggleRowExpansion = async (assignmentId: number) => {
+    const newExpanded = new Set(expandedRows);
+    
+    if (newExpanded.has(assignmentId)) {
+      newExpanded.delete(assignmentId);
+      setExpandedRows(newExpanded);
+    } else {
+      newExpanded.add(assignmentId);
+      setExpandedRows(newExpanded);
+      
+      // Fetch adjustment details if not already loaded
+      if (!adjustmentDetails.has(assignmentId)) {
+        setLoadingAdjustments(new Set(loadingAdjustments).add(assignmentId));
+        
+        try {
+          const { data, error } = await supabase
+            .from("soa_adjustments")
+            .select("id, adjustment_type, adjustment_amount, reason, reference, exchange_metadata, transfer_metadata, created_at")
+            .eq("assignment_id", assignmentId)
+            .in("adjustment_type", ["EXCHANGE", "INTER_SITE_TRANSFER"])
+            .order("created_at", { ascending: false });
+          
+          if (!error && data) {
+            setAdjustmentDetails(new Map(adjustmentDetails).set(assignmentId, data));
+          }
+        } catch (err) {
+          console.error("Error loading adjustment details:", err);
+        } finally {
+          const newLoading = new Set(loadingAdjustments);
+          newLoading.delete(assignmentId);
+          setLoadingAdjustments(newLoading);
+        }
+      }
+    }
+  };
 
   const getFinalNet = (row: SOASummaryRow) => {
     // CRITICAL: Only BANK CASH affects closing balance
@@ -785,6 +846,27 @@ export default function StatementOfAccounts() {
           }
         });
       }
+
+      // Admin Correction (confirmed only)
+      if (adj.exchange_metadata?.type === "ADMIN_CORRECTION" && adj.custodian_confirmed) {
+        const deltaTotal = Number(adj.exchange_metadata?.delta_total || 0);
+        const signatureIndicator = adj.custodian_signature_url ? "✓ Signed" : "Unsigned";
+        const remarks = `Correction approved by Custodian (${signatureIndicator})`;
+
+        if (deltaTotal !== 0) {
+          transactionRows.push({
+            assignment_id: adj.assignment_id,
+            assignment_date: assignmentDate,
+            ts: normalizeUtcDate(adj.custodian_confirmed_at) || new Date(),
+            type: "Admin Correction",
+            atm: "Adjustment",
+            debit: deltaTotal > 0 ? deltaTotal : 0,
+            credit: deltaTotal < 0 ? -deltaTotal : 0,
+            balanceImpact: deltaTotal,
+            remarks,
+          });
+        }
+      }
     });
 
     const sorted = transactionRows.sort((a, b) => {
@@ -1012,8 +1094,11 @@ export default function StatementOfAccounts() {
               </tr>
             </thead>
             <tbody>
-              {printStatementRows.map((row, idx) => (
-                <tr key={`print-row-${idx}`} className="print-statement-row">
+              {printStatementRows.map((row) => (
+                <tr
+                  key={`print-row-${row.assignment_id || row.id || ''}-${row.type}-${row.ts instanceof Date ? row.ts.getTime() : row.ts}-${row.atm}`}
+                  className="print-statement-row"
+                >
                   <td>{formatISTDate(row.ts, "short")}</td>
                   <td>{formatISTTime(row.ts)}</td>
                   <td>{row.type}</td>
@@ -1332,17 +1417,17 @@ export default function StatementOfAccounts() {
               {viewMode === "summary" ? (
                 <>
                   <div className="sm:hidden p-4 space-y-3">
-                    {summaryRows.map((r, idx) => {
+                    {summaryRows.map((r) => {
                       const netUnbalanced =
                         Math.abs(getFinalNet(r)) >= 0.01;
                       return (
                         <div
-                          key={idx}
+                          key={r.assignment_id || r.soa_id || r.id}
                           className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
                         >
                           <div className="flex items-center justify-between">
                             <div className="text-sm font-semibold text-slate-900">
-                              {formatISTDate(r.assignment_date, "short")}
+                              {formatISTDate(r.assignment_date, "short") || r.assignment_date || "—"}
                             </div>
                             <span className="text-xs font-semibold px-2 py-1 rounded bg-slate-100 text-slate-700">
                               {r.status || "unknown"}
@@ -1408,15 +1493,19 @@ export default function StatementOfAccounts() {
                               Final Net (Expected 0)
                             </span>
                             <span
-                              className={`px-2 py-1 rounded font-semibold ${
+                              className={`flex items-center gap-1 px-2 py-1 rounded font-semibold ${
                                 netUnbalanced
                                   ? "bg-amber-100 text-amber-900"
                                   : "bg-emerald-100 text-emerald-900"
                               }`}
                             >
+                              {netUnbalanced && <span title="Unreconciled">⚠️</span>}
                               ₹{getFinalNet(r).toLocaleString(
                                 "en-IN",
                                 { minimumFractionDigits: 2 }
+                              )}
+                              {netUnbalanced && (
+                                <span className="ml-1 text-xs font-normal text-amber-900">Unreconciled</span>
                               )}
                             </span>
                           </div>
@@ -1466,16 +1555,16 @@ export default function StatementOfAccounts() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
-                        {summaryRows.map((r, idx) => {
+                        {summaryRows.map((r) => {
                           const netUnbalanced =
                             Math.abs(getFinalNet(r)) >= 0.01;
                           return (
                             <tr
-                              key={idx}
+                              key={r.assignment_id || r.soa_id || r.id}
                               className="hover:bg-slate-50 transition-colors"
                             >
                               <td className="px-4 py-3 text-slate-900">
-                                {formatISTDate(r.assignment_date, "short")}
+                                {formatISTDate(r.assignment_date, "short") || r.assignment_date || "—"}
                               </td>
                               <td className="px-4 py-3 text-slate-700">
                                 <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
@@ -1590,12 +1679,12 @@ export default function StatementOfAccounts() {
               ) : (
                 <>
                   <div className="sm:hidden p-4 space-y-3">
-                    {detailedRows.map((r, idx) => {
+                    {detailedRows.map((r) => {
                       const closing = getClosingBalance(r);
                       const balanced = Math.abs(closing) < 0.01;
                       return (
                         <div
-                          key={idx}
+                          key={r.assignment_id || r.soa_id || r.id}
                           className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
                         >
                           <div className="flex items-center justify-between">
@@ -1739,87 +1828,230 @@ export default function StatementOfAccounts() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
-                        {detailedRows.map((r, idx) => {
+                        {detailedRows.map((r) => {
                           const closing = getClosingBalance(r);
                           const balanced = Math.abs(closing) < 0.01;
+                          const hasAdjustments = (r.exchange_count + r.transfer_count) > 0;
+                          const isExpanded = expandedRows.has(r.assignment_id);
+                          const adjustments = adjustmentDetails.get(r.assignment_id) || [];
+                          const isLoadingAdj = loadingAdjustments.has(r.assignment_id);
+                          
                           return (
-                            <tr
-                              key={idx}
-                              className="hover:bg-slate-50 transition-colors"
-                            >
-                              <td className="px-4 py-3 text-slate-900">
-                                {formatISTDate(r.assignment_date, "short")}
-                              </td>
-                              <td className="px-4 py-3 text-slate-700">
-                                <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
-                                  {r.status || "unknown"}
-                                </span>
-                              </td>
-                              {isAdmin && (
+                            <>
+                              <tr
+                                key={r.assignment_id || r.soa_id || r.id}
+                                className="hover:bg-slate-50 transition-colors"
+                              >
+                                <td className="px-4 py-3 text-slate-900">
+                                  {formatISTDate(r.assignment_date, "short") || r.assignment_date || "—"}
+                                </td>
                                 <td className="px-4 py-3 text-slate-700">
                                   <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
-                                    {r.full_name || "Unknown"}
+                                    {r.status || "unknown"}
                                   </span>
                                 </td>
-                              )}
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                {r.opening_balance.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                })}
-                              </td>
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                {r.total_withdrawals.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                })}
-                              </td>
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                {r.total_loads.toLocaleString("en-IN", {
-                                  minimumFractionDigits: 2,
-                                })}
-                              </td>
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                {r.exchange_count}
-                              </td>
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                {r.transfer_count}
-                              </td>
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                {r.travel_km}
-                              </td>
-                              {showAllowance && (
+                                {isAdmin && (
+                                  <td className="px-4 py-3 text-slate-700">
+                                    <span className="inline-block bg-slate-100 rounded px-2 py-1 text-xs font-medium">
+                                      {r.full_name || "Unknown"}
+                                    </span>
+                                  </td>
+                                )}
                                 <td className="px-4 py-3 text-right text-slate-900">
-                                  {r.travel_allowance.toLocaleString("en-IN", {
+                                  {r.opening_balance.toLocaleString("en-IN", {
                                     minimumFractionDigits: 2,
                                   })}
                                 </td>
+                                <td className="px-4 py-3 text-right text-slate-900">
+                                  {r.total_withdrawals.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </td>
+                                <td className="px-4 py-3 text-right text-slate-900">
+                                  {r.total_loads.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                  })}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  {hasAdjustments ? (
+                                    <button
+                                      onClick={() => toggleRowExpansion(r.assignment_id)}
+                                      className="inline-flex items-center gap-1 text-yellow-700 hover:text-yellow-900 font-medium text-sm transition-colors"
+                                      title="Click to see exchange details"
+                                    >
+                                      <span>{r.exchange_count}</span>
+                                      <span className="text-xs">{isExpanded ? "▼" : "▶"}</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-slate-900">{r.exchange_count}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  {hasAdjustments ? (
+                                    <button
+                                      onClick={() => toggleRowExpansion(r.assignment_id)}
+                                      className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 font-medium text-sm transition-colors"
+                                      title="Click to see transfer details"
+                                    >
+                                      <span>{r.transfer_count}</span>
+                                      <span className="text-xs">{isExpanded ? "▼" : "▶"}</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-slate-900">{r.transfer_count}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-right text-slate-900">
+                                  {r.travel_km}
+                                </td>
+                                {showAllowance && (
+                                  <td className="px-4 py-3 text-right text-slate-900">
+                                    {r.travel_allowance.toLocaleString("en-IN", {
+                                      minimumFractionDigits: 2,
+                                    })}
+                                  </td>
+                                )}
+                                <td className="px-4 py-3 text-right text-slate-900">
+                                  <span
+                                    className={
+                                      r.excess_reported > 0
+                                        ? "text-red-600 font-semibold"
+                                        : ""
+                                    }
+                                  >
+                                    {r.excess_reported.toLocaleString("en-IN", {
+                                      minimumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <span
+                                      className={`inline-block rounded px-2 py-1 font-semibold text-xs ${
+                                        balanced
+                                          ? "bg-emerald-100 text-emerald-900"
+                                          : "bg-amber-100 text-amber-900"
+                                      }`}
+                                    >
+                                      ₹{closing.toLocaleString("en-IN", {
+                                        minimumFractionDigits: 2,
+                                      })}
+                                    </span>
+                                    {balanced ? (
+                                      <span className="text-emerald-600 text-sm font-bold" title="Balanced">✓</span>
+                                    ) : (
+                                      <span className="text-amber-600 text-sm font-bold" title="Unreconciled">⚠️</span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                              
+                              {/* Expandable adjustment details row */}
+                              {isExpanded && (
+                                <tr className="bg-slate-50">
+                                  <td colSpan={isAdmin ? 12 : 11} className="px-4 py-4">
+                                    {isLoadingAdj ? (
+                                      <div className="flex items-center justify-center py-4 text-slate-600">
+                                        <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-slate-400 mr-2" />
+                                        Loading adjustment details...
+                                      </div>
+                                    ) : adjustments.length > 0 ? (
+                                      <div className="space-y-3">
+                                        <h4 className="text-sm font-semibold text-slate-700 mb-2">
+                                          📋 Operational Adjustments (Neutral - No Net Impact)
+                                        </h4>
+                                        {adjustments.map((adj) => (
+                                          <div
+                                            key={adj.id}
+                                            className={`rounded-lg border p-3 ${
+                                              adj.adjustment_type === "EXCHANGE"
+                                                ? "bg-yellow-50 border-yellow-200"
+                                                : "bg-blue-50 border-blue-200"
+                                            }`}
+                                          >
+                                            <div className="flex items-start justify-between mb-2">
+                                              <div className="flex items-center gap-2">
+                                                <span
+                                                  className={`px-2 py-1 rounded text-xs font-semibold ${
+                                                    adj.adjustment_type === "EXCHANGE"
+                                                      ? "bg-yellow-100 text-yellow-800"
+                                                      : "bg-blue-100 text-blue-800"
+                                                  }`}
+                                                >
+                                                  {adj.adjustment_type === "EXCHANGE" ? "💱 Exchange" : "🔄 Transfer"}
+                                                </span>
+                                                <span className="text-xs text-slate-500">
+                                                  {formatISTDate(adj.created_at, "short")} {formatISTTime(adj.created_at)}
+                                                </span>
+                                              </div>
+                                            </div>
+                                            
+                                            <p className="text-sm text-slate-700 mb-2">
+                                              <span className="font-medium">Reason:</span> {adj.reason}
+                                            </p>
+                                            
+                                            {adj.exchange_metadata && (
+                                              <div className="grid grid-cols-2 gap-3 text-xs mt-2">
+                                                <div className="bg-white rounded p-2 border border-yellow-200">
+                                                  <p className="font-semibold text-yellow-900 mb-1">From: {adj.exchange_metadata.from_location}</p>
+                                                  <p className="text-slate-600">
+                                                    {Object.entries(adj.exchange_metadata.from_denominations || {})
+                                                      .filter(([_, count]) => (count as number) > 0)
+                                                      .map(([denom, count]) => `₹${denom.replace('denom_', '')} × ${count}`)
+                                                      .join(', ')}
+                                                  </p>
+                                                  <p className="font-semibold text-yellow-900 mt-1">
+                                                    Total: ₹{(adj.exchange_metadata.total_amount || 0).toLocaleString("en-IN")}
+                                                  </p>
+                                                </div>
+                                                <div className="bg-white rounded p-2 border border-yellow-200">
+                                                  <p className="font-semibold text-yellow-900 mb-1">To: {adj.exchange_metadata.to_location}</p>
+                                                  <p className="text-slate-600">
+                                                    {Object.entries(adj.exchange_metadata.to_denominations || {})
+                                                      .filter(([_, count]) => (count as number) > 0)
+                                                      .map(([denom, count]) => `₹${denom.replace('denom_', '')} × ${count}`)
+                                                      .join(', ')}
+                                                  </p>
+                                                  <p className="font-semibold text-yellow-900 mt-1">
+                                                    Total: ₹{(adj.exchange_metadata.total_amount || 0).toLocaleString("en-IN")}
+                                                  </p>
+                                                </div>
+                                              </div>
+                                            )}
+                                            
+                                            {adj.transfer_metadata && (
+                                              <div className="grid grid-cols-2 gap-3 text-xs mt-2">
+                                                <div className="bg-white rounded p-2 border border-blue-200">
+                                                  <p className="font-semibold text-blue-900 mb-1">From: {adj.transfer_metadata.from_site_name}</p>
+                                                  <p className="text-slate-600">
+                                                    ₹{(adj.transfer_metadata.amount || 0).toLocaleString("en-IN")}
+                                                  </p>
+                                                </div>
+                                                <div className="bg-white rounded p-2 border border-blue-200">
+                                                  <p className="font-semibold text-blue-900 mb-1">To: {adj.transfer_metadata.to_site_name}</p>
+                                                  <p className="text-slate-600">
+                                                    ₹{(adj.transfer_metadata.amount || 0).toLocaleString("en-IN")}
+                                                  </p>
+                                                </div>
+                                              </div>
+                                            )}
+                                            
+                                            {adj.reference && (
+                                              <p className="text-xs text-slate-500 mt-2">
+                                                <span className="font-medium">Reference:</span> {adj.reference}
+                                              </p>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-slate-600 text-center py-2">
+                                        No adjustment details available
+                                      </p>
+                                    )}
+                                  </td>
+                                </tr>
                               )}
-                              <td className="px-4 py-3 text-right text-slate-900">
-                                <span
-                                  className={
-                                    r.excess_reported > 0
-                                      ? "text-red-600 font-semibold"
-                                      : ""
-                                  }
-                                >
-                                  {r.excess_reported.toLocaleString("en-IN", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <span
-                                  className={`inline-block rounded px-2 py-1 font-semibold text-xs ${
-                                    balanced
-                                      ? "bg-emerald-100 text-emerald-900"
-                                      : "bg-amber-100 text-amber-900"
-                                  }`}
-                                >
-                                  {closing.toLocaleString("en-IN", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </td>
-                            </tr>
+                            </>
                           );
                         })}
                       </tbody>

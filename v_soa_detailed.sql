@@ -1,4 +1,4 @@
-create view public.v_soa_detailed as
+create or replace view public.v_soa_detailed as
 select
   id as soa_id,
   id as assignment_id,
@@ -109,7 +109,27 @@ select
     ),
     0::numeric
   ) as total_loads,
-  0 as net_adjustments,
+  COALESCE(
+    (
+      select
+        sum(
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_2000')::bigint, 0) * 2000 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_500')::bigint, 0) * 500 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_200')::bigint, 0) * 200 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_100')::bigint, 0) * 100 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_50')::bigint, 0) * 50 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_20')::bigint, 0) * 20 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_10')::bigint, 0) * 10
+        ) as sum
+      from
+        soa_adjustments sa
+      where
+        sa.assignment_id = a.id
+        and sa.custodian_confirmed = true
+        and (sa.exchange_metadata->>'type') = 'ADMIN_CORRECTION'
+    ),
+    0
+  )::integer as net_adjustments,
   (
     select
       count(*) as count
@@ -164,6 +184,16 @@ select
     0::numeric
   ) as travel_allowance,
   status,
-  created_at
+  created_at,
+  (
+    select
+      count(*) as count
+    from
+      soa_adjustments sa
+    where
+      sa.assignment_id = a.id
+      and (sa.exchange_metadata->>'type') = 'ADMIN_CORRECTION'
+      and sa.custodian_confirmed = true
+  ) as admin_correction_count
 from
   assignments a;

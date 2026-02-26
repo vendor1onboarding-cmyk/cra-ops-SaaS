@@ -19,6 +19,7 @@ import TechnicalIssuesPage from "./pages/TechnicalIssues";
 import EODSummaryPage from "./pages/EODSummary";
 import TravelTrackingPage from "./pages/TravelTracking";
 import StatementOfAccounts from "./pages/StatementOfAccounts";
+import CustodianAdjustmentConfirm from "./pages/CustodianAdjustmentConfirm";
 import PasswordChange from "./pages/PasswordChange";
 import FirstLoginPasswordReset from "./pages/FirstLoginPasswordReset";
 
@@ -160,6 +161,15 @@ export default function App() {
           element={
             <PrivateRoute>
               <StatementOfAccounts />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/adjustments/confirm"
+          element={
+            <PrivateRoute>
+              <CustodianAdjustmentConfirm />
             </PrivateRoute>
           }
         />

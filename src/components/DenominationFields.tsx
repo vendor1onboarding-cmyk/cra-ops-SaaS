@@ -1,12 +1,15 @@
 type Props = {
   values: Record<string, number>;
   onChange: (name: string, value: number) => void;
+  denoms?: number[];
+  allowNegative?: boolean;
 };
 
-const DENOMS = [100, 200, 500, 2000];
+const DEFAULT_DENOMS = [100, 200, 500, 2000];
 
-export function DenominationFields({ values, onChange }: Props) {
-  const total = DENOMS.reduce(
+export function DenominationFields({ values, onChange, denoms, allowNegative }: Props) {
+  const activeDenoms = denoms && denoms.length > 0 ? denoms : DEFAULT_DENOMS;
+  const total = activeDenoms.reduce(
     (sum, d) => sum + (values[`denom_${d}`] || 0) * d,
     0
   );
@@ -21,7 +24,7 @@ export function DenominationFields({ values, onChange }: Props) {
       </div>
 
       {/* Denomination rows - Stack on mobile, grid on larger screens */}
-      {DENOMS.map((d) => {
+      {activeDenoms.map((d) => {
         const key = `denom_${d}`;
         const count = values[key] || 0;
         const amount = count * d;
@@ -35,7 +38,7 @@ export function DenominationFields({ values, onChange }: Props) {
             <div className="flex items-center justify-between mb-3 sm:mb-0">
               <span className="font-semibold text-sm text-slate-700">₹{d}</span>
               <span className="sm:hidden text-xs text-slate-500">
-                {amount > 0 && `₹${amount.toLocaleString()}`}
+                {amount !== 0 && `₹${amount.toLocaleString()}`}
               </span>
             </div>
 
@@ -48,7 +51,7 @@ export function DenominationFields({ values, onChange }: Props) {
                 type="number"
                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 value={count}
-                min={0}
+                min={allowNegative ? undefined : 0}
                 onChange={(e) =>
                   onChange(key, Number(e.target.value || 0))
                 }

@@ -56,6 +56,9 @@ export default function Dashboard() {
   const [exchangeCount, setExchangeCount] = useState(0);
   const [internalTransferTotal, setInternalTransferTotal] = useState(0);
   const [internalTransfers, setInternalTransfers] = useState<any[]>([]);
+  const [pendingCorrections, setPendingCorrections] = useState(0);
+  const [adminCorrectionCount, setAdminCorrectionCount] = useState(0);
+  const [adminCorrectionNet, setAdminCorrectionNet] = useState(0);
 
   // Denomination planning visibility
   const [bankDenomPlansForDisplay, setBankDenomPlansForDisplay] = useState<any[]>([]);
@@ -121,6 +124,23 @@ loadTravelKPI();
 
   }, [profile]);
 
+  // Load pending corrections count for custodian
+  useEffect(() => {
+    if (!profile || profile.role !== "custodian") return;
+
+    async function loadPendingCorrections() {
+      const { count } = await supabase
+        .from("soa_adjustments")
+        .select("id", { count: "exact", head: true })
+        .eq("custodian_id", profile.id)
+        .eq("requires_custodian_confirmation", true)
+        .eq("custodian_confirmed", false);
+
+      setPendingCorrections(count || 0);
+    }
+
+    loadPendingCorrections();
+  }, [profile]);
 
   async function loadDashboard() {
     setLoading(true);
@@ -141,6 +161,8 @@ loadTravelKPI();
       setExchangeCount(0);
       setInternalTransferTotal(0);
       setInternalTransfers([]);
+      setAdminCorrectionCount(0);
+      setAdminCorrectionNet(0);
 
       const { data: last } = await supabase
         .from("assignments")
@@ -177,7 +199,7 @@ loadTravelKPI();
 
     setAssignment(assign);
 
-    const [rs, ls, cps, dp, ops, bdp, arp] = await Promise.all([
+    const [rs, ls, cps, dp, ops, bdp, arp, adminCorrections] = await Promise.all([
       supabase
         .from("route_sites")
         .select("*, site:site_id(bank_name,address,site_code)")
@@ -199,6 +221,11 @@ loadTravelKPI();
         .select("*")
         .eq("assignment_id", assign.id)
         .maybeSingle(),
+      supabase
+        .from("soa_adjustments")
+        .select("id, exchange_metadata, custodian_confirmed")
+        .eq("assignment_id", assign.id)
+        .filter("exchange_metadata->>type", "eq", "ADMIN_CORRECTION"),
     ]);
 
     setRouteSites(rs.data || []);
@@ -215,6 +242,13 @@ loadTravelKPI();
     setExchangeCount(
       operational.filter((o: any) => o.adjustment_type === "EXCHANGE").length
     );
+    const adminRows = adminCorrections.data || [];
+    setAdminCorrectionCount(adminRows.length);
+    const correctionNet = adminRows.reduce((sum: number, row: any) => {
+      const delta = Number(row.exchange_metadata?.delta_total || 0);
+      return sum + delta;
+    }, 0);
+    setAdminCorrectionNet(correctionNet);
     const siteMap = new Map(
       (rs.data || []).map((r: any) => [r.site_id, r.site])
     );
@@ -530,6 +564,14 @@ loadTravelKPI();
   </div>
 )}
 
+{pendingCorrections > 0 && (
+  <Link to="/adjustments/confirm" className="block">
+    <div className="bg-blue-50 border border-blue-300 p-3 rounded text-sm text-blue-700 print:hidden hover:bg-blue-100 cursor-pointer">
+      📝 {pendingCorrections} {pendingCorrections === 1 ? 'adjustment' : 'adjustments'} awaiting your confirmation signature.
+    </div>
+  </Link>
+)}
+
       {!loading && !assignment && (
         <div className="space-y-4 pb-10 px-2 max-w-full print:hidden">
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -654,6 +696,11 @@ loadTravelKPI();
                   highlight={cashUtil.inHand < 0 ? "warn" : "ok"}
                 />
                 <Stat label="Exchanges" value={exchangeCount} />
+                <Stat label="Admin Corrections" value={adminCorrectionCount} />
+                <Stat
+                  label="Net Adjusted"
+                  value={`₹${adminCorrectionNet.toLocaleString("en-IN")}`}
+                />
                 <Stat
                   label="Internal Transfers"
                   value={`₹${internalTransferTotal.toLocaleString("en-IN")}`}

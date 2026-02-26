@@ -1,4 +1,4 @@
-create view public.v_soa_effective as
+create or replace view public.v_soa_effective as
 select
   id as soa_id,
   id as assignment_id,
@@ -153,8 +153,26 @@ select
       where
         v.assignment_id = a.id
     ),
-    0::numeric
-  ) as final_net_cash_position,
+    0::numeric  ) + COALESCE(
+    (
+      select
+        sum(
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_2000')::bigint, 0) * 2000 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_500')::bigint, 0) * 500 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_200')::bigint, 0) * 200 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_100')::bigint, 0) * 100 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_50')::bigint, 0) * 50 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_20')::bigint, 0) * 20 +
+          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_10')::bigint, 0) * 10
+        )::numeric as sum
+      from
+        soa_adjustments sa
+      where
+        sa.assignment_id = a.id
+        and sa.custodian_confirmed = true
+        and (sa.exchange_metadata->>'type') = 'ADMIN_CORRECTION'
+    ),
+    0::numeric  ) as final_net_cash_position,
   created_at as posted_at
 from
   assignments a;
