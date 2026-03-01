@@ -3,7 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
-import { getISTDateString, formatISTDate, getISTMonthStart } from "../utils/time";
+import { getISTDateString, formatDateString, getISTMonthStart } from "../utils/time";
 
 export default function AdminDashboard() {
   const { profile } = useAuth();
@@ -163,7 +163,7 @@ export default function AdminDashboard() {
                           <div className="text-xs text-slate-600 mt-1">
                             Net position: <span className="font-semibold text-amber-700">₹{Math.abs(account.final_net_cash_position).toLocaleString("en-IN")}</span>
                           </div>
-                          <div className="text-xs text-slate-500 mt-1">{formatISTDate(account.assignment_date, "short")}</div>
+                          <div className="text-xs text-slate-500 mt-1">{formatDateString(account.assignment_date)}</div>
                         </div>
                         <Link
                           to={`/soa?from=${account.assignment_date}&to=${account.assignment_date}&custodian=${account.custodian_id}&view=detailed`}
@@ -215,7 +215,7 @@ export default function AdminDashboard() {
                   <tbody className="divide-y divide-slate-100">
                     {eods.map((eod) => (
                       <tr key={eod.id} className="hover:bg-blue-50/50 active:bg-blue-100 transition-colors">
-                        <td className="px-3 sm:px-5 py-3 text-slate-700 font-medium">{formatISTDate(eod.assignment_date, "short")}</td>
+                        <td className="px-3 sm:px-5 py-3 text-slate-700 font-medium">{formatDateString(eod.assignment_date)}</td>
                         <td className="px-3 sm:px-5 py-3 text-slate-700">
                           <span className="block truncate">{eod.custodian?.full_name || "—"}</span>
                         </td>

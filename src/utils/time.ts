@@ -195,6 +195,24 @@ export function formatISTDate(
 }
 
 /**
+ * Format a date string in YYYY-MM-DD format to DD/MM/YYYY format
+ * Used for displaying assignment_date and other date-only fields
+ * 
+ * @param dateString - Date string in YYYY-MM-DD format
+ * @returns Formatted date string in DD/MM/YYYY format
+ */
+export function formatDateString(dateString: string | null | undefined): string {
+  if (!dateString) return "";
+  
+  // Match YYYY-MM-DD format
+  const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return dateString; // Return as-is if not in expected format
+  
+  const [, year, month, day] = match;
+  return `${day}/${month}/${year}`;
+}
+
+/**
  * Format time only for display
  * Shows: "02:30 PM IST"
  * Used for: pickup_time, load_time, timestamp displays

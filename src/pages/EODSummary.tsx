@@ -11,6 +11,7 @@ import {
   getISTDateString,
   getISTMonthStart,
   formatISTDate,
+  formatDateString,
   formatIST,
   formatISTFromUTC,
   formatISTFromISTEncodedUTC,
@@ -56,6 +57,7 @@ export default function EODSummary() {
   const modalSigPadRef = useRef<any>(null);
   const [custodianAssignments, setCustodianAssignments] = useState<any[]>([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<number | null>(null);
+  const [selectedCustodianDate, setSelectedCustodianDate] = useState<string | null>(null);
   const [custodianNotice, setCustodianNotice] = useState<string | null>(null);
   const [travelKm, setTravelKm] = useState(0);
 
@@ -71,11 +73,14 @@ export default function EODSummary() {
 
   const [adminFromDate, setAdminFromDate] = useState(getISTMonthStart());
   const [adminToDate, setAdminToDate] = useState(getISTDateString());
+  const [adminSingleDate, setAdminSingleDate] = useState<string | null>(null);
   const [adminStatus, setAdminStatus] = useState<
     "ALL" | "open" | "submitted" | "approved" | "rejected"
   >("ALL");
   const [adminCustodian, setAdminCustodian] = useState("ALL");
   const [adminCustodians, setAdminCustodians] = useState<any[]>([]);
+  const [adminResolvedAssignment, setAdminResolvedAssignment] = useState<any | null>(null);
+  const [adminResolveNotice, setAdminResolveNotice] = useState<string | null>(null);
 
   const today = getISTDateString();
 
@@ -87,13 +92,45 @@ export default function EODSummary() {
     } else if (profile.role === "admin" || profile.role === "supervisor") {
       loadAdminDashboard();
     }
-  }, [profile, adminFromDate, adminToDate, adminStatus, adminCustodian]);
+  }, [profile, adminFromDate, adminToDate, adminSingleDate, adminStatus, adminCustodian]);
 
   useEffect(() => {
     if (!profile || profile.role !== "custodian") return;
     if (!selectedAssignmentId) return;
     loadCustodianEOD(selectedAssignmentId);
   }, [profile, selectedAssignmentId]);
+
+  useEffect(() => {
+    if (!profile || (profile.role !== "admin" && profile.role !== "supervisor")) return;
+
+    if (!adminCustodian || adminCustodian === "ALL" || !adminSingleDate) {
+      setAdminResolvedAssignment(null);
+      setAdminResolveNotice(null);
+      return;
+    }
+
+    async function resolveAdminAssignmentByCustodianAndDate() {
+      const { data, error } = await supabase
+        .from("assignments")
+        .select("*, custodian:custodian_id(full_name)")
+        .eq("custodian_id", adminCustodian)
+        .eq("assignment_date", adminSingleDate)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) {
+        setAdminResolvedAssignment(null);
+        setAdminResolveNotice("No assignment found for selected custodian and date.");
+        return;
+      }
+
+      setAdminResolvedAssignment(data);
+      setAdminResolveNotice(null);
+    }
+
+    resolveAdminAssignmentByCustodianAndDate();
+  }, [profile, adminCustodian, adminSingleDate]);
 
   // --------------------------------------------------
   // CUSTODIAN EOD SUMMARY
@@ -113,12 +150,14 @@ export default function EODSummary() {
     const todayAssignment = rows.find((r) => r.assignment_date === today);
     if (todayAssignment) {
       setSelectedAssignmentId(todayAssignment.id);
+      setSelectedCustodianDate(today);
       setCustodianNotice(null);
       return;
     }
 
     if (rows.length > 0) {
       setSelectedAssignmentId(rows[0].id);
+      setSelectedCustodianDate(rows[0].assignment_date);
       setCustodianNotice(
         "No assignment for today. Showing latest available EOD."
       );
@@ -126,6 +165,7 @@ export default function EODSummary() {
     }
 
     setSelectedAssignmentId(null);
+    setSelectedCustodianDate(null);
     setCustodianNotice("No EOD records found yet.");
   }
 
@@ -241,7 +281,36 @@ export default function EODSummary() {
     setLoading(false);
   }
 
+  // --------------------------------------------------
+  // HANDLE CUSTODIAN DATE SELECTION
+  // --------------------------------------------------
+  async function handleCustodianDateChange(date: string) {
+    if (!profile) return;
 
+    setSelectedCustodianDate(date);
+    
+    // Find assignment matching the selected date
+    const { data: assignments } = await supabase
+      .from("assignments")
+      .select("id, assignment_date, status")
+      .eq("custodian_id", profile.id)
+      .eq("assignment_date", date)
+      .maybeSingle();
+
+    if (!assignments) {
+      setSelectedAssignmentId(null);
+      setAssignment(null);
+      setRouteSites([]);
+      setTaskSummary(null);
+      setEodDetails({ cashPickups: [], atmLoads: [], excessCash: [], adjustments: [] });
+      setTravelKm(0);
+      setCustodianNotice(`No assignment found for ${date}`);
+      return;
+    }
+
+    setSelectedAssignmentId(assignments.id);
+    setCustodianNotice(null);
+  }
 
   // --------------------------------------------------
   // SUBMIT EOD (NEW)
@@ -273,7 +342,7 @@ export default function EODSummary() {
   }
 
   // --------------------------------------------------
-  // ADMIN / SUPERVISOR VIEW (UNCHANGED)
+  // ADMIN / SUPERVISOR VIEW
   // --------------------------------------------------
   async function loadAdminDashboard() {
     setLoading(true);
@@ -289,9 +358,16 @@ export default function EODSummary() {
     let assignmentQuery = supabase
       .from("assignments")
       .select("*, custodian:custodian_id(full_name)")
-      .gte("assignment_date", adminFromDate)
-      .lte("assignment_date", adminToDate)
       .order("assignment_date", { ascending: false });
+
+    // Use single date filter if set, otherwise use date range
+    if (adminSingleDate) {
+      assignmentQuery = assignmentQuery.eq("assignment_date", adminSingleDate);
+    } else {
+      assignmentQuery = assignmentQuery
+        .gte("assignment_date", adminFromDate)
+        .lte("assignment_date", adminToDate);
+    }
 
     if (adminStatus !== "ALL") {
       assignmentQuery = assignmentQuery.eq("status", adminStatus);
@@ -351,6 +427,8 @@ export default function EODSummary() {
           custodianAssignments={custodianAssignments}
           selectedAssignmentId={selectedAssignmentId}
           setSelectedAssignmentId={setSelectedAssignmentId}
+          selectedCustodianDate={selectedCustodianDate}
+          onCustodianDateChange={handleCustodianDateChange}
           custodianNotice={custodianNotice}
           onSubmit={submitEOD}
           submitting={submitting}
@@ -368,11 +446,15 @@ export default function EODSummary() {
             issueSummary={issueSummary}
             adminFromDate={adminFromDate}
             adminToDate={adminToDate}
+            adminSingleDate={adminSingleDate}
             adminStatus={adminStatus}
             adminCustodian={adminCustodian}
             adminCustodians={adminCustodians}
+            adminResolvedAssignment={adminResolvedAssignment}
+            adminResolveNotice={adminResolveNotice}
             setAdminFromDate={setAdminFromDate}
             setAdminToDate={setAdminToDate}
+            setAdminSingleDate={setAdminSingleDate}
             setAdminStatus={setAdminStatus}
             setAdminCustodian={setAdminCustodian}
           />
@@ -403,6 +485,8 @@ function CustodianEOD({
   custodianAssignments,
   selectedAssignmentId,
   setSelectedAssignmentId,
+  selectedCustodianDate,
+  onCustodianDateChange,
   custodianNotice,
   onSubmit,
   submitting,
@@ -937,7 +1021,7 @@ function CustodianEOD({
           </div>
           <div className="text-right text-xs text-slate-700">
             <p className="font-bold text-sm">EOD REPORT</p>
-            <p className="mt-1"><span className="font-semibold">Date:</span> {assignment?.assignment_date}</p>
+            <p className="mt-1"><span className="font-semibold">Date:</span> {formatDateString(assignment?.assignment_date)}</p>
             <p><span className="font-semibold">Custodian:</span> {custodianName}</p>
           </div>
         </div>
@@ -997,11 +1081,32 @@ function CustodianEOD({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs text-slate-600 mb-1">
-              Select EOD Date
+              📅 Select EOD Date (Calendar)
+            </label>
+            <input
+              type="date"
+              value={selectedCustodianDate || ""}
+              onChange={(e) => onCustodianDateChange(e.target.value)}
+              className="input w-full"
+              max={new Date().toISOString().split('T')[0]}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">
+              Or Select from List
             </label>
             <select
               value={selectedAssignmentId ?? ""}
-              onChange={(e) => setSelectedAssignmentId(Number(e.target.value))}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                if (id) {
+                  const selected = custodianAssignments.find((a) => a.id === id);
+                  if (selected) {
+                    onCustodianDateChange(selected.assignment_date);
+                  }
+                }
+              }}
               className="input w-full"
             >
               <option value="">-- Select --</option>
@@ -1013,7 +1118,7 @@ function CustodianEOD({
             </select>
           </div>
 
-          <div className="sm:col-span-2 flex items-end">
+          <div className="flex items-end">
             {custodianNotice && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 w-full">
                 {custodianNotice}
@@ -1038,7 +1143,7 @@ function CustodianEOD({
                 {status}
               </span>
             </div>
-            <div>Date: {assignment.assignment_date}</div>
+            <div>Date: {formatDateString(assignment.assignment_date)}</div>
             {assignment.eod_signed && (
               <div className="text-green-700 font-semibold text-xs mt-1">✓ Locked & Signed</div>
             )}
@@ -1748,7 +1853,7 @@ function CustodianEOD({
             </div>
             <div className="border-b border-slate-400 w-40 mb-2"></div>
             <p className="font-semibold text-slate-800">{profile?.full_name || "Custodian Name"}</p>
-            <p className="text-slate-700">{assignment?.assignment_date || "Date"}</p>
+            <p className="text-slate-700">{formatDateString(assignment?.assignment_date) || "Date"}</p>
             <p className="text-slate-600 text-[10px] mt-1">Custodian / Cash Handler</p>
           </div>
           
@@ -1799,11 +1904,15 @@ function AdminDashboard({
   issueSummary,
   adminFromDate,
   adminToDate,
+  adminSingleDate,
   adminStatus,
   adminCustodian,
   adminCustodians,
+  adminResolvedAssignment,
+  adminResolveNotice,
   setAdminFromDate,
   setAdminToDate,
+  setAdminSingleDate,
   setAdminStatus,
   setAdminCustodian,
 }: any) {
@@ -1813,24 +1922,32 @@ function AdminDashboard({
 
       <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-4">
         <h3 className="text-sm font-semibold text-slate-700">EOD Filters</h3>
+        
+        {/* Primary filters row */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
-            <label className="block text-xs text-slate-600 mb-1">From</label>
+            <label className="block text-xs text-slate-600 mb-1">📅 EOD Date (Calendar)</label>
             <input
               type="date"
-              value={adminFromDate}
-              onChange={(e: any) => setAdminFromDate(e.target.value)}
+              value={adminSingleDate || ""}
+              onChange={(e: any) => setAdminSingleDate(e.target.value || null)}
               className="input w-full"
             />
           </div>
           <div>
-            <label className="block text-xs text-slate-600 mb-1">To</label>
-            <input
-              type="date"
-              value={adminToDate}
-              onChange={(e: any) => setAdminToDate(e.target.value)}
+            <label className="block text-xs text-slate-600 mb-1">Custodian</label>
+            <select
+              value={adminCustodian}
+              onChange={(e: any) => setAdminCustodian(e.target.value)}
               className="input w-full"
-            />
+            >
+              <option value="ALL">All Custodians</option>
+              {adminCustodians.map((c: any) => (
+                <option key={c.id} value={c.id}>
+                  {c.full_name}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs text-slate-600 mb-1">Status</label>
@@ -1847,20 +1964,72 @@ function AdminDashboard({
             </select>
           </div>
           <div>
-            <label className="block text-xs text-slate-600 mb-1">Custodian</label>
-            <select
-              value={adminCustodian}
-              onChange={(e: any) => setAdminCustodian(e.target.value)}
-              className="input w-full"
-            >
-              <option value="ALL">All</option>
-              {adminCustodians.map((c: any) => (
-                <option key={c.id} value={c.id}>
-                  {c.full_name}
-                </option>
-              ))}
-            </select>
+            <label className="block text-xs text-slate-600 mb-1">
+              {adminSingleDate ? "✓ Single Date" : "📊 Date Range (Optional)"}
+            </label>
+            {!adminSingleDate && (
+              <div className="flex gap-1">
+                <input
+                  type="date"
+                  value={adminFromDate}
+                  onChange={(e: any) => setAdminFromDate(e.target.value)}
+                  className="input flex-1 text-xs"
+                  title="From date"
+                />
+                <span className="text-slate-400 px-1 flex items-center">to</span>
+                <input
+                  type="date"
+                  value={adminToDate}
+                  onChange={(e: any) => setAdminToDate(e.target.value)}
+                  className="input flex-1 text-xs"
+                  title="To date"
+                />
+              </div>
+            )}
+            {adminSingleDate && (
+              <button
+                onClick={() => setAdminSingleDate(null)}
+                className="input w-full text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 transition"
+              >
+                Clear Date Filter
+              </button>
+            )}
           </div>
+        </div>
+
+        <div className="border-t border-slate-200 pt-3">
+          <h4 className="text-xs font-semibold text-slate-700 mb-2">Open Custodian EOD</h4>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="text-xs text-slate-500 md:col-span-2 flex items-center">
+              Select a custodian and single date above to resolve exact assignment.
+            </div>
+            <div>
+              {adminResolvedAssignment ? (
+                <Link
+                  to={`/admin/approvals/${adminResolvedAssignment.id}`}
+                  className="btn-primary w-full text-center"
+                >
+                  Open EOD #{adminResolvedAssignment.id}
+                </Link>
+              ) : (
+                <div className="text-xs text-slate-500 w-full p-2 border border-slate-200 rounded">
+                  No resolved assignment yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {adminResolveNotice && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-2">
+              {adminResolveNotice}
+            </div>
+          )}
+
+          {adminResolvedAssignment && (
+            <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-3 py-2 mt-2">
+              {formatDateString(adminResolvedAssignment.assignment_date)} • {adminResolvedAssignment.custodian?.full_name || "Unknown"} • {adminResolvedAssignment.status}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1885,7 +2054,7 @@ function AdminDashboard({
                     Assignment #{a.id}
                   </div>
                   <div className="text-xs text-slate-600">
-                    {a.assignment_date} • {a.custodian?.full_name || "Unknown"}
+                    {formatDateString(a.assignment_date)} • {a.custodian?.full_name || "Unknown"}
                   </div>
                 </div>
                 <span className="text-xs font-semibold px-2 py-1 rounded bg-slate-100 text-slate-700">

@@ -4,7 +4,7 @@ import { supabase } from "../api/supabaseClient";
 import { AppLayout } from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
-import { formatIST, formatISTAudit, formatISTDate, formatISTFromISTEncodedUTC, formatISTTime, parseUTCDate } from "../utils/time";
+import { formatIST, formatISTAudit, formatDateString, formatISTDate, formatISTFromISTEncodedUTC, formatISTTime, parseUTCDate } from "../utils/time";
 import { SignatureImage, SignatureModal, preloadSignatureImage } from "../components/SignatureImage";
 
 /* ---------------- Utilities ---------------- */
@@ -557,7 +557,7 @@ export default function AdminEODDetail() {
           </div>
           <div className="text-right text-xs">
             <p className="font-semibold">EOD Report</p>
-            <p>Date: {assignment.assignment_date}</p>
+            <p>Date: {formatDateString(assignment.assignment_date)}</p>
           </div>
         </div>
       </div>
@@ -625,7 +625,7 @@ export default function AdminEODDetail() {
         </div>
 
         <Section title="Assignment Summary">
-          <div>Date: {assignment.assignment_date}</div>
+          <div>Date: {formatDateString(assignment.assignment_date)}</div>
           <div>Status: {assignment.status}</div>
         </Section>
 
