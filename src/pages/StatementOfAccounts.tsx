@@ -27,6 +27,8 @@ const printStyles = `
       padding: 6px 4px;
       word-break: break-word;
       overflow-wrap: break-word;
+      white-space: normal;
+      vertical-align: top;
     }
     
     .print-statement-table th {
@@ -41,6 +43,13 @@ const printStyles = `
     
     .print-statement-row {
       page-break-inside: avoid;
+    }
+    
+    /* Allocate wider column for Transaction Type to accommodate bank names */
+    .print-statement-table th:nth-child(3),
+    .print-statement-table td:nth-child(3) {
+      width: 35%;
+      min-width: 90px;
     }
     
     .print-only {
@@ -535,6 +544,7 @@ export default function StatementOfAccounts() {
       credit: number;
       balanceImpact: number;
       remarks: string;
+      bank_name?: string;
     }> = [];
 
     // Build a map of assignments with bank pickups (to handle legacy loads correctly)
@@ -666,6 +676,7 @@ export default function StatementOfAccounts() {
             credit: bankAmount,
             balanceImpact: bankAmount,
             remarks: "",
+            bank_name: c.bank_name || "",
           });
         }
         if (internalTotal > 0) {
@@ -1101,7 +1112,11 @@ export default function StatementOfAccounts() {
                 >
                   <td>{formatISTDate(row.ts, "short")}</td>
                   <td>{formatISTTime(row.ts)}</td>
-                  <td>{row.type}</td>
+                  <td>
+                    {row.type === "Bank Pickup" && row.bank_name
+                      ? `${row.type} – ${row.bank_name}`
+                      : row.type}
+                  </td>
                   <td>{row.atm}</td>
                   <td className="text-right">
                     {row.debit !== 0
