@@ -43,8 +43,21 @@ async function getGPS() {
 
 export default function ATMReplenishment() {
   const { profile } = useAuth();
+  const today = getISTDateString();
+
+  type AssignmentOption = {
+    id: number;
+    assignment_date: string;
+    remainingCash: number;
+  };
 
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
+  const [currentAssignmentDate, setCurrentAssignmentDate] = useState(today);
+  const [selectedAssignmentDate, setSelectedAssignmentDate] = useState(today);
+  const [assignmentOptions, setAssignmentOptions] = useState<AssignmentOption[]>([]);
+  const [selectedAssignmentRemainingCash, setSelectedAssignmentRemainingCash] =
+    useState(0);
+  const [assignmentNotice, setAssignmentNotice] = useState<string | null>(null);
   const [sites, setSites] = useState<any[]>([]);
   const [siteId, setSiteId] = useState<number | null>(null);
   const site = sites.find((s) => s.id === siteId);
@@ -140,49 +153,191 @@ export default function ATMReplenishment() {
 
   /* ---------------- Load assignment & sites & removal plan ---------------- */
 
+  function sumDenomsAmount(row: any) {
+    return (
+      (row?.denom_100 || 0) * 100 +
+      (row?.denom_200 || 0) * 200 +
+      (row?.denom_500 || 0) * 500 +
+      (row?.denom_2000 || 0) * 2000
+    );
+  }
+
+  async function getRemainingCashForAssignment(targetAssignmentId: number) {
+    const [pickupRes, loadRes] = await Promise.all([
+      supabase
+        .from("cash_pickups")
+        .select(
+          "denom_2000, denom_500, denom_200, denom_100, pickup_source, internal_source_metadata"
+        )
+        .eq("assignment_id", targetAssignmentId),
+      supabase
+        .from("atm_replenishments")
+        .select("denom_2000, denom_500, denom_200, denom_100, source_breakdown")
+        .eq("assignment_id", targetAssignmentId),
+    ]);
+
+    if (pickupRes.error || loadRes.error) {
+      return 0;
+    }
+
+    const pickups = pickupRes.data || [];
+    const loads = loadRes.data || [];
+
+    const bankPicked = pickups.reduce((sum: number, row: any) => {
+      const source = row.pickup_source || "BANK";
+      if (source === "ATM_INTERNAL") return sum;
+
+      const internalSources = row?.internal_source_metadata?.sources || [];
+      const internalTotal = internalSources.reduce(
+        (acc: number, s: any) => acc + Number(s.total_amount || 0),
+        0
+      );
+
+      return sum + Math.max(sumDenomsAmount(row) - internalTotal, 0);
+    }, 0);
+
+    const bankLoaded = loads.reduce((sum: number, row: any) => {
+      const fromBreakdown = Number(row?.source_breakdown?.bank_source?.total_amount);
+      if (Number.isFinite(fromBreakdown)) {
+        return sum + fromBreakdown;
+      }
+      return sum + sumDenomsAmount(row);
+    }, 0);
+
+    const remaining = bankPicked - bankLoaded;
+    return Math.round(remaining * 100) / 100;
+  }
+
+  async function loadAssignmentContext(targetAssignmentId: number) {
+    setAssignmentId(targetAssignmentId);
+    setSiteId(null);
+    setTimeIn(null);
+    setGpsStatus("unknown");
+    setGpsMsg(null);
+    setPhoto(null);
+    setSubmitLocked(false);
+
+    const [sitesRes, removalPlanRes] = await Promise.all([
+      supabase
+        .from("route_sites")
+        .select("site:sites(id, bank_name, address, latitude, longitude)")
+        .eq("assignment_id", targetAssignmentId),
+      supabase
+        .from("atm_removal_plans")
+        .select("denom_100, denom_200, denom_500, denom_2000")
+        .eq("assignment_id", targetAssignmentId)
+        .maybeSingle(),
+    ]);
+
+    setSites((sitesRes.data || []).map((r: any) => r.site));
+
+    if (removalPlanRes.data) {
+      setAssignmentRemovalPlan({
+        denom_100: removalPlanRes.data.denom_100 || 0,
+        denom_200: removalPlanRes.data.denom_200 || 0,
+        denom_500: removalPlanRes.data.denom_500 || 0,
+        denom_2000: removalPlanRes.data.denom_2000 || 0,
+      });
+    } else {
+      setAssignmentRemovalPlan(null);
+    }
+  }
+
   useEffect(() => {
     if (!profile) return;
 
-    async function loadData() {
-      const today = getISTDateString();
-
-      const { data: assignment } = await supabase
+    async function loadAssignments() {
+      const { data: currentAssignment } = await supabase
         .from("assignments")
-        .select("id")
+        .select("id, assignment_date")
         .eq("custodian_id", profile.id)
         .eq("assignment_date", today)
-        .single();
-
-      if (!assignment) return;
-
-      setAssignmentId(assignment.id);
-
-      const { data } = await supabase
-        .from("route_sites")
-        .select("site:sites(id, bank_name, address, latitude, longitude)")
-        .eq("assignment_id", assignment.id);
-
-      setSites((data || []).map((r: any) => r.site));
-
-      // Fetch ATM removal plan for this assignment (for intelligent source matching)
-      const { data: removalPlan } = await supabase
-        .from("atm_removal_plans")
-        .select("denom_100, denom_200, denom_500, denom_2000")
-        .eq("assignment_id", assignment.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      if (removalPlan) {
-        setAssignmentRemovalPlan({
-          denom_100: removalPlan.denom_100 || 0,
-          denom_200: removalPlan.denom_200 || 0,
-          denom_500: removalPlan.denom_500 || 0,
-          denom_2000: removalPlan.denom_2000 || 0,
-        });
+      if (currentAssignment?.assignment_date) {
+        setCurrentAssignmentDate(currentAssignment.assignment_date);
+        setSelectedAssignmentDate(currentAssignment.assignment_date);
       }
+
+      const { data: assignments } = await supabase
+        .from("assignments")
+        .select("id, assignment_date")
+        .eq("custodian_id", profile.id)
+        .order("assignment_date", { ascending: false })
+        .limit(45);
+
+      const rows = assignments || [];
+
+      if (rows.length === 0) {
+        setAssignmentId(null);
+        setSites([]);
+        setAssignmentOptions([]);
+        setSelectedAssignmentRemainingCash(0);
+        setAssignmentNotice("No assignments found.");
+        return;
+      }
+
+      const options = (
+        await Promise.all(
+          rows.map(async (row: any) => ({
+            ...row,
+            remainingCash: await getRemainingCashForAssignment(row.id),
+          }))
+        )
+      ) as AssignmentOption[];
+
+      setAssignmentOptions(options);
+
+      const currentOption = options.find(
+        (row) => row.assignment_date === currentAssignment?.assignment_date
+      );
+
+      const fallbackOption =
+        currentOption ||
+        options.find((row) => row.remainingCash > 0) ||
+        options[0];
+
+      setSelectedAssignmentDate(fallbackOption.assignment_date);
+      setSelectedAssignmentRemainingCash(fallbackOption.remainingCash);
+
+      if (fallbackOption.remainingCash <= 0) {
+        setAssignmentNotice("No remaining cash available for this assignment.");
+      } else {
+        setAssignmentNotice(null);
+      }
+
+      await loadAssignmentContext(fallbackOption.id);
     }
 
-    loadData();
+    loadAssignments();
   }, [profile]);
+
+  async function handleAssignmentDateChange(date: string) {
+    const previousDate = selectedAssignmentDate;
+    setSelectedAssignmentDate(date);
+    setError(null);
+
+    const selected = assignmentOptions.find((row) => row.assignment_date === date);
+
+    if (!selected) {
+      setAssignmentNotice("No assignment found for selected date.");
+      setSelectedAssignmentDate(previousDate);
+      return;
+    }
+
+    setSelectedAssignmentRemainingCash(selected.remainingCash);
+
+    if (selected.remainingCash <= 0) {
+      setAssignmentNotice("No remaining cash available for this assignment.");
+      setSelectedAssignmentDate(previousDate);
+      return;
+    }
+
+    setAssignmentNotice(null);
+    await loadAssignmentContext(selected.id);
+  }
 
   /* ---------------- Load denomination plan (read-only preview) ---------------- */
 
@@ -781,7 +936,19 @@ export default function ATMReplenishment() {
 
     setSaving(true);
 
-    if (!siteId || !assignmentId) {
+    if (!assignmentId) {
+      setError("No eligible assignment selected.");
+      setSaving(false);
+      return;
+    }
+
+    if (selectedAssignmentRemainingCash <= 0) {
+      setError("No remaining cash available for this assignment.");
+      setSaving(false);
+      return;
+    }
+
+    if (!siteId) {
       setError("Select ATM site");
       setSaving(false);
       return;
@@ -824,6 +991,17 @@ export default function ATMReplenishment() {
     // Calculate source breakdown (bank vs internal ATM sources)
     // This reconstructs the authoritative internal pool from database events
     const sourceBreakdown = await calculateSourceBreakdown(denoms);
+    const isBackdated =
+      selectedAssignmentDate && selectedAssignmentDate !== currentAssignmentDate;
+
+    const sourceBreakdownWithAudit = {
+      ...sourceBreakdown,
+      audit: {
+        is_backdated: Boolean(isBackdated),
+        original_assignment_date: selectedAssignmentDate,
+        actual_load_timestamp: new Date().toISOString(),
+      },
+    };
 
     const { error } = await supabase.from("atm_replenishments").insert({
       assignment_id: assignmentId,
@@ -838,7 +1016,7 @@ export default function ATMReplenishment() {
       geo_status: gpsStatus,
       photo_required: gpsStatus !== "verified",
       photo_url: photoPath,
-      source_breakdown: sourceBreakdown,
+      source_breakdown: sourceBreakdownWithAudit,
     });
 
     if (error) {
@@ -929,6 +1107,46 @@ export default function ATMReplenishment() {
           <p className="text-sm text-slate-600">
             Record cash loading at ATM locations with GPS verification
           </p>
+        </div>
+
+        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-3">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Assignment Date Selector <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              value={selectedAssignmentDate}
+              max={today}
+              onChange={(e) => handleAssignmentDateChange(e.target.value)}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          {selectedAssignmentDate !== currentAssignmentDate && (
+            <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded px-3 py-2 font-medium">
+              Backdated Load
+            </div>
+          )}
+
+          <div className="text-xs text-slate-600">
+            Remaining Cash in Hand: ₹
+            {selectedAssignmentRemainingCash.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+            })}
+          </div>
+
+          {assignmentNotice && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              {assignmentNotice}
+            </div>
+          )}
+
+          {assignmentOptions.length > 0 && (
+            <p className="text-[11px] text-slate-500">
+              Date can be used only when that assignment has remaining cash.
+            </p>
+          )}
         </div>
 
         {/* GPS Status Message */}
@@ -1048,8 +1266,8 @@ export default function ATMReplenishment() {
                     ✓ Available Cash (Enterprise Control)
                   </p>
                   <p className="text-xs text-slate-600 mt-1">
-                    Maximum cash you can load today based on pickups, exchanges,
-                    and previous loads.
+                    Maximum cash you can load for selected assignment based on pickups,
+                    exchanges, and previous loads.
                   </p>
                 </div>
                 <span className="text-xs font-semibold text-indigo-900 bg-indigo-100 px-2 py-1 rounded">

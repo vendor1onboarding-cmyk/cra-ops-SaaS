@@ -145,9 +145,30 @@ export default function EODSummary() {
       .limit(30);
 
     const rows = data || [];
-    setCustodianAssignments(rows);
+    const assignmentIds = rows.map((r: any) => r.id).filter(Boolean);
+    const backdatedByAssignmentId: Record<number, boolean> = {};
 
-    const todayAssignment = rows.find((r) => r.assignment_date === today);
+    if (assignmentIds.length > 0) {
+      const { data: loadRows } = await supabase
+        .from("atm_replenishments")
+        .select("assignment_id, source_breakdown")
+        .in("assignment_id", assignmentIds);
+
+      (loadRows || []).forEach((row: any) => {
+        if (row?.source_breakdown?.audit?.is_backdated) {
+          backdatedByAssignmentId[row.assignment_id] = true;
+        }
+      });
+    }
+
+    const enrichedRows = rows.map((row: any) => ({
+      ...row,
+      backdated_load_executed: Boolean(backdatedByAssignmentId[row.id]),
+    }));
+
+    setCustodianAssignments(enrichedRows);
+
+    const todayAssignment = enrichedRows.find((r: any) => r.assignment_date === today);
     if (todayAssignment) {
       setSelectedAssignmentId(todayAssignment.id);
       setSelectedCustodianDate(today);
@@ -155,9 +176,9 @@ export default function EODSummary() {
       return;
     }
 
-    if (rows.length > 0) {
-      setSelectedAssignmentId(rows[0].id);
-      setSelectedCustodianDate(rows[0].assignment_date);
+    if (enrichedRows.length > 0) {
+      setSelectedAssignmentId(enrichedRows[0].id);
+      setSelectedCustodianDate(enrichedRows[0].assignment_date);
       setCustodianNotice(
         "No assignment for today. Showing latest available EOD."
       );
@@ -1112,7 +1133,7 @@ function CustodianEOD({
               <option value="">-- Select --</option>
               {custodianAssignments.map((a: any) => (
                 <option key={a.id} value={a.id}>
-                  {a.assignment_date} ({a.status})
+                  {a.assignment_date} ({a.status}) • Backdated Load Executed: {a.backdated_load_executed ? "Yes" : "No"}
                 </option>
               ))}
             </select>
@@ -1144,6 +1165,9 @@ function CustodianEOD({
               </span>
             </div>
             <div>Date: {formatDateString(assignment.assignment_date)}</div>
+            <div className="text-xs text-slate-600 mt-1">
+              Backdated Load Executed: {atmLoads.some((row: any) => row?.source_breakdown?.audit?.is_backdated) ? "Yes" : "No"}
+            </div>
             {assignment.eod_signed && (
               <div className="text-green-700 font-semibold text-xs mt-1">✓ Locked & Signed</div>
             )}
@@ -1257,6 +1281,13 @@ function CustodianEOD({
                   ₹{cashInHand.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </span>
               </div>
+              {cashInHand > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
+                  Cash remaining in hand: ₹{cashInHand.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                  <br />
+                  Please load in ATM in future assignment.
+                </div>
+              )}
             </div>
 
             <Section title="Bank Cash Picked">

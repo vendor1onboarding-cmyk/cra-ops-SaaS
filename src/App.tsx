@@ -6,6 +6,7 @@ import AdminSOAAdjustments from "./pages/AdminSOAAdjustments";
 import AdminOperations from "./pages/AdminOperations";
 import AdvancedAnalytics from "./pages/analytics/AdvancedAnalytics";
 import BankAccountOnboarding from "./pages/admin/BankAccountOnboarding";
+import AdminChequeVerification from "./pages/admin/AdminChequeVerification";
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -255,6 +256,15 @@ export default function App() {
           element={
             <RequireAdmin>
               <BankAccountOnboarding />
+            </RequireAdmin>
+          }
+        />
+
+        <Route
+          path="/admin/cheque-verification"
+          element={
+            <RequireAdmin>
+              <AdminChequeVerification />
             </RequireAdmin>
           }
         />

@@ -14,6 +14,7 @@ type AdminAction =
   | "password-reset"
   | "delete-user"
   | "bank-account-onboarding"
+  | "cheque-verification"
   | null;
 
 interface ActionOption {
@@ -61,6 +62,13 @@ const ADMIN_ACTIONS: ActionOption[] = [
     description: "Onboard and manage bank accounts for cash pickup operations",
     icon: "🏦",
     navigateTo: "/admin/bank-accounts",
+  },
+  {
+    id: "cheque-verification",
+    label: "Cheque Verification",
+    description: "Review, verify, and audit bank cash pickup cheques for fraud traceability",
+    icon: "💳",
+    navigateTo: "/admin/cheque-verification",
   },
   // Future actions can be added here:
   // { id: "custodian-mapping", label: "Custodian Mapping", ... },

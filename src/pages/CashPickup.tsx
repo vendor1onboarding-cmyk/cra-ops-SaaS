@@ -74,8 +74,20 @@ async function getGPS() {
 export default function CashPickup() {
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<'bank' | 'atm'>('bank');
+  const today = getISTDateString();
+
+  type AssignmentOption = {
+    id: number;
+    assignment_date: string;
+    status: string;
+  };
+
   // Bank Pickup State
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
+  const [assignmentOptions, setAssignmentOptions] = useState<AssignmentOption[]>([]);
+  const [currentAssignmentDate, setCurrentAssignmentDate] = useState(today);
+  const [selectedAssignmentDate, setSelectedAssignmentDate] = useState(today);
+  const [assignmentNotice, setAssignmentNotice] = useState<string | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [selectedBankId, setSelectedBankId] = useState<string>("");
   const [expectedAmount, setExpectedAmount] = useState<number>(0);
@@ -88,6 +100,14 @@ export default function CashPickup() {
   const [bankGps, setBankGps] = useState<GPSState>(EMPTY_GPS);
   const [bankPhoto, setBankPhoto] = useState<File | null>(null);
   const [bankSubmitLocked, setBankSubmitLocked] = useState(false);
+  // Cheque capture state (Bank pickup only)
+  const [chequeNumber, setChequeNumber] = useState<string>("");
+  const [chequeImage, setChequeImage] = useState<File | null>(null);
+  const [chequeMetadata, setChequeMetadata] = useState<Record<string, any>>({
+    verification_method: "MOBILE",
+    device_id: "mobile-app",
+    geo_verified: false,
+  });
   const [plannedDenoms, setPlannedDenoms] = useState<
     | {
         denom_100: number;
@@ -119,33 +139,93 @@ export default function CashPickup() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState("");
   const [confirmType, setConfirmType] = useState<"bank" | "atm" | null>(null);
-  const today = getISTDateString();
 
   // --------------------------------------------------
-  // Load TODAY's assignment ONLY (NO FALLBACK)
+  // Load assignment options (current + backdated open/rejected)
   // --------------------------------------------------
   useEffect(() => {
     if (!profile) return;
 
-    async function loadTodayAssignment() {
-      const { data: assignment } = await supabase
+    async function loadAssignments() {
+      const { data: currentAssignment } = await supabase
         .from("assignments")
-        .select("id")
+        .select("id, assignment_date, status")
         .eq("custodian_id", profile.id)
         .eq("assignment_date", today)
-        .eq("status", "open")
+        .in("status", ["open", "rejected"])
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      if (!assignment) {
+      const { data: assignments } = await supabase
+        .from("assignments")
+        .select("id, assignment_date, status")
+        .eq("custodian_id", profile.id)
+        .in("status", ["open", "rejected"])
+        .order("assignment_date", { ascending: false })
+        .limit(45);
+
+      const options = (assignments || []) as AssignmentOption[];
+      setAssignmentOptions(options);
+
+      if (currentAssignment?.assignment_date) {
+        setCurrentAssignmentDate(currentAssignment.assignment_date);
+      }
+
+      const initial =
+        options.find((row) => row.assignment_date === currentAssignment?.assignment_date) ||
+        options[0];
+
+      if (!initial) {
         setAssignmentId(null);
+        setAssignmentNotice("No editable assigned assignments found.");
         return;
       }
 
-      setAssignmentId(assignment.id);
+      setSelectedAssignmentDate(initial.assignment_date);
+      setAssignmentId(initial.id);
+      setAssignmentNotice(null);
     }
 
-    loadTodayAssignment();
-  }, [profile]);
+    loadAssignments();
+  }, [profile, today]);
+
+  async function handleAssignmentDateChange(date: string) {
+    const previousDate = selectedAssignmentDate;
+    setSelectedAssignmentDate(date);
+    setMessage(null);
+
+    const selected = assignmentOptions.find((row) => row.assignment_date === date);
+    if (!selected) {
+      setAssignmentNotice("No editable assignment found for selected date.");
+      setSelectedAssignmentDate(previousDate);
+      return;
+    }
+
+    setAssignmentId(selected.id);
+    setAssignmentNotice(null);
+
+    // Reset context-sensitive states when switching assignment
+    setSelectedAtmSiteId(null);
+    setAtmGps(EMPTY_GPS);
+    setAtmPhoto(null);
+    setAtmSubmitLocked(false);
+
+    setSelectedBankId("");
+    setExpectedAmount(0);
+    setForm({ denom_2000: 0, denom_500: 0, denom_200: 0, denom_100: 0 });
+    setBankGps(EMPTY_GPS);
+    setBankPhoto(null);
+    setBankSubmitLocked(false);
+    // Reset cheque fields on assignment switch
+    setChequeNumber("");
+    setChequeImage(null);
+    setChequeMetadata({
+      verification_method: "MOBILE",
+      device_id: "mobile-app",
+      geo_verified: false,
+    });
+  }
 
   useEffect(() => {
     if (!assignmentId) {
@@ -311,6 +391,14 @@ export default function CashPickup() {
     setBankGps(EMPTY_GPS);
     setBankPhoto(null);
     setBankSubmitLocked(false);
+    // Reset cheque fields
+    setChequeNumber("");
+    setChequeImage(null);
+    setChequeMetadata({
+      verification_method: "MOBILE",
+      device_id: "mobile-app",
+      geo_verified: false,
+    });
   }
   function resetAtmForm() {
     setAtmDenoms({
@@ -462,6 +550,20 @@ export default function CashPickup() {
     return path;
   }
 
+  async function uploadChequeImage(file: File, assignmentId: number) {
+    const path = `cheque-images/${assignmentId}-${Date.now()}.jpg`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("issue-photos")
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) {
+      throw new Error("Cheque image upload failed");
+    }
+
+    return path;
+  }
+
   async function saveBankPickup() {
     if (loading || bankSubmitLocked) return;
     if (!assignmentId || !selectedBankId) {
@@ -500,6 +602,17 @@ export default function CashPickup() {
       }
     }
 
+    let chequeImagePath: string | null = null;
+    if (chequeImage) {
+      try {
+        chequeImagePath = await uploadChequeImage(chequeImage, assignmentId);
+      } catch (err) {
+        setMessage("Failed to upload cheque image");
+        setLoading(false);
+        return;
+      }
+    }
+
     const { error } = await supabase
       .from("cash_pickups")
       .upsert(
@@ -507,6 +620,7 @@ export default function CashPickup() {
           assignment_id: assignmentId,
           bank_name: selectedBank?.bank_name || "",
           branch: selectedBank?.branch_name || selectedBank?.branch_code || "",
+          bank_account_id: selectedBankId,
           pickup_time: new Date().toISOString(),
           expected_amount: expectedAmount,
           total_amount: bankAmount,
@@ -514,10 +628,15 @@ export default function CashPickup() {
           pickup_source: "BANK",
           gps_metadata: buildGpsMetadata(bankGps, "BANK"),
           gps_photo_url: bankPhotoPath,
+          // Cheque fields (banking-grade verification)
+          cheque_number: chequeNumber || null,
+          cheque_image_url: chequeImagePath,
+          cheque_status: chequeNumber ? "PENDING" : null,
+          cheque_metadata: chequeNumber ? chequeMetadata : null,
           ...form,
         },
         {
-          onConflict: "assignment_id,bank_name",
+          onConflict: "assignment_id,bank_account_id",
         }
       );
 
@@ -646,9 +765,36 @@ export default function CashPickup() {
           </p>
         </div>
 
+        <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Assignment Date Selector <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              value={selectedAssignmentDate}
+              max={today}
+              onChange={(e) => handleAssignmentDateChange(e.target.value)}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          {selectedAssignmentDate !== currentAssignmentDate && (
+            <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded px-3 py-2 font-medium">
+              Backdated Pickup
+            </div>
+          )}
+
+          {assignmentNotice && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              {assignmentNotice}
+            </div>
+          )}
+        </div>
+
         {!assignmentId && (
           <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
-            <span className="font-semibold">ℹ️ No assignment available</span> for today.
+            <span className="font-semibold">ℹ️ No assignment available</span> for selected date.
           </div>
         )}
 
@@ -971,6 +1117,68 @@ export default function CashPickup() {
                         />
                       </div>
                     )}
+                  </div>
+
+                  {/* Cheque Capture (Banking-Grade Verification) */}
+                  <div className="border border-amber-200 bg-amber-50 rounded-lg p-4 space-y-4">
+                    <div className="flex items-start gap-3">
+                      <div className="text-2xl">🏦</div>
+                      <div>
+                        <h3 className="text-base font-semibold text-amber-900">Banking-Grade Cheque Capture</h3>
+                        <p className="text-xs text-amber-700 mt-1">
+                          Optional: Capture cheque details for audit and fraud traceability
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Cheque Number <span className="text-slate-500">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={30}
+                        placeholder="e.g., 892734"
+                        value={chequeNumber}
+                        onChange={(e) => setChequeNumber(e.target.value.toUpperCase())}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Max 30 characters. Helps with bank reconciliation.
+                      </p>
+                    </div>
+
+                    {chequeNumber && (
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                          Upload Cheque Image <span className="text-slate-500">(Optional)</span>
+                        </label>
+                        <div className="border-2 border-amber-300 border-dashed rounded-lg p-4 text-center">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={(e) => setChequeImage(e.target.files?.[0] || null)}
+                            className="w-full text-xs"
+                          />
+                          {chequeImage && (
+                            <p className="text-xs text-emerald-600 mt-2 font-medium">
+                              ✓ {chequeImage.name} ({(chequeImage.size / 1024).toFixed(1)} KB) selected
+                            </p>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">
+                          Supported: JPG, PNG. Max 10MB. Camera capture enabled for mobile.
+                        </p>
+                      </div>
+                    )}
+
+                    {chequeNumber && <div
+                      className="bg-white rounded-md px-3 py-2 border-l-4 border-amber-500">
+                      <p className="text-xs text-amber-900">
+                        <strong>Cheque Status:</strong> PENDING verification (Admin will review)
+                      </p>
+                    </div>}
                   </div>
 
                   {/* Bank Save Button */}
