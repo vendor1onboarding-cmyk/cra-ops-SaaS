@@ -75,6 +75,41 @@ interface Anomaly {
   detail: string;
 }
 
+// ─── New Analytics Types ───
+interface BankPickupTrend {
+  bank: string;
+  branch: string;
+  count: number;
+  total: number;
+  avg: number;
+  variance_rate: number;
+}
+
+interface ATMPerformance {
+  siteId: number;
+  label: string;
+  loadCount: number;
+  totalLoaded: number;
+  efficiencyScore: number;
+  city: string;
+}
+
+interface CashRecyclingMetrics {
+  atmRemoved: number;
+  atmReused: number;
+  bankPickup: number;
+  recyclingPercent: number;
+  internalReusePercent: number;
+}
+
+interface RiskIndicator {
+  type: string;
+  identifier: string;
+  riskValue: number;
+  riskPercent: number | null;
+  description: string;
+}
+
 interface Analytics {
   kpis: ExecutiveKPIs;
   denom: DenomMix;
@@ -85,6 +120,11 @@ interface Analytics {
   anomalies: Anomaly[];
   banks: BankRow[];
   loadBuckets: number[];    // [0-10, 10-20, 20-30, 30-45, 45-60, 60+] min
+  // ─── New Analytics ───
+  bankPickupTrends: BankPickupTrend[];
+  atmPerformance: ATMPerformance[];
+  cashRecycling: CashRecyclingMetrics;
+  riskIndicators: RiskIndicator[];
 }
 
 /* ================================================================
@@ -340,6 +380,67 @@ export default function AdvancedAnalytics() {
                 : <SiteTable rows={data.sites} />
               }
             </section>
+
+            {/* ═══════════ VII. BANK PICKUP TRENDS ═══════════ */}
+            <section>
+              <SectionHead title="Bank Pickup Trends" question="What are the patterns in bank cash collection?" />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card title="Top Bank Branches by Volume" sub="Highest cash pickup sources">
+                  {data.bankPickupTrends.length === 0
+                    ? <Empty msg="No bank pickup trend data." />
+                    : <BankPickupTable rows={data.bankPickupTrends.slice(0, 10)} fmt={fmt} />
+                  }
+                </Card>
+                <Card title="Pickup Frequency vs Amount" sub="Branch performance comparison">
+                  {data.bankPickupTrends.length === 0
+                    ? <Empty msg="No data available." />
+                    : <PickupScatterChart data={data.bankPickupTrends.slice(0, 15)} />
+                  }
+                </Card>
+                <Card title="Variance Analysis" sub="Branches with highest discrepancy rates">
+                  {data.bankPickupTrends.length === 0
+                    ? <Empty msg="No variance data." />
+                    : <VarianceBarChart data={data.bankPickupTrends.filter(b => b.variance_rate > 5).slice(0, 10)} />
+                  }
+                </Card>
+                <Card title="Cash Recycling Metrics" sub="ATM-to-ATM cash reuse efficiency">
+                  <RecyclingMetrics metrics={data.cashRecycling} fmt={fmt} />
+                </Card>
+              </div>
+            </section>
+
+            {/* ═══════════ VIII. ATM PERFORMANCE ANALYTICS ═══════════ */}
+            <section>
+              <SectionHead title="ATM Performance Analytics" question="Which ATMs drive the most activity?" />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card title="Top ATMs by Load Volume" sub="Most frequently serviced sites">
+                  {data.atmPerformance.length === 0
+                    ? <Empty msg="No ATM performance data." />
+                    : <ATMPerformanceTable rows={data.atmPerformance.slice(0, 10)} fmt={fmt} />
+                  }
+                </Card>
+                <Card title="ATM Efficiency Distribution" sub="Performance score across all sites">
+                  {data.atmPerformance.length === 0
+                    ? <Empty msg="No data available." />
+                    : <EfficiencyDistribution data={data.atmPerformance} />
+                  }
+                </Card>
+                <Card title="City-wise Load Analysis" sub="Geographic distribution of activity">
+                  {data.atmPerformance.length === 0
+                    ? <Empty msg="No city data." />
+                    : <CityHBar data={aggregateByCity(data.atmPerformance)} fmt={fmt} />
+                  }
+                </Card>
+                <Card title="Risk Indicators" sub="Alerts requiring attention">
+                  {data.riskIndicators.length === 0
+                    ? <div className="text-xs text-emerald-600 py-4 text-center flex items-center justify-center gap-2">
+                        <span>✓</span> No critical risks detected
+                      </div>
+                    : <RiskIndicatorList risks={data.riskIndicators.slice(0, 8)} />
+                  }
+                </Card>
+              </div>
+            </section>
           </div>
         )}
 
@@ -445,6 +546,96 @@ async function fetchAnalytics(
     const nameMap = new Map(custodianOpts.map(c => [c.id, c.label]));
     const siteMap = new Map(siteOpts.map(s => [s.id, s.label]));
     const assignMap = new Map(assignments.map((a: any) => [a.id, a]));
+
+    // 3. Fetch new analytics views (read-only)
+    const [
+      { data: varianceData },
+      { data: atmUtilData },
+      { data: internalEffData },
+      { data: recyclingData },
+      { data: riskData },
+    ] = await Promise.all([
+      supabase.from("v_cash_variance_analytics").select("*"),
+      supabase.from("v_atm_load_utilization").select("*"),
+      supabase.from("v_internal_transfer_efficiency").select("*").in("assignment_id", aIds),
+      supabase.from("v_cash_recycling_rate").select("*").in("assignment_id", aIds),
+      supabase.from("v_cash_risk_indicators").select("*"),
+    ]);
+
+    // Process bank pickup trends from variance analytics
+    const bankPickupTrends: BankPickupTrend[] = (varianceData || []).map((v: any) => ({
+      bank: v.bank_name || "Unknown",
+      branch: v.branch || "Unknown",
+      count: v.total_pickups || 0,
+      total: 0, // Will aggregate from pickups
+      avg: 0,
+      variance_rate: v.variance_rate_percent || 0,
+    }));
+
+    // Enrich with actual amounts from pickups
+    const branchTotalMap = new Map<string, { total: number; count: number }>();
+    pickups.forEach((p: any) => {
+      if (p.pickup_source === "BANK") {
+        const key = `${p.bank_name || "Unknown"}|${p.branch || "Unknown"}`;
+        if (!branchTotalMap.has(key)) branchTotalMap.set(key, { total: 0, count: 0 });
+        const b = branchTotalMap.get(key)!;
+        b.total += p.total_amount || 0;
+        b.count += 1;
+      }
+    });
+    bankPickupTrends.forEach(t => {
+      const key = `${t.bank}|${t.branch}`;
+      const b = branchTotalMap.get(key);
+      if (b) {
+        t.total = b.total;
+        t.avg = b.count > 0 ? b.total / b.count : 0;
+      }
+    });
+    bankPickupTrends.sort((a, b) => b.total - a.total);
+
+    // Process ATM performance
+    const atmPerformance: ATMPerformance[] = (atmUtilData || [])
+      .filter((a: any) => (selSites.length === 0 || selSites.includes(a.site_id)))
+      .map((a: any) => ({
+        siteId: a.site_id,
+        label: siteMap.get(a.site_id) || `${a.bank_name || "Bank"} - ${a.address || "Site"}`,
+        loadCount: a.load_count || 0,
+        totalLoaded: a.total_loaded || 0,
+        efficiencyScore: 0, // Will compute from internal_transfer_efficiency
+        city: a.city || "Unknown",
+      }))
+      .sort((a, b) => b.loadCount - a.loadCount);
+
+    // Compute cash recycling metrics (aggregated across period)
+    const recyclingMetrics = (recyclingData || []).reduce(
+      (acc: CashRecyclingMetrics, r: any) => ({
+        atmRemoved: acc.atmRemoved + (r.atm_removed || 0),
+        atmReused: acc.atmReused + (r.atm_reused || 0),
+        bankPickup: acc.bankPickup + (r.bank_pickup || 0),
+        recyclingPercent: 0, // Will compute after reduction
+        internalReusePercent: 0,
+      }),
+      { atmRemoved: 0, atmReused: 0, bankPickup: 0, recyclingPercent: 0, internalReusePercent: 0 }
+    );
+    recyclingMetrics.recyclingPercent = recyclingMetrics.atmRemoved > 0
+      ? (recyclingMetrics.atmReused / recyclingMetrics.atmRemoved) * 100
+      : 0;
+    
+    // Compute internal reuse % from internal_transfer_efficiency
+    const totalInternalUsed = (internalEffData || []).reduce((s: number, r: any) => s + (r.internal_used || 0), 0);
+    const totalBankUsed = (internalEffData || []).reduce((s: number, r: any) => s + (r.bank_used || 0), 0);
+    recyclingMetrics.internalReusePercent = (totalInternalUsed + totalBankUsed) > 0
+      ? (totalInternalUsed / (totalInternalUsed + totalBankUsed)) * 100
+      : 0;
+
+    // Process risk indicators
+    const riskIndicators: RiskIndicator[] = (riskData || []).map((r: any) => ({
+      type: r.risk_type || "Unknown",
+      identifier: r.identifier || "",
+      riskValue: r.risk_value || 0,
+      riskPercent: r.risk_percent,
+      description: r.risk_description || "",
+    }));
 
     // ─── Executive KPIs ───
     // CRITICAL: Use bank_picked/bank_loaded for utilization. Internal transfers
@@ -716,6 +907,7 @@ async function fetchAnalytics(
     setData({
       kpis, denom: { picked: denomPicked, loaded: denomLoaded },
       daily, custodians, sites, peaks, anomalies, banks, loadBuckets,
+      bankPickupTrends, atmPerformance, cashRecycling: recyclingMetrics, riskIndicators,
     });
   } catch (err: any) {
     setError(err.message || "Failed to load analytics");
@@ -737,6 +929,9 @@ function buildEmpty(from: string, to: string): Analytics {
     daily: keys.map(d => ({ date: d, loads: 0, km: 0, bankPicked: 0, bankLoaded: 0, net: 0 })),
     custodians: [], sites: [], peaks: new Array(24).fill(0),
     anomalies: [], banks: [], loadBuckets: [0, 0, 0, 0, 0, 0],
+    bankPickupTrends: [], atmPerformance: [],
+    cashRecycling: { atmRemoved: 0, atmReused: 0, bankPickup: 0, recyclingPercent: 0, internalReusePercent: 0 },
+    riskIndicators: [],
   };
 }
 
@@ -1239,6 +1434,223 @@ function NetExposureChart({ data }: { data: DailyRow[] }) {
       </div>
     </div>
   );
+}
+
+/* ================================================================
+   NEW ANALYTICS UI COMPONENTS
+   ================================================================ */
+
+/* ── Bank Pickup Trends Table ── */
+function BankPickupTable({ rows, fmt }: { rows: BankPickupTrend[]; fmt: (v: number) => string }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="border-b border-slate-200 text-slate-600">
+            <th className="text-left py-1 pr-2 font-medium">Bank</th>
+            <th className="text-left py-1 pr-2 font-medium">Branch</th>
+            <th className="text-right py-1 px-1 font-medium">Count</th>
+            <th className="text-right py-1 px-1 font-medium">Total</th>
+            <th className="text-right py-1 px-1 font-medium">Avg</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+              <td className="py-1.5 pr-2 text-slate-700 font-medium">{r.bank}</td>
+              <td className="py-1.5 pr-2 text-slate-600">{r.branch}</td>
+              <td className="py-1.5 px-1 text-right text-slate-700">{r.count}</td>
+              <td className="py-1.5 px-1 text-right text-slate-900 font-semibold">{fmt(r.total)}</td>
+              <td className="py-1.5 px-1 text-right text-slate-600">{fmt(r.avg)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ── Pickup Scatter: Frequency vs Amount ── */
+function PickupScatterChart({ data }: { data: BankPickupTrend[] }) {
+  if (!data.length) return <Empty msg="No data" />;
+  const W = 400, H = 180, P = 30;
+  const maxCount = Math.max(...data.map(d => d.count), 1);
+  const maxTotal = Math.max(...data.map(d => d.total), 1);
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-40">
+        {data.map((d, i) => {
+          const x = P + (d.count / maxCount) * (W - P * 2);
+          const y = H - P - (d.total / maxTotal) * (H - P * 2);
+          return (
+            <circle key={i} cx={x} cy={y} r={4} fill="#3b82f6" opacity={0.6}
+              title={`${d.bank} ${d.branch}: ${d.count} pickups, ₹${d.total.toLocaleString()}`} />
+          );
+        })}
+      </svg>
+      <div className="text-[9px] text-slate-400 mt-1 text-center">
+        Horizontal: Pickup Count · Vertical: Total Amount
+      </div>
+    </div>
+  );
+}
+
+/* ── Variance Bar Chart ── */
+function VarianceBarChart({ data }: { data: BankPickupTrend[] }) {
+  if (!data.length) return <Empty msg="No variance data" />;
+  const maxVar = Math.max(...data.map(d => d.variance_rate), 1);
+  return (
+    <div className="space-y-1.5">
+      {data.map((d, i) => (
+        <div key={i}>
+          <div className="flex justify-between text-[10px] mb-0.5">
+            <span className="text-slate-600 truncate">{d.bank} - {d.branch}</span>
+            <span className="text-red-600 font-semibold">{d.variance_rate.toFixed(1)}%</span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-1.5">
+            <div className="h-full rounded-full bg-red-500" style={{ width: `${(d.variance_rate / maxVar) * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Cash Recycling Metrics Display ── */
+function RecyclingMetrics({ metrics, fmt }: { metrics: CashRecyclingMetrics; fmt: (v: number) => string }) {
+  const items = [
+    { label: "ATM Removed", value: fmt(metrics.atmRemoved), color: "text-amber-600" },
+    { label: "ATM Reused", value: fmt(metrics.atmReused), color: "text-emerald-600" },
+    { label: "Recycling Rate", value: `${metrics.recyclingPercent.toFixed(1)}%`, color: "text-blue-600" },
+    { label: "Internal Reuse %", value: `${metrics.internalReusePercent.toFixed(1)}%`, color: "text-purple-600" },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {items.map((item, i) => (
+        <div key={i} className="bg-slate-50 rounded p-2">
+          <div className="text-[10px] text-slate-500 font-medium">{item.label}</div>
+          <div className={`text-lg font-bold ${item.color} mt-0.5`}>{item.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── ATM Performance Table ── */
+function ATMPerformanceTable({ rows, fmt }: { rows: ATMPerformance[]; fmt: (v: number) => string }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="border-b border-slate-200 text-slate-600">
+            <th className="text-left py-1 pr-2 font-medium">ATM Site</th>
+            <th className="text-right py-1 px-1 font-medium">Loads</th>
+            <th className="text-right py-1 px-1 font-medium">Total Loaded</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+              <td className="py-1.5 pr-2 text-slate-700 truncate max-w-[200px]" title={r.label}>{r.label}</td>
+              <td className="py-1.5 px-1 text-right text-slate-700 font-semibold">{r.loadCount}</td>
+              <td className="py-1.5 px-1 text-right text-slate-900 font-semibold">{fmt(r.totalLoaded)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ── Efficiency Distribution ── */
+function EfficiencyDistribution({ data }: { data: ATMPerformance[] }) {
+  const buckets = [0, 0, 0, 0]; // [0-25%, 25-50%, 50-75%, 75-100%]
+  data.forEach(d => {
+    const eff = d.efficiencyScore;
+    if (eff < 25) buckets[0]++;
+    else if (eff < 50) buckets[1]++;
+    else if (eff < 75) buckets[2]++;
+    else buckets[3]++;
+  });
+  const max = Math.max(...buckets, 1);
+  const labels = ["0-25%", "25-50%", "50-75%", "75-100%"];
+  const colors = ["#ef4444", "#f59e0b", "#3b82f6", "#10b981"];
+
+  return (
+    <div className="space-y-2">
+      {labels.map((label, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-600 w-16">{label}</span>
+          <div className="flex-1 bg-slate-100 rounded-full h-3">
+            <div className="h-full rounded-full transition-all" style={{
+              width: `${(buckets[i] / max) * 100}%`,
+              backgroundColor: colors[i],
+            }} />
+          </div>
+          <span className="text-[11px] text-slate-600 w-8 text-right">{buckets[i]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── City-wise Horizontal Bar ── */
+function CityHBar({ data, fmt }: { data: { city: string; total: number }[]; fmt: (v: number) => string }) {
+  if (!data.length) return <Empty msg="No city data" />;
+  const max = Math.max(...data.map(d => d.total), 1);
+  return (
+    <div className="space-y-1.5">
+      {data.map((d, i) => (
+        <div key={i}>
+          <div className="flex justify-between text-[10px] mb-0.5">
+            <span className="text-slate-700 font-medium">{d.city}</span>
+            <span className="text-slate-900 font-semibold">{fmt(d.total)}</span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-2">
+            <div className="h-full rounded-full bg-indigo-500" style={{ width: `${(d.total / max) * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Risk Indicator List ── */
+function RiskIndicatorList({ risks }: { risks: RiskIndicator[] }) {
+  const iconMap: Record<string, string> = {
+    "HIGH_VARIANCE_BRANCH": "⚠️",
+    "ATM_OVERLOAD": "📦",
+    "LOW_CASH_RECYCLING": "🔄",
+  };
+  return (
+    <div className="space-y-1.5">
+      {risks.map((r, i) => (
+        <div key={i} className="bg-amber-50 border border-amber-200 rounded p-2 text-[11px]">
+          <div className="flex items-start gap-2">
+            <span className="text-sm flex-shrink-0">{iconMap[r.type] || "🔔"}</span>
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-amber-800">{r.identifier}</div>
+              <div className="text-slate-600 text-[10px] mt-0.5">{r.description}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Helper: Aggregate ATM data by city ── */
+function aggregateByCity(data: ATMPerformance[]): { city: string; total: number }[] {
+  const map = new Map<string, number>();
+  data.forEach(d => {
+    const curr = map.get(d.city) || 0;
+    map.set(d.city, curr + d.totalLoaded);
+  });
+  return Array.from(map.entries())
+    .map(([city, total]) => ({ city, total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8);
 }
 
 /* ================================================================
