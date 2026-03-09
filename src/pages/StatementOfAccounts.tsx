@@ -13,22 +13,39 @@ import {
 
 // Print styles for operational settlement report
 const printStyles = `
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
   @media print {
     .print-statement-table {
-      table-layout: fixed;
+      table-layout: auto;
       width: 100%;
-      font-size: 11px;
+      font-size: 10px;
       border-collapse: collapse;
     }
     
     .print-statement-table th,
     .print-statement-table td {
       border: 1px solid #000;
-      padding: 6px 4px;
+      padding: 5px 4px;
       word-break: break-word;
       overflow-wrap: break-word;
       white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
       vertical-align: top;
+    }
+
+    .print-statement-table th:nth-child(1),
+    .print-statement-table td:nth-child(1),
+    .print-statement-table th:nth-child(2),
+    .print-statement-table td:nth-child(2) {
+      white-space: nowrap;
+      min-width: 76px;
+      word-break: normal;
+      overflow-wrap: normal;
     }
     
     .print-statement-table th {
@@ -48,7 +65,12 @@ const printStyles = `
     /* Allocate wider column for Transaction Type to accommodate bank names */
     .print-statement-table th:nth-child(3),
     .print-statement-table td:nth-child(3) {
-      width: 35%;
+      width: 30%;
+      min-width: 100px;
+    }
+
+    .print-statement-table th:nth-child(8),
+    .print-statement-table td:nth-child(8) {
       min-width: 90px;
     }
     
@@ -300,12 +322,6 @@ export default function StatementOfAccounts() {
                 (assignments || []).map((a: any) => [a.id, a.status])
               );
 
-              // Embed custodian signature for custodian view (most recent signed)
-              if (!isAdmin) {
-                const signed = (assignments || []).find((a: any) => a.eod_signed && a.eod_signature_url);
-                setCustodianSignatureUrl(signed?.eod_signature_url || null);
-              }
-
               rows = rows.map((row: any) => {
                 const sources = sourceMap.get(row.assignment_id ?? row.soa_id);
                 const bankPicked = row.bank_picked ?? row.cash_picked;
@@ -314,7 +330,8 @@ export default function StatementOfAccounts() {
                 // These values come from summing bank_source.total_amount and internal_source.total_amount
                 // across all ATM loads for this assignment, ensuring proper separation
                 const bankLoaded = sources?.bank ?? Number(row.bank_loaded ?? 0);
-                const internalLoaded = sources?.internal ?? Number(row.internal_loaded ?? 0);
+                // Internal movement in SOA must be sourced from ATM_INTERNAL pickups only.
+                const internalLoaded = Number(internalPicked);
                 return {
                   ...row,
                   status: statusMap.get(row.assignment_id ?? row.soa_id),
@@ -427,6 +444,37 @@ export default function StatementOfAccounts() {
     loadCustodians();
   }, [isAdmin]);
 
+  useEffect(() => {
+    if (!profile) return;
+
+    async function loadLoggedInCustodianSignature() {
+      if (profile.role !== "custodian") {
+        setCustodianSignatureUrl(null);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("assignments")
+        .select("eod_signature_url")
+        .eq("custodian_id", profile.id)
+        .eq("eod_signed", true)
+        .not("eod_signature_url", "is", null)
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error loading custodian signature:", error);
+        setCustodianSignatureUrl(null);
+        return;
+      }
+
+      setCustodianSignatureUrl(data?.eod_signature_url || null);
+    }
+
+    loadLoggedInCustodianSignature();
+  }, [profile]);
+
 
   const getClosingBalance = (row: SOADetailedRow) =>
     row.opening_balance - row.total_loads;
@@ -484,7 +532,7 @@ export default function StatementOfAccounts() {
         acc.bankPicked += r.bank_picked ?? r.cash_picked;
         acc.internalPicked += r.internal_picked ?? 0;
         acc.bankLoaded += r.bank_loaded ?? 0;
-        acc.internalLoaded += r.internal_loaded ?? 0;
+        acc.internalLoaded += r.internal_picked ?? 0;
         acc.allowance += r.travel_allowance;
         acc.net += getFinalNet(r);
         return acc;
@@ -495,6 +543,69 @@ export default function StatementOfAccounts() {
 
   const normalizeUtcDate = (value?: string | Date) =>
     value ? parseUTCDate(value) : null;
+
+  // ATM load time_in has mixed historical formats across app versions.
+  // Resolve timestamps by preferring the interpretation that matches
+  // assignment_date in IST, which avoids false midnight shifts.
+  const normalizeLoadDate = (value: string | Date | undefined, assignmentDate?: string) => {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return isNaN(value.getTime()) ? null : value;
+    }
+
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const hasTimezone = /[zZ]|[+-]\d{2}(:?\d{2})?$/.test(raw);
+    const parsedAsUtc = parseUTCDate(raw);
+
+    const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+    const withoutTz = normalized.replace(/[zZ]|[+-]\d{2}(:?\d{2})?$/, "");
+    const parsedAsIstClock = new Date(`${withoutTz}+05:30`);
+
+    const getIstDateKey = (d: Date | null) =>
+      d
+        ? d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+        : "";
+
+    if (assignmentDate) {
+      const utcKey = getIstDateKey(parsedAsUtc);
+      const istClockKey = !isNaN(parsedAsIstClock.getTime()) ? getIstDateKey(parsedAsIstClock) : "";
+
+      if (utcKey === assignmentDate && istClockKey !== assignmentDate) {
+        return parsedAsUtc;
+      }
+      if (istClockKey === assignmentDate && utcKey !== assignmentDate) {
+        return parsedAsIstClock;
+      }
+      if (utcKey === assignmentDate && istClockKey === assignmentDate) {
+        return parsedAsUtc;
+      }
+    }
+
+    if (hasTimezone && parsedAsUtc) {
+      const hourInIst = Number(
+        parsedAsUtc.toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          hour: "2-digit",
+          hour12: false,
+        })
+      );
+
+      // Legacy encoded records may appear around 00:00-03:59 after UTC conversion.
+      if (!isNaN(hourInIst) && hourInIst <= 3 && !isNaN(parsedAsIstClock.getTime())) {
+        return parsedAsIstClock;
+      }
+
+      return parsedAsUtc;
+    }
+
+    if (!isNaN(parsedAsIstClock.getTime())) {
+      return parsedAsIstClock;
+    }
+
+    return parsedAsUtc;
+  };
 
   const printStatementRows = useMemo(() => {
     if (!printTransactions) return [];
@@ -583,10 +694,11 @@ export default function StatementOfAccounts() {
     });
 
     (printTransactions.atmLoads || []).forEach((a: any) => {
+      const assignmentDate = printTransactions.assignmentDates.get(a.assignment_id) || "";
       timeline.push({
         kind: "load",
         assignment_id: a.assignment_id,
-        ts: normalizeUtcDate(a.time_in) || new Date(),
+        ts: normalizeLoadDate(a.time_in, assignmentDate) || new Date(),
         raw: a,
       });
     });
@@ -899,10 +1011,7 @@ export default function StatementOfAccounts() {
     // Running balance starts at 0 each day (opening balance excluded intentionally).
     // This differs from accounting model where opening balance carries forward.
     //
-    // FINAL RECONCILIATION: If denomination matching or rounding leaves a residual
-    // balance at assignment end, auto-neutralize with reconciliation row to ensure
-    // operational settlement closes at 0. This maintains print ledger integrity
-    // without affecting database, KPIs, or monthly totals.
+    // Running balance should reflect actual operations; no synthetic reconciliation row.
     let running = 0;
     let currentAssignment = -1;
     
@@ -921,29 +1030,8 @@ export default function StatementOfAccounts() {
       
       const outputRow = { ...row, balance: running };
       
-      // Check if this is the last row of the assignment
-      const isLastRowOfAssignment =
-        index === array.length - 1 ||
-        array[index + 1].assignment_id !== row.assignment_id;
-      
-      // If there's a residual balance at end of assignment, add auto-reconciliation row
-      if (isLastRowOfAssignment && Math.abs(running) > 0.5) {
-        const reconciliationRow = {
-          ...outputRow,
-          type: "Reconciliation Adjustment",
-          atm: "",
-          debit: running > 0 ? running : 0,
-          credit: running < 0 ? -running : 0,
-          balanceImpact: -running,
-          balance: 0,
-          remarks: "Auto neutralized to maintain operational settlement = 0",
-        };
-        running = 0;
-        return [outputRow, reconciliationRow];
-      }
-      
       return [outputRow];
-    });
+    }).filter((row) => row.type !== "Reconciliation Adjustment");
   }, [printTransactions]);
 
   const summaryTravelKmTotal = useMemo(() => {
@@ -989,7 +1077,7 @@ export default function StatementOfAccounts() {
           "Bank Picked",
           "ATM Picked",
           "Bank Loaded",
-          "ATM Loaded",
+          "Internal Movement",
           "Travel KM",
           ...(showAllowance ? ["Allowance"] : []),
           "Final Net Position",
@@ -1021,7 +1109,7 @@ export default function StatementOfAccounts() {
             row.bank_picked ?? row.cash_picked,
             row.internal_picked ?? 0,
             row.bank_loaded ?? 0,
-            row.internal_loaded ?? 0,
+            row.internal_picked ?? 0,
             row.travel_km,
             ...(showAllowance ? [row.travel_allowance] : []),
             getFinalNet(row),
@@ -1082,7 +1170,8 @@ export default function StatementOfAccounts() {
             <div className="text-right text-xs">
               <p className="font-semibold">Operational Daily Settlement Report</p>
               <p>Period: {fromDate} to {toDate}</p>
-              <p>Date: {new Date().toLocaleDateString("en-IN")}</p>
+              <p>Date: {new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}</p>
+              <p>Time: {new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })} IST</p>
               {profile?.full_name && (
                 <p>Custodian: {profile.full_name}</p>
               )}
@@ -1292,7 +1381,7 @@ export default function StatementOfAccounts() {
         </div>
 
           {/* ===== Load Source Breakdown & Internal Movement Info ===== */}
-          {!loading && viewMode === "summary" && (summaryTotals.bankLoaded > 0 || summaryTotals.internalLoaded > 0) && (
+          {!loading && viewMode === "summary" && (summaryTotals.bankLoaded > 0 || summaryTotals.internalPicked > 0) && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h3 className="text-sm font-semibold text-blue-900 mb-2">
               💡 Cash Flow Summary (Month-End)
@@ -1300,9 +1389,9 @@ export default function StatementOfAccounts() {
             <div className="text-xs text-blue-800 space-y-1">
               <p className="font-medium text-green-700">✓ Total ATM Cash Loaded (SOA): ₹{summaryTotals.bankLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
               <p className="ml-4 text-slate-600">From Bank withdrawals → Affects Closing Balance</p>
-              {summaryTotals.internalLoaded > 0 && (
+              {summaryTotals.internalPicked > 0 && (
                 <>
-                  <p className="font-medium mt-2 text-blue-700">⟷ Internal ATM Transfers (Neutral): ₹{summaryTotals.internalLoaded.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                  <p className="font-medium mt-2 text-blue-700">⟷ Internal ATM Transfers (Neutral): ₹{summaryTotals.internalPicked.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
                   <p className="ml-4 text-slate-600">Movement between ATMs → Net Impact = 0 (not in SOA KPI)</p>
                 </>
               )}
@@ -1336,7 +1425,7 @@ export default function StatementOfAccounts() {
             />
             <KPI
               label="Internal ATM Movement"
-              value={summaryTotals.internalLoaded}
+              value={summaryTotals.internalPicked}
               subtext="₹"
               color="slate"
               highlight={false}
@@ -1481,7 +1570,7 @@ export default function StatementOfAccounts() {
                             <div>
                               <p className="text-slate-500">Internal Movement</p>
                               <p className="font-semibold text-blue-700">
-                                ₹{(r.internal_loaded ?? 0).toLocaleString("en-IN", {
+                                ₹{(r.internal_picked ?? 0).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
                                 })}
                               </p>
@@ -1609,8 +1698,8 @@ export default function StatementOfAccounts() {
                                 })}
                               </td>
                               <td className="px-4 py-3 text-right text-blue-700 font-medium">
-                                {(r.internal_loaded ?? 0) > 0
-                                  ? `(+${(r.internal_loaded ?? 0).toLocaleString("en-IN", {
+                                {(r.internal_picked ?? 0) > 0
+                                  ? `(+${(r.internal_picked ?? 0).toLocaleString("en-IN", {
                                       minimumFractionDigits: 2,
                                     })})`
                                   : "-"}
@@ -1666,7 +1755,7 @@ export default function StatementOfAccounts() {
                             })}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-700">
-                            {summaryTotals.internalLoaded.toLocaleString("en-IN", {
+                            {summaryTotals.internalPicked.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
                             })}
                           </td>

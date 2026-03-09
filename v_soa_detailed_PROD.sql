@@ -1,4 +1,4 @@
-create or replace view public.v_soa_detailed as
+create view public.v_soa_detailed as
 select
   id as soa_id,
   id as assignment_id,
@@ -8,9 +8,7 @@ select
     (
       select
         sum(
-          (
-            cp.denom_2000 * 2000 + cp.denom_500 * 500 + cp.denom_200 * 200 + cp.denom_100 * 100 + cp.denom_50 * 50 + cp.denom_20 * 20 + cp.denom_10 * 10
-          )::numeric - COALESCE(NULLIF(cp.internal_source_metadata ->> 'total_internal_amount'::text, ''::text)::numeric, 0::numeric)
+          cp.denom_2000 * 2000 + cp.denom_500 * 500 + cp.denom_200 * 200 + cp.denom_100 * 100 + cp.denom_50 * 50 + cp.denom_20 * 20 + cp.denom_10 * 10
         ) as sum
       from
         cash_pickups cp
@@ -18,7 +16,7 @@ select
         cp.assignment_id = a.id
         and COALESCE(cp.pickup_source, 'BANK'::text) = 'BANK'::text
     ),
-    0::numeric
+    0::bigint
   ) as bank_withdrawals,
   COALESCE(
     (
@@ -33,14 +31,28 @@ select
         and cp.pickup_source = 'ATM_INTERNAL'::text
     ),
     0::bigint
-  )::numeric as internal_withdrawals,
-  COALESCE(
+  )::numeric + COALESCE(
     (
       select
         sum(
           (
-            cp.denom_2000 * 2000 + cp.denom_500 * 500 + cp.denom_200 * 200 + cp.denom_100 * 100 + cp.denom_50 * 50 + cp.denom_20 * 20 + cp.denom_10 * 10
-          )::numeric - COALESCE(NULLIF(cp.internal_source_metadata ->> 'total_internal_amount'::text, ''::text)::numeric, 0::numeric)
+            cp.internal_source_metadata ->> 'total_internal_amount'::text
+          )::numeric
+        ) as sum
+      from
+        cash_pickups cp
+      where
+        cp.assignment_id = a.id
+        and cp.internal_source_metadata is not null
+        and COALESCE(cp.pickup_source, 'BANK'::text) = 'BANK'::text
+    ),
+    0::numeric
+  ) as internal_withdrawals,
+  COALESCE(
+    (
+      select
+        sum(
+          cp.denom_2000 * 2000 + cp.denom_500 * 500 + cp.denom_200 * 200 + cp.denom_100 * 100 + cp.denom_50 * 50 + cp.denom_20 * 20 + cp.denom_10 * 10
         ) as sum
       from
         cash_pickups cp
@@ -48,15 +60,13 @@ select
         cp.assignment_id = a.id
         and COALESCE(cp.pickup_source, 'BANK'::text) = 'BANK'::text
     ),
-    0::numeric
+    0::bigint
   )::numeric as opening_balance,
   COALESCE(
     (
       select
         sum(
-          (
-            cp.denom_2000 * 2000 + cp.denom_500 * 500 + cp.denom_200 * 200 + cp.denom_100 * 100 + cp.denom_50 * 50 + cp.denom_20 * 20 + cp.denom_10 * 10
-          )::numeric - COALESCE(NULLIF(cp.internal_source_metadata ->> 'total_internal_amount'::text, ''::text)::numeric, 0::numeric)
+          cp.denom_2000 * 2000 + cp.denom_500 * 500 + cp.denom_200 * 200 + cp.denom_100 * 100 + cp.denom_50 * 50 + cp.denom_20 * 20 + cp.denom_10 * 10
         ) as sum
       from
         cash_pickups cp
@@ -64,7 +74,7 @@ select
         cp.assignment_id = a.id
         and COALESCE(cp.pickup_source, 'BANK'::text) = 'BANK'::text
     ),
-    0::numeric
+    0::bigint
   )::numeric as total_withdrawals,
   COALESCE(
     (
@@ -103,22 +113,65 @@ select
     (
       select
         sum(
-          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_2000')::bigint, 0) * 2000 +
-          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_500')::bigint, 0) * 500 +
-          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_200')::bigint, 0) * 200 +
-          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_100')::bigint, 0) * 100 +
-          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_50')::bigint, 0) * 50 +
-          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_20')::bigint, 0) * 20 +
-          COALESCE((sa.exchange_metadata->'delta_denominations'->>'denom_10')::bigint, 0) * 10
+          COALESCE(
+            (
+              (
+                sa.exchange_metadata -> 'delta_denominations'::text
+              ) ->> 'denom_2000'::text
+            )::bigint,
+            0::bigint
+          ) * 2000 + COALESCE(
+            (
+              (
+                sa.exchange_metadata -> 'delta_denominations'::text
+              ) ->> 'denom_500'::text
+            )::bigint,
+            0::bigint
+          ) * 500 + COALESCE(
+            (
+              (
+                sa.exchange_metadata -> 'delta_denominations'::text
+              ) ->> 'denom_200'::text
+            )::bigint,
+            0::bigint
+          ) * 200 + COALESCE(
+            (
+              (
+                sa.exchange_metadata -> 'delta_denominations'::text
+              ) ->> 'denom_100'::text
+            )::bigint,
+            0::bigint
+          ) * 100 + COALESCE(
+            (
+              (
+                sa.exchange_metadata -> 'delta_denominations'::text
+              ) ->> 'denom_50'::text
+            )::bigint,
+            0::bigint
+          ) * 50 + COALESCE(
+            (
+              (
+                sa.exchange_metadata -> 'delta_denominations'::text
+              ) ->> 'denom_20'::text
+            )::bigint,
+            0::bigint
+          ) * 20 + COALESCE(
+            (
+              (
+                sa.exchange_metadata -> 'delta_denominations'::text
+              ) ->> 'denom_10'::text
+            )::bigint,
+            0::bigint
+          ) * 10
         ) as sum
       from
         soa_adjustments sa
       where
         sa.assignment_id = a.id
         and sa.custodian_confirmed = true
-        and (sa.exchange_metadata->>'type') = 'ADMIN_CORRECTION'
+        and (sa.exchange_metadata ->> 'type'::text) = 'ADMIN_CORRECTION'::text
     ),
-    0
+    0::numeric
   )::integer as net_adjustments,
   (
     select
@@ -182,7 +235,7 @@ select
       soa_adjustments sa
     where
       sa.assignment_id = a.id
-      and (sa.exchange_metadata->>'type') = 'ADMIN_CORRECTION'
+      and (sa.exchange_metadata ->> 'type'::text) = 'ADMIN_CORRECTION'::text
       and sa.custodian_confirmed = true
   ) as admin_correction_count
 from

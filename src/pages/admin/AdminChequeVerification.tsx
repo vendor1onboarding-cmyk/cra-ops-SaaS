@@ -441,14 +441,11 @@ export default function AdminChequeVerification() {
 
       {/* Confirmation Modal */}
       <ConfirmationModal
-        isOpen={showConfirm}
+        open={showConfirm}
         title="Confirm Cheque Action"
         message={confirmMessage}
         onConfirm={processConfirmation}
-        onCancel={() => setShowConfirm(false)}
-        isLoading={processing}
-        confirmText="Confirm"
-        cancelText="Cancel"
+        confirmLabel={processing ? "Processing..." : "Confirm"}
       />
     </div>
   );

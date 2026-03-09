@@ -174,6 +174,7 @@ CREATE TABLE public.cash_pickups (
   assignment_id bigint,
   bank_name text,
   branch text,
+  bank_account_id uuid,
   pickup_time timestamp with time zone DEFAULT now(),
   denom_2000 integer DEFAULT 0,
   denom_500 integer DEFAULT 0,
@@ -201,7 +202,9 @@ CREATE TABLE public.cash_pickups (
   cheque_metadata jsonb,
   CONSTRAINT cash_pickups_pkey PRIMARY KEY (id),
   CONSTRAINT cash_pickups_assignment_id_fkey FOREIGN KEY (assignment_id) REFERENCES public.assignments(id),
-  CONSTRAINT cash_pickups_source_site_id_fkey FOREIGN KEY (source_site_id) REFERENCES public.sites(id)
+  CONSTRAINT cash_pickups_source_site_id_fkey FOREIGN KEY (source_site_id) REFERENCES public.sites(id),
+  CONSTRAINT cash_pickups_bank_account_id_fkey FOREIGN KEY (bank_account_id) REFERENCES public.bank_accounts(id) ON DELETE SET NULL,
+  CONSTRAINT cash_pickups_assignment_bank_unique UNIQUE (assignment_id, bank_account_id)
 );
 CREATE TABLE public.cheque_audit_log (
   id bigint NOT NULL DEFAULT nextval('cheque_audit_log_id_seq'::regclass),
