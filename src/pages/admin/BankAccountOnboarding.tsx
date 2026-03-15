@@ -49,6 +49,7 @@ export default function BankAccountOnboarding() {
   const [messageType, setMessageType] = useState<"success" | "error">("success");
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState("");
+  const [editingBankId, setEditingBankId] = useState<string | null>(null);
 
   const [form, setForm] = useState<FormData>({
     bank_name: "",
@@ -121,14 +122,20 @@ export default function BankAccountOnboarding() {
     return Object.keys(newErrors).length === 0;
   }
 
-  // Check for duplicates
+  // Check for duplicates (excluding the current bank being edited)
   async function checkDuplicate(): Promise<boolean> {
-    const { data, error } = await supabase
+    let query = supabase
       .from("bank_accounts")
       .select("id")
       .eq("account_number", form.account_number.trim())
-      .eq("ifsc_code", form.ifsc_code.toUpperCase().trim())
-      .maybeSingle();
+      .eq("ifsc_code", form.ifsc_code.toUpperCase().trim());
+
+    // Exclude current bank if editing
+    if (editingBankId) {
+      query = query.neq("id", editingBankId);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       console.error(error);
@@ -146,7 +153,7 @@ export default function BankAccountOnboarding() {
     return false;
   }
 
-  // Handle form submission
+  // Handle form submission (add or update)
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -170,7 +177,7 @@ export default function BankAccountOnboarding() {
     setMessage(null);
 
     try {
-      const { error } = await supabase.from("bank_accounts").insert({
+      const bankData = {
         bank_name: form.bank_name.trim(),
         account_number: form.account_number.trim(),
         ifsc_code: form.ifsc_code.toUpperCase().trim(),
@@ -182,24 +189,52 @@ export default function BankAccountOnboarding() {
         latitude: form.latitude ? Number(form.latitude) : null,
         longitude: form.longitude ? Number(form.longitude) : null,
         is_active: form.is_active,
-        created_by: profile.id,
-      });
+      };
+
+      let error;
+
+      if (editingBankId) {
+        // Update existing bank account
+        const { error: updateError } = await supabase
+          .from("bank_accounts")
+          .update(bankData)
+          .eq("id", editingBankId);
+        error = updateError;
+
+        if (!error) {
+          setMessageType("success");
+          setSubmitLocked(true);
+          setConfirmMessage(
+            `Bank account for ${form.bank_name.trim() || "bank"} updated successfully.`
+          );
+          setShowConfirm(true);
+        }
+      } else {
+        // Insert new bank account
+        const { error: insertError } = await supabase.from("bank_accounts").insert({
+          ...bankData,
+          created_by: profile.id,
+        });
+        error = insertError;
+
+        if (!error) {
+          setMessageType("success");
+          setSubmitLocked(true);
+          setConfirmMessage(
+            `Bank account added successfully for ${form.bank_name.trim() || "bank"}.`
+          );
+          setShowConfirm(true);
+        }
+      }
 
       if (error) {
         console.error(error);
-        setMessage("Failed to save bank account");
+        setMessage(editingBankId ? "Failed to update bank account" : "Failed to save bank account");
         setMessageType("error");
-      } else {
-        setMessageType("success");
-        setSubmitLocked(true);
-        setConfirmMessage(
-          `Bank account added successfully for ${form.bank_name.trim() || "bank"}.`
-        );
-        setShowConfirm(true);
       }
     } catch (err) {
       console.error(err);
-      setMessage("Error saving bank account");
+      setMessage(editingBankId ? "Error updating bank account" : "Error saving bank account");
       setMessageType("error");
     } finally {
       setLoading(false);
@@ -221,9 +256,50 @@ export default function BankAccountOnboarding() {
       is_active: true,
     });
     setErrors({});
+    setEditingBankId(null);
     await loadBankAccounts();
     setView("list");
     setSubmitLocked(false);
+  }
+
+  // Load bank account data for editing
+  function loadBankForEdit(bank: BankAccount) {
+    setEditingBankId(bank.id);
+    setForm({
+      bank_name: bank.bank_name,
+      account_number: bank.account_number,
+      ifsc_code: bank.ifsc_code,
+      branch_code: bank.branch_code || "",
+      branch_name: bank.branch_name || "",
+      branch_phone: bank.branch_phone || "",
+      branch_email: bank.branch_email || "",
+      branch_address: bank.branch_address || "",
+      latitude: bank.latitude ? String(bank.latitude) : "",
+      longitude: bank.longitude ? String(bank.longitude) : "",
+      is_active: bank.is_active,
+    });
+    setErrors({});
+    setView("form");
+    setMessage(null);
+  }
+
+  function cancelEdit() {
+    setEditingBankId(null);
+    setForm({
+      bank_name: "",
+      account_number: "",
+      ifsc_code: "",
+      branch_code: "",
+      branch_name: "",
+      branch_phone: "",
+      branch_email: "",
+      branch_address: "",
+      latitude: "",
+      longitude: "",
+      is_active: true,
+    });
+    setErrors({});
+    setView("list");
   }
 
   // Handle toggle is_active
@@ -343,6 +419,9 @@ export default function BankAccountOnboarding() {
                       <th className="px-4 py-3 text-center font-semibold text-slate-700">
                         Status
                       </th>
+                      <th className="px-4 py-3 text-center font-semibold text-slate-700">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -379,6 +458,14 @@ export default function BankAccountOnboarding() {
                             {bank.is_active ? "✅ Active" : "❌ Inactive"}
                           </button>
                         </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => loadBankForEdit(bank)}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 hover:bg-blue-200 transition-all"
+                          >
+                            ✏️ Edit
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -392,7 +479,7 @@ export default function BankAccountOnboarding() {
         {view === "form" && (
           <div className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6">
             <h2 className="text-lg font-semibold text-slate-800 mb-5">
-              Add New Bank Account
+              {editingBankId ? "📝 Edit Bank Account" : "➕ Add New Bank Account"}
             </h2>
 
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -407,11 +494,19 @@ export default function BankAccountOnboarding() {
                   onChange={(e) =>
                     setForm({ ...form, bank_name: e.target.value })
                   }
+                  disabled={!!editingBankId}
                   placeholder="e.g., CITY UNION BANK"
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  className={`w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
+                    editingBankId ? "bg-slate-100 cursor-not-allowed" : ""
+                  }`}
                 />
                 {errors.bank_name && (
                   <p className="text-red-600 text-xs mt-1">{errors.bank_name}</p>
+                )}
+                {editingBankId && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    Cannot edit core bank identifier
+                  </p>
                 )}
               </div>
 
@@ -426,12 +521,20 @@ export default function BankAccountOnboarding() {
                   onChange={(e) =>
                     setForm({ ...form, account_number: e.target.value })
                   }
+                  disabled={!!editingBankId}
                   placeholder="e.g., 510909010242049"
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  className={`w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
+                    editingBankId ? "bg-slate-100 cursor-not-allowed" : ""
+                  }`}
                 />
                 {errors.account_number && (
                   <p className="text-red-600 text-xs mt-1">
                     {errors.account_number}
+                  </p>
+                )}
+                {editingBankId && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    Cannot edit core bank identifier
                   </p>
                 )}
               </div>
@@ -445,12 +548,20 @@ export default function BankAccountOnboarding() {
                   type="text"
                   value={form.ifsc_code}
                   onChange={(e) => handleIFSCChange(e.target.value)}
+                  disabled={!!editingBankId}
                   placeholder="e.g., CUB0000085 (11 chars)"
                   maxLength={11}
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                  className={`w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary font-mono ${
+                    editingBankId ? "bg-slate-100 cursor-not-allowed" : ""
+                  }`}
                 />
                 {errors.ifsc_code && (
                   <p className="text-red-600 text-xs mt-1">{errors.ifsc_code}</p>
+                )}
+                {editingBankId && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    Cannot edit core bank identifier
+                  </p>
                 )}
               </div>
 
@@ -592,24 +703,18 @@ export default function BankAccountOnboarding() {
                   disabled={loading || submitLocked}
                   className="flex-1 bg-primary text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
                 >
-                  {loading ? "Saving..." : "✅ Save Bank Account"}
+                  {loading
+                    ? editingBankId
+                      ? "Updating..."
+                      : "Saving..."
+                    : editingBankId
+                    ? "✅ Update Bank Account"
+                    : "✅ Save Bank Account"}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
-                    setView("list");
-                    setForm({
-                      bank_name: "",
-                      account_number: "",
-                      ifsc_code: "",
-                      branch_code: "",
-                      branch_name: "",
-                      branch_phone: "",
-                      branch_email: "",
-                      branch_address: "",
-                      is_active: true,
-                    });
-                    setErrors({});
+                    cancelEdit();
                   }}
                   className="px-6 py-2.5 border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 transition-all"
                 >
