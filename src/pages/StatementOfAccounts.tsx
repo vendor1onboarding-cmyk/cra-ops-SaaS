@@ -109,6 +109,8 @@ type SOADetailedRow = {
   custodian_id?: string;
   assignment_date: string;
   opening_balance: number;
+  bank_withdrawals?: number;
+  internal_withdrawals?: number;
   total_withdrawals: number;
   total_loads: number;
   exchange_count: number;
@@ -223,6 +225,8 @@ export default function StatementOfAccounts() {
                 custodian_id,
                 assignment_date,
                 opening_balance,
+                bank_withdrawals,
+                internal_withdrawals,
                 total_withdrawals,
                 total_loads,
                 exchange_count,
@@ -476,8 +480,12 @@ export default function StatementOfAccounts() {
   }, [profile]);
 
 
-  const getClosingBalance = (row: SOADetailedRow) =>
-    row.opening_balance - row.total_loads;
+  const getClosingBalance = (row: SOADetailedRow) => {
+    // CRITICAL: Closing Balance = Only Bank Cash movement (bank picked - bank loaded)
+    // Internal transfers between ATMs are movements, not cash position changes
+    // They are tracked separately as transfers, not in closing balance
+    return (row.bank_withdrawals ?? row.opening_balance ?? 0) - row.total_loads;
+  };
 
   const toggleRowExpansion = async (assignmentId: number) => {
     const newExpanded = new Set(expandedRows);
@@ -516,11 +524,12 @@ export default function StatementOfAccounts() {
   };
 
   const getFinalNet = (row: SOASummaryRow) => {
-    // CRITICAL: Only BANK CASH affects closing balance
-    // Internal transfers are neutral and must NOT be included
-    const bankPicked = row.bank_picked ?? row.cash_picked;
-    const bankLoaded = row.bank_loaded ?? 0;
-    return bankPicked - bankLoaded;
+    // CRITICAL: Cash-in-Hand = Total Picked - Total Loaded (INCLUDES both Bank and ATM_INTERNAL)
+    // This must match ATMReplenishment, Dashboard, and EOD calculations to avoid inconsistency
+    // ATM_INTERNAL pickups ARE part of available cash for ATM replenishment
+    const totalPicked = (row.bank_picked ?? row.cash_picked) + (row.internal_picked ?? 0);
+    const totalLoaded = (row.bank_loaded ?? 0) + (row.internal_loaded ?? 0);
+    return totalPicked - totalLoaded;
   };
 
   // Calculate totals
@@ -532,7 +541,7 @@ export default function StatementOfAccounts() {
         acc.bankPicked += r.bank_picked ?? r.cash_picked;
         acc.internalPicked += r.internal_picked ?? 0;
         acc.bankLoaded += r.bank_loaded ?? 0;
-        acc.internalLoaded += r.internal_picked ?? 0;
+        acc.internalLoaded += r.internal_loaded ?? 0;
         acc.allowance += r.travel_allowance;
         acc.net += getFinalNet(r);
         return acc;
@@ -1042,7 +1051,9 @@ export default function StatementOfAccounts() {
     return detailedRows.reduce(
       (acc, r) => {
         acc.opening += r.opening_balance;
-        acc.withdrawals += r.total_withdrawals;
+        // CRITICAL: withdrawals = only bank withdrawals (internal transfers shown separately)
+        const bankWithdrawals = r.bank_withdrawals ?? r.opening_balance ?? 0;
+        acc.withdrawals += bankWithdrawals;
         acc.loads += r.total_loads;
         acc.allowance += r.travel_allowance;
         acc.travelKm += r.travel_km || 0;
@@ -1424,7 +1435,7 @@ export default function StatementOfAccounts() {
               color="green"
             />
             <KPI
-              label="Internal ATM Movement"
+              label="Transfers"
               value={summaryTotals.internalPicked}
               subtext="₹"
               color="slate"
@@ -1568,7 +1579,7 @@ export default function StatementOfAccounts() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-slate-500">Internal Movement</p>
+                              <p className="text-slate-500">Transfers</p>
                               <p className="font-semibold text-blue-700">
                                 ₹{(r.internal_picked ?? 0).toLocaleString("en-IN", {
                                   minimumFractionDigits: 2,
@@ -1643,7 +1654,7 @@ export default function StatementOfAccounts() {
                             Bank Loaded
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                            Internal Movement
+                            Transfers
                           </th>
                           <th className="px-4 py-3 text-right font-semibold text-slate-700">
                             KM
@@ -1698,11 +1709,9 @@ export default function StatementOfAccounts() {
                                 })}
                               </td>
                               <td className="px-4 py-3 text-right text-blue-700 font-medium">
-                                {(r.internal_picked ?? 0) > 0
-                                  ? `(+${(r.internal_picked ?? 0).toLocaleString("en-IN", {
-                                      minimumFractionDigits: 2,
-                                    })})`
-                                  : "-"}
+                                {(r.internal_picked ?? 0).toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
                               </td>
                               <td className="px-4 py-3 text-right text-slate-900">
                                 {r.travel_km}
