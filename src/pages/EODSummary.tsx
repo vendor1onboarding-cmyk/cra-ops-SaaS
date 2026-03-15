@@ -655,10 +655,11 @@ function CustodianEOD({
   const internalTransferTotal = Math.max(internalPicked, internalLoaded);
   const netInternalTransfer = internalPicked - internalLoaded;
 
-  // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
-  // Internal transfers are neutral and do NOT impact Cash-in-Hand
-  const totalPicked = bankPicked;
-  const totalLoaded = bankLoaded;
+  // CRITICAL: Cash-in-Hand = Total Picked - Total Loaded (INCLUDES both Bank and ATM_INTERNAL)
+  // This must match ATMReplenishment and Dashboard calculations to avoid inconsistency
+  // ATM_INTERNAL pickups ARE part of available cash for ATM replenishment
+  const totalPicked = bankPicked + internalPicked;
+  const totalLoaded = bankLoaded + internalLoaded;
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
 
@@ -1270,7 +1271,7 @@ function CustodianEOD({
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-600">Cash in Hand (Bank Net)</span>
+                <span className="text-slate-600">Cash in Hand</span>
                 <span
                   className={`px-2 py-1 rounded text-xs font-semibold ${
                     closingUnbalanced

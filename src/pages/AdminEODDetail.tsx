@@ -280,8 +280,10 @@ export default function AdminEODDetail() {
     };
   }, [data.adjustments, data.cashPickups, data.atmLoads]);
 
-  const totalPicked = bankPicked;
-  const totalLoaded = bankLoaded;
+  // CRITICAL: Cash-in-Hand = Total Picked - Total Loaded (INCLUDES both Bank and ATM_INTERNAL)
+  // This must match ATMReplenishment and Dashboard calculations to avoid inconsistency
+  const totalPicked = bankPicked + internalPicked;
+  const totalLoaded = bankLoaded + internalLoaded;
   const cashInHand = totalPicked - totalLoaded;
   const closingUnbalanced = Math.abs(cashInHand) >= 0.01;
 
@@ -668,7 +670,7 @@ export default function AdminEODDetail() {
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-600">Cash in Hand (Bank Net)</span>
+              <span className="text-slate-600">Cash in Hand</span>
               <span
                 className={`px-2 py-1 rounded text-xs font-semibold ${
                   closingUnbalanced
