@@ -298,17 +298,10 @@ loadTravelKPI();
   }
 
   function computeCash(pickups: any[], loads: any[]) {
-    // FLOW 1: BANK CASH (affects Cash-in-Hand)
-    const bankPicked = pickups.reduce((sum, p) => {
-      const source = p.pickup_source || "BANK";
-      if (source === "ATM_INTERNAL") return sum;
-      // For BANK pickups, subtract any internal_source_metadata total
-      const metaSources = extractInternalSourcesFromMetadata(p);
-      const metaTotal = metaSources.reduce(
-        (acc: number, s: any) => acc + Number(s.total_amount || 0),
-        0
-      );
-      return sum + Math.max(sumDenoms(p, DENOMS) - metaTotal, 0);
+    // FLOW 1: TOTAL CASH PICKED (ALL sources: bank + ATM_INTERNAL)
+    // Cash-in-Hand includes all cash picked, regardless of source
+    const totalPicked = pickups.reduce((sum, p) => {
+      return sum + sumDenoms(p, DENOMS);
     }, 0);
 
     // FLOW 2: INTERNAL ATM TRANSFER tracking
@@ -399,12 +392,13 @@ loadTravelKPI();
     // Internal transfer display (max of picked vs loaded for visibility)
     setInternalTransferTotal(Math.max(internalPickedTotal, totalInternalLoaded));
 
-    // CRITICAL: Cash-in-Hand = Bank Picked - Bank Loaded (ONLY)
-    // Internal transfers do NOT impact Cash-in-Hand
+    // Cash-in-Hand = Total Picked (all sources) - Total Loaded
+    // Both bank and ATM internal pickups contribute to available cash
+    const totalLoaded = totalBankLoaded + totalInternalLoaded;
     setCashUtil({
-      picked: bankPicked,
-      loaded: totalBankLoaded,
-      inHand: bankPicked - totalBankLoaded,
+      picked: totalPicked,
+      loaded: totalLoaded,
+      inHand: totalPicked - totalLoaded,
     });
   }
 

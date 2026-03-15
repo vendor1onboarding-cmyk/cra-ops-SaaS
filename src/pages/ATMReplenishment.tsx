@@ -183,28 +183,10 @@ export default function ATMReplenishment() {
     const pickups = pickupRes.data || [];
     const loads = loadRes.data || [];
 
-    const bankPicked = pickups.reduce((sum: number, row: any) => {
-      const source = row.pickup_source || "BANK";
-      if (source === "ATM_INTERNAL") return sum;
+    const totalPicked = pickups.reduce((sum: number, row: any) => sum + sumDenomsAmount(row), 0);
+    const totalLoaded = loads.reduce((sum: number, row: any) => sum + sumDenomsAmount(row), 0);
 
-      const internalSources = row?.internal_source_metadata?.sources || [];
-      const internalTotal = internalSources.reduce(
-        (acc: number, s: any) => acc + Number(s.total_amount || 0),
-        0
-      );
-
-      return sum + Math.max(sumDenomsAmount(row) - internalTotal, 0);
-    }, 0);
-
-    const bankLoaded = loads.reduce((sum: number, row: any) => {
-      const fromBreakdown = Number(row?.source_breakdown?.bank_source?.total_amount);
-      if (Number.isFinite(fromBreakdown)) {
-        return sum + fromBreakdown;
-      }
-      return sum + sumDenomsAmount(row);
-    }, 0);
-
-    const remaining = bankPicked - bankLoaded;
+    const remaining = totalPicked - totalLoaded;
     return Math.round(remaining * 100) / 100;
   }
 
