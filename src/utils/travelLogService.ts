@@ -66,15 +66,15 @@ class TravelLogService {
    * Check if there's an active travel session for the given custodian
    * Returns true if active, false otherwise (or on error)
    */
-  async hasActiveTravel(custodianId: string): Promise<boolean> {
+  async hasActiveTravel(custodianId: string, assignmentId: number): Promise<boolean> {
     try {
       const { data } = await supabase
         .from("travel_logs")
         .select("id")
         .eq("custodian_id", custodianId)
+        .eq("assignment_id", assignmentId)
         .eq("status", "in_progress")
         .maybeSingle();
-
       return !!data;
     } catch (error) {
       console.warn("[TravelLog] Failed to check active travel:", error);
@@ -134,10 +134,10 @@ class TravelLogService {
         context = TravelContext.MANUAL, // Default to manual if not specified
       } = options;
 
-      // Check for existing active travel
-      const hasActive = await this.hasActiveTravel(custodianId);
+      // Check for existing active travel for this assignment
+      const hasActive = await this.hasActiveTravel(custodianId, assignmentId);
       if (hasActive) {
-        console.warn("[TravelLog] Active travel already exists, skipping start");
+        console.warn("[TravelLog] Active travel already exists for this assignment, skipping start");
         return null;
       }
 
@@ -191,18 +191,20 @@ class TravelLogService {
    */
   async endTravel(
     custodianId: string,
+    assignmentId?: number,
     options?: { odometerEnd?: string }
   ): Promise<boolean> {
     try {
-      // Find the active travel session
-      const { data: activeTravel } = await supabase
+      // Find the active travel session for this assignment (if provided), else any active
+      let query = supabase
         .from("travel_logs")
         .select("*")
         .eq("custodian_id", custodianId)
         .eq("status", "in_progress")
         .order("start_time", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(1);
+      if (assignmentId) query = query.eq("assignment_id", assignmentId);
+      const { data: activeTravel } = await query.maybeSingle();
 
       if (!activeTravel) {
         console.warn("[TravelLog] No active travel to end");
@@ -433,13 +435,10 @@ class TravelLogService {
     try {
       // Preserve current context before ending
       const currentContext = this.getTravelContext();
-      
-      // End current travel (this will clear context)
-      await this.endTravel(custodianId);
-
+      // End current travel for this assignment (if provided)
+      await this.endTravel(custodianId, newTravelOptions.assignmentId);
       // Small delay to ensure transaction completes
       await new Promise((resolve) => setTimeout(resolve, 100));
-
       // Start new travel with preserved context
       return await this.startTravel({
         ...newTravelOptions,
@@ -459,12 +458,10 @@ class TravelLogService {
     options: TravelLogServiceOptions
   ): Promise<number | null> {
     try {
-      const hasActive = await this.hasActiveTravel(options.custodianId);
-
+      const hasActive = await this.hasActiveTravel(options.custodianId, options.assignmentId);
       if (!hasActive) {
         return await this.startTravel(options);
       }
-
       return await this.endAndStartTravel(options.custodianId, options);
     } catch (error) {
       console.warn("[TravelLog] Trigger checkpoint failed:", error);
