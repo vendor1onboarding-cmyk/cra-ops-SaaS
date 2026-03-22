@@ -71,6 +71,29 @@ async function getGPS() {
   });
 }
 
+// Fetch branch details based on account number and IFSC code
+async function fetchBranchDetails(accountNumber: string, ifscCode: string) {
+  try {
+    const { data, error } = await supabase
+      .from("bank_accounts")
+      .select("branch_name")
+      .eq("account_number", accountNumber)
+      .eq("ifsc_code", ifscCode)
+      .eq("is_active", true)
+      .single();
+
+    if (error) {
+      console.error("Error fetching branch details:", error);
+      return null;
+    }
+
+    return data?.branch_name || null;
+  } catch (err) {
+    console.error("Unexpected error fetching branch details:", err);
+    return null;
+  }
+}
+
 export default function CashPickup() {
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<'bank' | 'atm'>('bank');
