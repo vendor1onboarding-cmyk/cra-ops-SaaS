@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import { DenominationFields } from "../components/DenominationFields";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { getISTDateString } from "../utils/time";

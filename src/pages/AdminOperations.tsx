@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import ATMSiteOnboarding from "./admin/ATMSiteOnboarding";
 import ATMSiteUpdate from "./admin/ATMSiteUpdate";
 import UserOnboarding from "./admin/UserOnboarding";

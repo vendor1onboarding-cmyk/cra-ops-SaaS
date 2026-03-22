@@ -1,0 +1,3 @@
+// Place this file in src/assets/india1-logo.png (or .svg if available)
+// This is a placeholder for the India1 ATM logo used in the certificate letterhead.
+// The actual image should be added to the assets folder and referenced in the React component.

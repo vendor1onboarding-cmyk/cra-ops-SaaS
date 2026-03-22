@@ -1,6 +1,6 @@
 import React, { useEffect, useState , useRef} from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import {

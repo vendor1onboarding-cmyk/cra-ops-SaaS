@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import SignatureCanvas from "react-signature-canvas";
 import { SignatureImage, SignatureModal, preloadSignatureImage } from "../components/SignatureImage";

@@ -1,3 +1,12 @@
+import CashTransitCertificate from "./pages/CashTransitCertificate";
+        <Route
+          path="/cash-transit-certificate"
+          element={
+            <PrivateRoute>
+              <CashTransitCertificate />
+            </PrivateRoute>
+          }
+        />
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import AdminRouteAssignmentPage from "./pages/AdminRouteAssignment";
@@ -266,6 +275,15 @@ export default function App() {
             <RequireAdmin>
               <AdminChequeVerification />
             </RequireAdmin>
+          }
+        />
+
+        <Route
+          path="/cash-transit-certificate"
+          element={
+            <PrivateRoute>
+              <CashTransitCertificate />
+            </PrivateRoute>
           }
         />
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import {
   getISTDateString,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../api/supabaseClient";
-import { AppLayout } from "../../components/Layout";
+import AppLayout from "../../components/Layout";
 import { formatISTDate } from "../../utils/time";
 
 /* ================================================================

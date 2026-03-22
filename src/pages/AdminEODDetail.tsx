@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { formatIST, formatISTAudit, formatDateString, formatISTDate, formatISTFromISTEncodedUTC, formatISTTime, parseUTCDate } from "../utils/time";

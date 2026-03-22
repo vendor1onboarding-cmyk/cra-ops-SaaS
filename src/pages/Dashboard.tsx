@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import { getISTDateString, getISTMonthStart, formatISTDate } from "../utils/time";
 
 const DENOMS = [100, 200, 500, 2000];

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import { DenominationFields } from "../components/DenominationFields";
 import { useAuth } from "../context/AuthContext";
 import {

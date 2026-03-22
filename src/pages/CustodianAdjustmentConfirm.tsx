@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import SignatureCanvas from "react-signature-canvas";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { formatISTAudit, formatISTDate } from "../utils/time";

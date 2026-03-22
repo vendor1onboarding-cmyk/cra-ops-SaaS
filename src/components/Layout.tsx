@@ -27,7 +27,7 @@ const ICONS: Record<string, string> = {
   "Change Password": "🔐",
 };
 
-export function AppLayout({ children }: { children: ReactNode }) {
+export default function AppLayout({ children }: { children: ReactNode }) {
   const { profile, signOut } = useAuth();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -66,15 +66,15 @@ const navItems = isAdmin
     { to: "/denomination-plan", label: "Denomination" },
     { to: "/cash-pickup", label: "Cash Pickup" },
     { to: "/atm-replenishment", label: "ATM Load" },
-	{ to: "/atm-excess-cash", label: "ATM Excess Cash",},
+    { to: "/atm-excess-cash", label: "ATM Excess Cash" },
     { to: "/denomination-exchange", label: "Denomination Exchange" },
     { to: "/inter-site-transfer", label: "Inter-Site Transfer" },
     { to: "/technical-issues", label: "Tech Issues" },
     { to: "/eod-summary", label: "EOD" },
-	{ to: "/soa", label: "Statement of Accounts" },
-	{ to: "/travel-log", label: "Travel Log" },
-	
-    ];
+    { to: "/soa", label: "Statement of Accounts" },
+    { to: "/travel-log", label: "Travel Log" },
+    { to: "/cash-transit-certificate", label: "Cash Transit Certificate" },
+  ];
 
   function NavLinks({ onClick }: { onClick?: () => void }) {
     return (
@@ -93,7 +93,7 @@ const navItems = isAdmin
                 }`}
               >
                 <span className="text-lg">
-                  {ICONS[item.label] || "•"}
+                  {ICONS[item.label] || (item.label === "Cash Transit Certificate" ? "📄" : "•")}
                 </span>
                 <span className="flex-1">{item.label}</span>
                 {active && (
@@ -110,7 +110,7 @@ const navItems = isAdmin
   return (
     <div className="min-h-screen flex flex-col">
       {/* STICKY HEADER */}
-      <header className="sticky top-0 z-40 bg-primary text-white px-4 py-3 flex justify-between items-center shadow-md">
+      <header className="sticky top-0 z-40 bg-primary text-white px-4 py-3 flex justify-between items-center shadow-md print:hidden">
         <div className="flex items-center gap-3">
           {/* Mobile / Tablet Menu Button */}
           <button
@@ -192,19 +192,19 @@ const navItems = isAdmin
 
       {/* OFFLINE WARNING BANNER */}
       {offline && (
-        <div className="bg-red-600 text-white text-xs text-center py-2">
+        <div className="bg-red-600 text-white text-xs text-center py-2 print:hidden">
           ⚠️ You are offline. Data will sync once network is restored.
         </div>
       )}
 
       {/* DESKTOP / TABLET */}
       <div className="flex flex-1">
-        <nav className="hidden md:block w-64 bg-white border-r p-3">
+        <nav className="hidden md:block w-64 bg-white border-r p-3 print:hidden">
           <NavLinks />
         </nav>
 
-        <main className="flex-1 bg-slate-100">
-  <div className="mx-auto w-full max-w-6xl px-3 py-3 sm:px-4 sm:py-4">
+        <main className="flex-1 bg-slate-100 print:bg-white print:min-h-screen">
+  <div className="mx-auto w-full max-w-6xl px-3 py-3 sm:px-4 sm:py-4 print:p-0 print:max-w-none">
     {children}
   </div>
 </main>
@@ -213,7 +213,7 @@ const navItems = isAdmin
 
       {/* MOBILE DRAWER */}
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40">
+        <div className="fixed inset-0 z-50 bg-black/40 print:hidden">
           <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl p-4 overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h2 className="font-semibold text-primary text-base">

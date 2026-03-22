@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../api/supabaseClient";
-import { AppLayout } from "../components/Layout";
+import AppLayout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
