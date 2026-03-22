@@ -1,12 +1,3 @@
-import CashTransitCertificate from "./pages/CashTransitCertificate";
-        <Route
-          path="/cash-transit-certificate"
-          element={
-            <PrivateRoute>
-              <CashTransitCertificate />
-            </PrivateRoute>
-          }
-        />
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import AdminRouteAssignmentPage from "./pages/AdminRouteAssignment";
@@ -32,6 +23,8 @@ import StatementOfAccounts from "./pages/StatementOfAccounts";
 import CustodianAdjustmentConfirm from "./pages/CustodianAdjustmentConfirm";
 import PasswordChange from "./pages/PasswordChange";
 import FirstLoginPasswordReset from "./pages/FirstLoginPasswordReset";
+import CashTransitCertificate from "./pages/CashTransitCertificate";
+import ValidateCashTransitCertificate from "./pages/ValidateCashTransitCertificate";
 
 import AdminApprovalsPage from "./pages/AdminApprovals";
 import AdminEODDetailPage from "./pages/AdminEODDetail";
@@ -285,6 +278,11 @@ export default function App() {
               <CashTransitCertificate />
             </PrivateRoute>
           }
+        />
+
+        <Route
+          path="/validate-cash-transit-certificate"
+          element={<ValidateCashTransitCertificate />}
         />
 
         {/* ----------------- FALLBACK ----------------- */}

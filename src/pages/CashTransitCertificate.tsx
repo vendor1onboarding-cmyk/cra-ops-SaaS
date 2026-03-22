@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../api/supabaseClient";
@@ -38,7 +37,7 @@ const A4_STYLE = {
 export default function CashTransitCertificate() {
   const { profile } = useAuth();
   console.log("🧾 Cash Transit Certificate Page Loaded");
-  console.log("🧾 Profile:", profile);
+  console.log("Profile:", profile); // Debugging log to check if profile is null
   const [loading, setLoading] = useState(true);
   const [assignment, setAssignment] = useState<any>(null);
   const [routeSites, setRouteSites] = useState<any[]>([]);
@@ -48,9 +47,29 @@ export default function CashTransitCertificate() {
   const [chequeNo, setChequeNo] = useState("");
   const [vehicleNo, setVehicleNo] = useState("");
   const [bankOverride, setBankOverride] = useState("");
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>("");
   const [printPreview, setPrintPreview] = useState(false);
   const [validation, setValidation] = useState<string[]>([]);
   const printRef = useRef<HTMLDivElement>(null);
+
+  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+
+  // --- Fetch bank accounts for override dropdown ---
+  useEffect(() => {
+    async function loadBankAccounts() {
+      try {
+        const { data, error } = await supabase
+          .from("bank_accounts")
+          .select("id, bank_name, branch_name, account_number, ifsc_code, branch_address, branch_phone")
+          .eq("is_active", true)
+          .order("bank_name", { ascending: true });
+        if (!error) setBankAccounts(data || []);
+      } catch (err) {
+        console.error("Error loading bank accounts:", err);
+      }
+    }
+    loadBankAccounts();
+  }, []);
 
   // --- Fetch available assignments ---
   useEffect(() => {
@@ -165,8 +184,6 @@ export default function CashTransitCertificate() {
       
       setRouteSites(sites || []);
       
-      setRouteSites(sites || []);
-      
       // 3. Denomination plans
       const { data: plans } = await supabase
         .from("denomination_plans")
@@ -201,6 +218,8 @@ export default function CashTransitCertificate() {
   const total200 = tableRows.reduce((a, r) => a + r.d200, 0);
   const total100 = tableRows.reduce((a, r) => a + r.d100, 0);
   const totalIndent = tableRows.reduce((a, r) => a + r.indent, 0);
+  const selectedBank = bankAccounts.find((b) => b.id === selectedBankAccountId);
+  const bankBranchLocation = selectedBank?.branch_address || selectedBank?.branch_name || "Bank location not specified";
 
   const validationUrl = assignment
     ? `${window.location.origin}/validate-cash-transit-certificate?assignment_id=${assignment.id}`
@@ -225,6 +244,18 @@ export default function CashTransitCertificate() {
     }, 200);
   }
 
+  // Set bank details for override from already-loaded bankAccounts
+  function handleBankOverrideSelection(bankId: string) {
+    setSelectedBankAccountId(bankId);
+    const bank = bankAccounts.find((b) => b.id === bankId);
+    if (bank) {
+      const label = [bank.bank_name, bank.branch_name, bank.branch_address].filter(Boolean).join(", ");
+      setBankOverride(label);
+    } else {
+      setBankOverride("");
+    }
+  }
+
   if (loading) return <Layout><div>Loading...</div></Layout>;
 
   // --- Main Render ---
@@ -240,7 +271,7 @@ export default function CashTransitCertificate() {
         <div style={{ textAlign: "center", fontWeight: 500, fontSize: 15, marginBottom: 12 }}>Cash in Transit Certificate</div>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
           <div>Authorized Franchisee Name: <b>{profile?.full_name || "-"}</b></div>
-          <div>Location: <b>Not specified</b></div>
+          <div>Location: <b>{bankBranchLocation}</b></div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
           <div>Cash Withdrawal Bank Name & Location: <b>{bankOverride || "Bank not specified"}</b></div>
@@ -365,9 +396,20 @@ export default function CashTransitCertificate() {
             <label className="block text-xs font-semibold">Vehicle No</label>
             <input className="border px-2 py-1 rounded w-40" value={vehicleNo} onChange={e => setVehicleNo(e.target.value)} />
           </div>
-          <div>
+          <div className="col-span-2 md:col-span-1">
             <label className="block text-xs font-semibold">Bank Branch (Override)</label>
-            <input className="border px-2 py-1 rounded w-48" value={bankOverride} onChange={e => setBankOverride(e.target.value)} />
+            <select
+              className="border px-2 py-1 rounded w-full"
+              value={selectedBankAccountId}
+              onChange={(e) => handleBankOverrideSelection(e.target.value)}
+            >
+              <option value="">— Select Bank Branch —</option>
+              {bankAccounts.map((bank: any) => (
+                <option key={bank.id} value={bank.id}>
+                  {bank.bank_name}{bank.branch_name ? ` – ${bank.branch_name}` : ""}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         <button className="bg-primary text-white px-4 py-2 rounded shadow" onClick={handlePrint} disabled={!!validation.length}>Generate Letter</button>
@@ -380,7 +422,7 @@ export default function CashTransitCertificate() {
           <div style={{ textAlign: "center", fontWeight: 500, fontSize: 15, marginBottom: 12 }}>Cash in Transit Certificate</div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <div>Authorized Franchisee Name: <b>{profile?.full_name || "-"}</b></div>
-            <div>Location: <b>Not specified</b></div>
+            <div>Location: <b>{bankBranchLocation}</b></div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <div>Cash Withdrawal Bank Name & Location: <b>{bankOverride || "Bank not specified"}</b></div>
@@ -494,7 +536,7 @@ export default function CashTransitCertificate() {
               <div style={{ fontSize: 12, fontStyle: "italic" }}>Total in words: <b>{numberToWords(totalIndent)}</b></div>
             </div>
             <div>
-              <QRCodeCanvas value={assignment?.id ? String(assignment.id) : ""} size={64} />
+              <QRCodeCanvas value={validationUrl} size={64} />
             </div>
           </div>
         </div>
@@ -503,3 +545,4 @@ export default function CashTransitCertificate() {
     </Layout>
   );
 }
+
