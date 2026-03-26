@@ -144,6 +144,11 @@ export default function CashPickup() {
   const [plannedError, setPlannedError] = useState<string | null>(null);
   const [banksLoading, setBanksLoading] = useState(false);
   const [banksError, setBanksError] = useState<string | null>(null);
+  // Bank pickup history state
+  const [bankHistory, setBankHistory] = useState<any[]>([]);
+  const [bankHistoryLoading, setBankHistoryLoading] = useState(false);
+  const [bankHistoryError, setBankHistoryError] = useState<string | null>(null);
+  const [showAllBankHistory, setShowAllBankHistory] = useState(false);
   // ATM Pickup State
   const [atmSites, setAtmSites] = useState<ATMSite[]>([]);
   const [selectedAtmSiteId, setSelectedAtmSiteId] = useState<number | null>(null);
@@ -304,6 +309,48 @@ export default function CashPickup() {
 
   // Get selected bank details
   const selectedBank = bankAccounts.find((b) => b.id === selectedBankId);
+
+  // --------------------------------------------------
+  // Load bank pickup history (for selected bank)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!assignmentId || !selectedBankId) {
+      setBankHistory([]);
+      setBankHistoryError(null);
+      return;
+    }
+
+    async function loadBankPickupHistory() {
+      setBankHistoryLoading(true);
+      setBankHistoryError(null);
+
+      try {
+        const { data, error } = await supabase
+          .from("cash_pickups")
+          .select("id, pickup_time, total_amount")
+          .eq("assignment_id", assignmentId)
+          .eq("bank_account_id", selectedBankId)
+          .eq("pickup_source", "BANK")
+          .order("pickup_time", { ascending: true });
+
+        if (error) {
+          console.error("Error loading bank pickup history:", error);
+          setBankHistoryError("Failed to load pickup history");
+          setBankHistory([]);
+        } else {
+          setBankHistory(data || []);
+        }
+      } catch (err) {
+        console.error("Error:", err);
+        setBankHistoryError("Error loading history");
+        setBankHistory([]);
+      } finally {
+        setBankHistoryLoading(false);
+      }
+    }
+
+    loadBankPickupHistory();
+  }, [assignmentId, selectedBankId]);
 
   // --------------------------------------------------
   // Load planned bank denominations (for comparison)
@@ -638,30 +685,25 @@ export default function CashPickup() {
 
     const { error } = await supabase
       .from("cash_pickups")
-      .upsert(
-        {
-          assignment_id: assignmentId,
-          bank_name: selectedBank?.bank_name || "",
-          branch: selectedBank?.branch_name || selectedBank?.branch_code || "",
-          bank_account_id: selectedBankId,
-          pickup_time: new Date().toISOString(),
-          expected_amount: expectedAmount,
-          total_amount: bankAmount,
-          variance,
-          pickup_source: "BANK",
-          gps_metadata: buildGpsMetadata(bankGps, "BANK"),
-          gps_photo_url: bankPhotoPath,
-          // Cheque fields (banking-grade verification)
-          cheque_number: chequeNumber || null,
-          cheque_image_url: chequeImagePath,
-          cheque_status: chequeNumber ? "PENDING" : null,
-          cheque_metadata: chequeNumber ? chequeMetadata : null,
-          ...form,
-        },
-        {
-          onConflict: "assignment_id,bank_account_id",
-        }
-      );
+      .insert({
+        assignment_id: assignmentId,
+        bank_name: selectedBank?.bank_name || "",
+        branch: selectedBank?.branch_name || selectedBank?.branch_code || "",
+        bank_account_id: selectedBankId,
+        pickup_time: new Date().toISOString(),
+        expected_amount: expectedAmount,
+        total_amount: bankAmount,
+        variance,
+        pickup_source: "BANK",
+        gps_metadata: buildGpsMetadata(bankGps, "BANK"),
+        gps_photo_url: bankPhotoPath,
+        // Cheque fields (banking-grade verification)
+        cheque_number: chequeNumber || null,
+        cheque_image_url: chequeImagePath,
+        cheque_status: chequeNumber ? "PENDING" : null,
+        cheque_metadata: chequeNumber ? chequeMetadata : null,
+        ...form,
+      });
 
     if (error) {
       console.error(error);
@@ -1142,6 +1184,39 @@ export default function CashPickup() {
                     )}
                   </div>
 
+                  {/* Bank Pickup History Panel */}
+                  {bankHistory.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-800">Pickup History</h3>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllBankHistory(!showAllBankHistory)}
+                          className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                        >
+                          {showAllBankHistory ? "Show Less" : `Show All (${bankHistory.length})`}
+                        </button>
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        {bankHistory.slice(0, showAllBankHistory ? undefined : 5).map((pickup, idx) => {
+                          const runningTotal = bankHistory
+                            .slice(0, idx + 1)
+                            .reduce((sum, p) => sum + (p.total_amount || 0), 0);
+                          const pickupTime = new Date(pickup.pickup_time).toLocaleTimeString("en-IN");
+                          return (
+                            <div key={pickup.id} className="flex justify-between bg-white px-3 py-2 rounded border border-blue-100">
+                              <div>
+                                <span className="font-medium text-slate-700">{pickupTime}</span>
+                                <span className="text-slate-600 ml-2">₹{(pickup.total_amount || 0).toLocaleString("en-IN")}</span>
+                              </div>
+                              <span className="font-semibold text-blue-600">Total: ₹{runningTotal.toLocaleString("en-IN")}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Cheque Capture (Banking-Grade Verification) */}
                   <div className="border border-amber-200 bg-amber-50 rounded-lg p-4 space-y-4">
                     <div className="flex items-start gap-3">
@@ -1172,26 +1247,45 @@ export default function CashPickup() {
                     </div>
 
                     {chequeNumber && (
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                          Upload Cheque Image <span className="text-slate-500">(Optional)</span>
-                        </label>
-                        <div className="border-2 border-amber-300 border-dashed rounded-lg p-4 text-center">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            onChange={(e) => setChequeImage(e.target.files?.[0] || null)}
-                            className="w-full text-xs"
-                          />
-                          {chequeImage && (
-                            <p className="text-xs text-emerald-600 mt-2 font-medium">
-                              ✓ {chequeImage.name} ({(chequeImage.size / 1024).toFixed(1)} KB) selected
-                            </p>
-                          )}
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Take Live Photo <span className="text-slate-500">(Optional)</span>
+                          </label>
+                          <div className="border-2 border-amber-300 border-dashed rounded-lg p-4 text-center">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={(e) => setChequeImage(e.target.files?.[0] || null)}
+                              className="w-full text-xs"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">Opens device camera</p>
+                          </div>
                         </div>
-                        <p className="text-xs text-slate-500 mt-2">
-                          Supported: JPG, PNG. Max 10MB. Camera capture enabled for mobile.
+
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Upload Existing Photo <span className="text-slate-500">(Optional)</span>
+                          </label>
+                          <div className="border-2 border-amber-300 border-dashed rounded-lg p-4 text-center">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => setChequeImage(e.target.files?.[0] || null)}
+                              className="w-full text-xs"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">Select from gallery or files</p>
+                          </div>
+                        </div>
+
+                        {chequeImage && (
+                          <p className="text-xs text-emerald-600 font-medium">
+                            ✓ {chequeImage.name} ({(chequeImage.size / 1024).toFixed(1)} KB) selected
+                          </p>
+                        )}
+                        <p className="text-xs text-slate-500">
+                          Supported: JPG, PNG. Max 10MB.
                         </p>
                       </div>
                     )}
