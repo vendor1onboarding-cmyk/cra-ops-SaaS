@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ATM Operations Web Application - Commercial Estimate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f7f7fa; color: #222; margin: 0; padding: 0; }
+    .container { max-width: 900px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px #0001; padding: 32px; }
+    h1, h2 { color: #1a237e; }
+    h1 { font-size: 2.2rem; margin-bottom: 0.5em; }
+    h2 { font-size: 1.3rem; margin-top: 2em; margin-bottom: 0.5em; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 2em; }
+    th, td { border: 1px solid #e0e0e0; padding: 8px 12px; text-align: left; }
+    th { background: #e3f2fd; color: #0d47a1; font-weight: 600; }
+    tr:nth-child(even) { background: #f5f5f5; }
+    .summary-table th, .summary-table td { font-size: 1.1em; }
+    .note { color: #388e3c; font-size: 1em; margin-top: 1em; }
+    .section { margin-bottom: 2em; }
+    .highlight { color: #d32f2f; font-weight: bold; }
+    @media (max-width: 600px) { .container { padding: 12px; } th, td { font-size: 0.95em; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ATM Operations Web Application<br>Commercial Estimate</h1>
+
+    <div class="section">
+      <h2>1️⃣ Phase-wise Development Effort</h2>
+      <table>
+        <tr><th>Phase</th><th>Description</th><th>Person-Days</th><th>Team</th><th>Cost/Day (₹)</th><th>Phase Cost (₹)</th></tr>
+        <tr><td>1</td><td>Requirement & Architecture Design</td><td>8</td><td>PM, Lead Dev</td><td>8,000</td><td>64,000</td></tr>
+        <tr><td>2</td><td>Core ATM Operations</td><td>18</td><td>Dev, UI, QA</td><td>7,500</td><td>135,000</td></tr>
+        <tr><td>3</td><td>SOA & EOD Engine</td><td>14</td><td>Dev, QA</td><td>7,500</td><td>105,000</td></tr>
+        <tr><td>4</td><td>Internal Transfer Logic & Source Segregation</td><td>10</td><td>Dev, QA</td><td>7,500</td><td>75,000</td></tr>
+        <tr><td>5</td><td>Dashboard & KPI System</td><td>10</td><td>Dev, UI</td><td>7,500</td><td>75,000</td></tr>
+        <tr><td>6</td><td>GPS + Photo + Travel Log Integration</td><td>8</td><td>Dev, UI</td><td>7,500</td><td>60,000</td></tr>
+        <tr><td>7</td><td>Print / PDF Engine (Mobile Optimized)</td><td>6</td><td>Dev, UI</td><td>7,500</td><td>45,000</td></tr>
+        <tr><td>8</td><td>Admin & Approval Workflow</td><td>8</td><td>Dev, QA</td><td>7,500</td><td>60,000</td></tr>
+        <tr><td>9</td><td>Testing, Stabilization & Audit Hardening</td><td>12</td><td>QA, Dev</td><td>7,500</td><td>90,000</td></tr>
+        <tr style="font-weight:bold;background:#e3f2fd;"><td colspan="5">Total Development Cost</td><td>₹709,000</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>2️⃣ Total Development Cost (Initial Build)</h2>
+      <table>
+        <tr><th>Item</th><th>Cost (₹)</th></tr>
+        <tr><td>Grand Total Development Cost</td><td>709,000</td></tr>
+        <tr><td>30% Advance</td><td>212,700</td></tr>
+        <tr><td>40% Mid milestone</td><td>283,600</td></tr>
+        <tr><td>30% Final delivery</td><td>212,700</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>3️⃣ Platform Cost (Monthly)</h2>
+      <table>
+        <tr><th>Scale</th><th>Supabase DB/Auth</th><th>Supabase Storage</th><th>Hosting</th><th>Object Storage</th><th>Total Monthly (₹)</th></tr>
+        <tr><td>Initial (5–10 custodians)</td><td>2,000</td><td>1,000</td><td>1,500</td><td>1,000</td><td>5,500</td></tr>
+        <tr><td>Medium (50–100 users)</td><td>6,000</td><td>3,000</td><td>3,000</td><td>2,000</td><td>14,000</td></tr>
+        <tr><td>Enterprise (500+ users)</td><td>20,000</td><td>8,000</td><td>8,000</td><td>6,000</td><td>42,000</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>4️⃣ Maintenance & Support Cost</h2>
+      <table>
+        <tr><th>Item</th><th>Cost (₹)</th></tr>
+        <tr><td>Monthly Maintenance (Basic SLA)</td><td>10,000</td></tr>
+        <tr><td>Annual Maintenance (15–20% of project value)</td><td>120,000</td></tr>
+        <tr><td>Priority SLA (Annual)</td><td>216,000</td></tr>
+        <tr><td>Enhancement Change (per person-day)</td><td>7,500</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>5️⃣ Future Scaling Cost Estimate</h2>
+      <table>
+        <tr><th>Item</th><th>Estimated Cost (₹)</th></tr>
+        <tr><td>Additional Module (per module)</td><td>80,000–200,000</td></tr>
+        <tr><td>BI Dashboard</td><td>120,000–250,000</td></tr>
+        <tr><td>API Integration (per integration)</td><td>60,000–150,000</td></tr>
+        <tr><td>Mobile App Version</td><td>250,000–400,000</td></tr>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>6️⃣ Final Summary Table</h2>
+      <table class="summary-table">
+        <tr><th>Item</th><th>Cost (INR)</th></tr>
+        <tr><td>Development Cost (Initial Build)</td><td>₹709,000</td></tr>
+        <tr><td>Platform (Monthly – Initial)</td><td>₹5,500</td></tr>
+        <tr><td>Platform (Monthly – Scale 100 users)</td><td>₹14,000</td></tr>
+        <tr><td>Platform (Monthly – Enterprise 500+ users)</td><td>₹42,000</td></tr>
+        <tr><td>Maintenance (Annual)</td><td>₹120,000</td></tr>
+        <tr><td>Priority Maintenance (Annual)</td><td>₹216,000</td></tr>
+        <tr><td>Enhancement Change (per day)</td><td>₹7,500</td></tr>
+        <tr><td>Future Module (per module)</td><td>₹80,000–₹200,000</td></tr>
+        <tr><td>BI Dashboard</td><td>₹120,000–₹250,000</td></tr>
+        <tr><td>API Integration</td><td>₹60,000–₹150,000</td></tr>
+        <tr><td>Mobile App Version</td><td>₹250,000–₹400,000</td></tr>
+      </table>
+      <div class="note">All figures are estimates based on mid-tier Indian software services pricing.<br>No technical explanation included.</div>
+    </div>
+  </div>
+</body>
+</html>

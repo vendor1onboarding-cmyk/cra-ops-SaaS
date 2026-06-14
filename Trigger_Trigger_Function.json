@@ -1,0 +1,80 @@
+[
+  {
+    "trigger_name": "after_atm_cash_adjustments_insert",
+    "table_name": "atm_cash_adjustments",
+    "function_name": "trg_atm_cash_adjustments_soa",
+    "trigger_definition": "CREATE TRIGGER after_atm_cash_adjustments_insert AFTER INSERT ON public.atm_cash_adjustments FOR EACH ROW EXECUTE FUNCTION trg_atm_cash_adjustments_soa()"
+  },
+  {
+    "trigger_name": "after_atm_excess_cash_insert",
+    "table_name": "atm_excess_cash",
+    "function_name": "trg_atm_excess_cash_soa",
+    "trigger_definition": "CREATE TRIGGER after_atm_excess_cash_insert AFTER INSERT ON public.atm_excess_cash FOR EACH ROW EXECUTE FUNCTION trg_atm_excess_cash_soa()"
+  },
+  {
+    "trigger_name": "after_atm_replenishments_insert",
+    "table_name": "atm_replenishments",
+    "function_name": "trg_atm_replenishments_soa",
+    "trigger_definition": "CREATE TRIGGER after_atm_replenishments_insert AFTER INSERT ON public.atm_replenishments FOR EACH ROW EXECUTE FUNCTION trg_atm_replenishments_soa()"
+  },
+  {
+    "trigger_name": "update_bank_accounts_timestamp",
+    "table_name": "bank_accounts",
+    "function_name": "update_timestamp",
+    "trigger_definition": "CREATE TRIGGER update_bank_accounts_timestamp BEFORE UPDATE ON public.bank_accounts FOR EACH ROW EXECUTE FUNCTION update_timestamp()"
+  },
+  {
+    "trigger_name": "enforce_bucket_name_length_trigger",
+    "table_name": "buckets",
+    "function_name": "enforce_bucket_name_length",
+    "trigger_definition": "CREATE TRIGGER enforce_bucket_name_length_trigger BEFORE INSERT OR UPDATE OF name ON storage.buckets FOR EACH ROW EXECUTE FUNCTION storage.enforce_bucket_name_length()"
+  },
+  {
+    "trigger_name": "protect_buckets_delete",
+    "table_name": "buckets",
+    "function_name": "protect_delete",
+    "trigger_definition": "CREATE TRIGGER protect_buckets_delete BEFORE DELETE ON storage.buckets FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete()"
+  },
+  {
+    "trigger_name": "trigger_log_cheque_status_change",
+    "table_name": "cash_pickups",
+    "function_name": "log_cheque_status_change",
+    "trigger_definition": "CREATE TRIGGER trigger_log_cheque_status_change AFTER UPDATE ON public.cash_pickups FOR EACH ROW EXECUTE FUNCTION log_cheque_status_change()"
+  },
+  {
+    "trigger_name": "cron_job_cache_invalidate",
+    "table_name": "job",
+    "function_name": "job_cache_invalidate",
+    "trigger_definition": "CREATE TRIGGER cron_job_cache_invalidate AFTER INSERT OR DELETE OR UPDATE OR TRUNCATE ON cron.job FOR EACH STATEMENT EXECUTE FUNCTION cron.job_cache_invalidate()"
+  },
+  {
+    "trigger_name": "protect_objects_delete",
+    "table_name": "objects",
+    "function_name": "protect_delete",
+    "trigger_definition": "CREATE TRIGGER protect_objects_delete BEFORE DELETE ON storage.objects FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete()"
+  },
+  {
+    "trigger_name": "update_objects_updated_at",
+    "table_name": "objects",
+    "function_name": "update_updated_at_column",
+    "trigger_definition": "CREATE TRIGGER update_objects_updated_at BEFORE UPDATE ON storage.objects FOR EACH ROW EXECUTE FUNCTION storage.update_updated_at_column()"
+  },
+  {
+    "trigger_name": "after_soa_adjustment_insert",
+    "table_name": "soa_adjustments",
+    "function_name": "trg_soa_adjustment_ledger",
+    "trigger_definition": "CREATE TRIGGER after_soa_adjustment_insert AFTER INSERT ON public.soa_adjustments FOR EACH ROW EXECUTE FUNCTION trg_soa_adjustment_ledger()"
+  },
+  {
+    "trigger_name": "tr_check_filters",
+    "table_name": "subscription",
+    "function_name": "subscription_check_filters",
+    "trigger_definition": "CREATE TRIGGER tr_check_filters BEFORE INSERT OR UPDATE ON realtime.subscription FOR EACH ROW EXECUTE FUNCTION realtime.subscription_check_filters()"
+  },
+  {
+    "trigger_name": "after_travel_logs_update",
+    "table_name": "travel_logs",
+    "function_name": "trg_travel_logs_soa",
+    "trigger_definition": "CREATE TRIGGER after_travel_logs_update AFTER UPDATE ON public.travel_logs FOR EACH ROW WHEN (((old.end_time IS NULL) AND (new.end_time IS NOT NULL))) EXECUTE FUNCTION trg_travel_logs_soa()"
+  }
+]

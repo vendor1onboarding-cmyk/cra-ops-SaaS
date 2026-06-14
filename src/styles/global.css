@@ -1,0 +1,814 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------
+   BASE LAYOUT
+--------------------------------- */
+body {
+  @apply bg-slate-100 text-slate-800;
+  overflow-x: hidden; /* Prevent whole-page horizontal scroll */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ---------------------------------
+   CARD / CONTAINER STABILITY
+--------------------------------- */
+.card,
+.dashboard-card {
+  @apply bg-white rounded-lg shadow-sm p-4 md:p-5 w-full min-w-0 border border-slate-100;
+}
+
+/* ---------------------------------
+   KPI GRID FIX (Mobile Safe)
+--------------------------------- */
+.kpi-grid {
+  @apply grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-4 max-w-full;
+}
+
+.kpi-card {
+  @apply bg-white rounded-lg shadow-sm p-4 min-w-0 border border-slate-100 hover:shadow-md transition-shadow;
+}
+
+.kpi-card p {
+  @apply truncate text-xs sm:text-sm;
+}
+
+/* ---------------------------------
+   FORM ELEMENTS
+--------------------------------- */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+textarea,
+select {
+  @apply w-full px-2 py-1.5 sm:px-3 sm:py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all;
+}
+
+input[type="text"]::placeholder,
+input[type="email"]::placeholder,
+input[type="password"]::placeholder,
+textarea::placeholder {
+  @apply text-slate-400;
+}
+
+textarea {
+  @apply min-h-[100px] resize-y;
+}
+
+label {
+  @apply block text-xs sm:text-sm font-medium text-slate-700 mb-1 sm:mb-2;
+}
+
+/* ---------------------------------
+   FORM GROUPS
+--------------------------------- */
+.form-group {
+  @apply space-y-2 mb-4;
+}
+
+/* ---------------------------------
+   TABLE RESPONSIVENESS (CRITICAL FIX)
+--------------------------------- */
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e8f0;
+}
+
+.table-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+}
+
+thead {
+  @apply bg-slate-50 border-b-2 border-slate-200;
+}
+
+th {
+  @apply px-3 py-3 text-left text-xs md:text-sm font-semibold text-slate-700 whitespace-nowrap;
+}
+
+td {
+  @apply px-3 py-3 text-xs md:text-sm text-slate-600 border-b border-slate-100;
+}
+
+tbody tr {
+  @apply hover:bg-slate-50 transition-colors;
+}
+
+tbody tr:last-child td {
+  @apply border-b-0;
+}
+
+/* Mobile card-style tables */
+@media (max-width: 640px) {
+  table {
+    min-width: 100%;
+    display: block;
+  }
+
+  thead {
+    display: none;
+  }
+
+  tbody,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+  }
+
+  tr {
+    @apply mb-4 border border-slate-200 rounded-lg overflow-hidden shadow-sm;
+  }
+
+  td {
+    @apply border-0 text-left py-2 px-3 relative text-xs;
+    background: white;
+  }
+
+  td:first-child {
+    @apply pt-3 font-semibold text-slate-900 bg-slate-50;
+  }
+
+  td:last-child {
+    @apply pb-3;
+  }
+}
+
+/* ---------------------------------
+
+/* ---------------------------------
+   DASHBOARD SECTION SPACING
+--------------------------------- */
+.dashboard-section {
+  @apply space-y-4 md:space-y-6 justify-center;
+}
+
+@media (max-width: 640px) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-success {
+    @apply w-full;
+  }
+}
+
+
+/* Print / Save PDF button alignment */
+.print-actions {
+  @apply flex justify-end gap-2 mt-3;
+}
+
+@media (max-width: 640px) {
+  .print-actions {
+    @apply justify-center;
+  }
+}
+
+/* ---------------------------------
+   PRINT STYLES - MOBILE & DESKTOP OPTIMIZED
+--------------------------------- */
+
+/* ===== PRINT VISIBILITY CONTROL ===== */
+.print-only {
+  display: none !important;
+}
+
+.no-print {
+  display: block;
+}
+
+/* ===== CORE PRINT STYLES ===== */
+@media print {
+  /* Page setup */
+  @page {
+    size: A4;
+    margin: 12mm 10mm 18mm 10mm;
+  }
+
+  /* Reset body */
+  body {
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 9pt;
+    line-height: 1.35;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide screen-only elements */
+  nav,
+  header,
+  button,
+  select,
+  input,
+  textarea,
+  .print-hidden,
+  .no-print,
+  .fixed,
+  .sticky {
+    display: none !important;
+  }
+
+  /* Re-show buttons INSIDE print-only sections (e.g. none here but future-proof) */
+  .print-only button {
+    display: none !important;
+  }
+
+  /* Visibility toggles */
+  .print-only {
+    display: block !important;
+  }
+
+  /* ── Layout reset: remove sidebar, padding, max-width constraints ── */
+  .min-h-screen,
+  .flex-1 {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  main > div {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Hide desktop sidebar in print */
+  nav.hidden.md\\:block,
+  .md\\:block[class*="w-64"] {
+    display: none !important;
+  }
+
+  /* Hide mobile drawer overlay */
+  .fixed.inset-0.z-50 {
+    display: none !important;
+  }
+
+  /* Container reset */
+  .container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* ── Page break controls ── */
+  h1, h2, h3, h4 {
+    page-break-after: avoid;
+    break-after: avoid;
+    margin-top: 6pt;
+    margin-bottom: 4pt;
+  }
+
+  /* Keep summary sections and cards together */
+  .summary-section,
+  .border.rounded,
+  .bg-white.rounded-lg,
+  .bg-white.rounded {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Tables: allow break but keep rows together */
+  table {
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group; /* Repeat header on every page */
+    background-color: #f1f5f9 !important; /* bg-slate-100 */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Table body rows should have NO background color in print */
+  tbody tr {
+    background-color: transparent !important;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Orphans / widows — at least 3 rows before/after break */
+  tbody {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* ── Print statement table ── */
+  .print-statement-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 7.5pt;
+    margin-bottom: 4mm;
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+
+  .print-statement-table th,
+  .print-statement-table td {
+    border: 0.5pt solid #94a3b8;
+    padding: 2pt 3pt;
+    font-size: 7.5pt;
+    line-height: 1.25;
+    vertical-align: top;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .print-statement-table th {
+    background: #1e3a5f !important;
+    color: #ffffff !important;
+    font-weight: 700;
+    text-align: left;
+    border: 0.5pt solid #1e3a5f !important;
+    border-bottom: 1.5pt solid #0f2540 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-statement-table thead th {
+    border-bottom: 1.5pt solid #0f2540 !important;
+  }
+
+  .print-statement-table td,
+  .print-statement-table tbody tr {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  .print-only table tbody tr,
+  .print-only table td {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  .print-only table tbody tr:nth-child(even),
+  .print-only table tbody tr:nth-child(odd) {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  .print-only table tfoot tr,
+  .print-only table tfoot td {
+    background: #f1f5f9 !important;
+    background-color: #f1f5f9 !important;
+    border-top: 1.5pt solid #1e3a5f !important;
+    font-weight: 700 !important;
+    border-bottom: 1.5pt solid #1e3a5f !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Column widths (8 columns: Date, Time, Type, ATM, Debit, Credit, Balance, Remarks) */
+  .print-statement-table th:nth-child(1),
+  .print-statement-table td:nth-child(1) { width: 9%; } /* Date */
+
+  .print-statement-table th:nth-child(2),
+  .print-statement-table td:nth-child(2) { width: 9%; } /* Time */
+
+  .print-statement-table th:nth-child(3),
+  .print-statement-table td:nth-child(3) { width: 16%; } /* Type */
+
+  .print-statement-table th:nth-child(4),
+  .print-statement-table td:nth-child(4) { width: 14%; } /* ATM */
+
+  .print-statement-table th:nth-child(5),
+  .print-statement-table td:nth-child(5) { width: 11%; text-align: right; } /* Debit */
+
+  .print-statement-table th:nth-child(6),
+  .print-statement-table td:nth-child(6) { width: 11%; text-align: right; } /* Credit */
+
+  .print-statement-table th:nth-child(7),
+  .print-statement-table td:nth-child(7) { width: 12%; text-align: right; font-weight: 500; } /* Balance */
+
+  .print-statement-table th:nth-child(8),
+  .print-statement-table td:nth-child(8) { width: 18%; } /* Remarks */
+
+  /* Row stability */
+  .print-statement-row {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* ── Print header section ── */
+  .print-only.mb-4 {
+    margin-bottom: 4mm !important;
+    padding: 3mm 4mm !important;
+    background: #ffffff !important;
+    border-bottom: 2pt solid #1e3a5f !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-only h1 {
+    font-size: 14pt !important;
+    margin: 0 !important;
+  }
+
+  .print-only h2 {
+    font-size: 12pt;
+    margin-bottom: 3mm;
+    border-bottom: 1.5pt solid #1e293b;
+    padding-bottom: 1.5mm;
+  }
+
+  .print-only h3 {
+    font-size: 10pt;
+    margin-top: 3mm;
+    margin-bottom: 2mm;
+  }
+
+  /* ── KPI & summary boxes ── */
+  .print-only .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6pt;
+    margin-bottom: 4mm;
+  }
+
+  .print-only .kpi-card {
+    border: 0.5pt solid #e2e8f0;
+    padding: 4pt;
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    font-size: 7.5pt;
+  }
+
+  .print-only .kpi-card p,
+  .print-only .summary-box {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    font-size: 7.5pt;
+  }
+
+  /* ── Signature section ── */
+  .print-only .signature-section,
+  .print-only .border-t.text-xs {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Signature grid: always 2 columns in print */
+  .print-only .grid.grid-cols-1.sm\\:grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 20mm !important;
+  }
+
+  .print-only .border-b {
+    width: 50mm !important;
+  }
+
+  /* ── Footer – signature section
+     The footer div carries BOTH classes: print-only AND border-t
+     so use a combined selector (no space) ── */
+  .print-only.border-t,
+  .print-only > .border-t {
+    border-top: 2pt solid #1e3a5f !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    padding: 5mm 4mm 3mm 4mm !important;
+    margin-top: 8mm !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Page number */
+  body::after {
+    counter-increment: page;
+    content: "Page " counter(page);
+    position: fixed;
+    bottom: 5mm;
+    right: 10mm;
+    font-size: 7.5pt;
+    color: #64748b;
+  }
+
+  /* ── Enhanced mobile print support ── */
+  /* Mobile devices printing should use full width efficiently */
+  @page {
+    margin: 8mm !important;
+  }
+
+  /* Better table cell overflow handling */
+  .print-statement-table td {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    padding: 1mm 1.5mm !important;
+    vertical-align: middle !important;
+  }
+
+  .print-statement-table td:nth-child(2) {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+  }
+
+  .print-statement-table td:nth-child(4) {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .print-statement-table td:nth-child(8) {
+    white-space: normal !important;
+    word-break: break-word !important;
+    line-height: 1.3 !important;
+  }
+
+  /* Enhanced signature section for mobile print */
+  .print-only .signature-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10mm !important;
+    margin-top: 8mm !important;
+  }
+
+  .print-only .signature-item {
+    text-align: center !important;
+  }
+
+  .print-only .signature-item .border-b {
+    margin: 0 auto 2mm auto !important;
+    width: 40mm !important;
+  }
+
+  /* Font size adjustments for mobile print */
+  @media print and (max-width: 576px) {
+    .print-only h1 { font-size: 12pt !important; }
+    .print-only h2 { font-size: 11pt !important; }
+    .print-only h3 { font-size: 9pt !important; }
+    .print-statement-table { font-size: 7pt !important; }
+    .print-only .kpi-card { font-size: 7pt !important; }
+  }
+
+  /* Ensure footer elements stay together */
+  .print-only footer,
+  .print-only .border-t.pt-4 {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    display: block !important;
+  }
+
+  /* ── Print date/time formatting ── */
+  .print-only time,
+  .print-only .text-slate-500 {
+    font-size: 7.5pt !important;
+    color: #64748b !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Ensure nothing overflows the page */
+  * {
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* Ensure html/body is white – stops colored page-end bleeds */
+  html, body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  /* Wipe ALL section / card colored backgrounds to white in print.
+     Only the table thead, tfoot, alerts are allowed color. */
+  .bg-slate-50,
+  .bg-slate-100,
+  .bg-slate-200,
+  .bg-gray-50,
+  .bg-gray-100,
+  .bg-gray-200,
+  .bg-white,
+  .bg-blue-50,
+  .bg-indigo-50,
+  .bg-green-50,
+  .bg-yellow-50,
+  .rounded,
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-md,
+  .border.rounded,
+  .bg-white.rounded,
+  .bg-white.rounded-lg,
+  .bg-white.p-4,
+  .bg-white.shadow,
+  .bg-white.p-4.rounded,
+  .bg-white.rounded.shadow,
+  .bg-white.p-5,
+  .bg-white.rounded-xl {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+  }
+
+  /* Remove shadows, box-shadows, and border-radius for cleaner print */
+  .shadow, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl {
+    box-shadow: none !important;
+  }
+
+  /* ── Tailwind print utilities support ── */
+  .print\\:hidden {
+    display: none !important;
+  }
+
+  .print\\:block {
+    display: block !important;
+  }
+
+  /* ── Analytics page print support ── */
+  /* Force grid layouts to render in print */
+  .grid {
+    display: grid !important;
+  }
+
+  /* Ensure SVG charts are visible with proper sizing */
+  svg {
+    display: inline-block !important;
+    max-height: 180px;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Keep KPI color indicators in print */
+  .border-l-4 {
+    border-left-width: 4px !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .border-l-emerald-500 { border-left-color: #10b981 !important; }
+  .border-l-amber-400   { border-left-color: #fbbf24 !important; }
+  .border-l-red-500     { border-left-color: #ef4444 !important; }
+  .border-l-slate-300   { border-left-color: #cbd5e1 !important; }
+
+  /* Alert backgrounds in print */
+  .bg-red-50    { background-color: #fef2f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bg-amber-50  { background-color: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bg-emerald-100 { background-color: #d1fae5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Image handling */
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Signature image in print */
+  .print-only img {
+    display: inline-block !important;
+    max-height: 25mm;
+    width: auto;
+  }
+}
+
+/* ===== FORM DENSITY NORMALIZATION ===== */
+/* Use Tailwind spacing utilities for consistency. Remove custom paddings that conflict. */
+
+/* .form-section, .form-grid, .card, .form-field, .form-body, .form-footer, etc. are handled by Tailwind classes above. */
+
+/* Remove duplicate label and button rules. Use Tailwind utilities in components. */
+
+/* Mobile tightening for vertical spacing */
+@media (max-width: 640px) {
+  .space-y-3 > * + * {
+    margin-top: 0.75rem !important;
+  }
+  .space-y-4 > * + * {
+    margin-top: 0.5rem !important;
+  }
+}
+/* ===== STANDARD FORM LAYOUT ===== */
+
+.form-container {
+  @apply bg-white rounded-lg shadow-sm border border-slate-200;
+}
+
+.form-header {
+  @apply px-4 py-3 border-b border-slate-200;
+}
+
+.form-title {
+  @apply text-base font-semibold text-slate-800;
+}
+
+.form-subtitle {
+  @apply text-xs text-slate-500 mt-0.5;
+}
+
+.form-body {
+  @apply px-4 py-3 space-y-3;
+}
+
+.form-footer {
+  @apply px-4 py-3 border-t border-slate-200 flex justify-end gap-2;
+}
+
+/* Inputs */
+.form-field label {
+  @apply block text-xs font-medium text-slate-600 mb-1;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  @apply w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm
+         focus:outline-none focus:ring-2 focus:ring-primary;
+}
+
+/* Compact buttons */
+.btn-primary {
+  @apply bg-primary text-white text-sm px-3 py-2 sm:px-4 sm:py-1.5 rounded-md hover:bg-primary-light;
+}
+
+.btn-secondary {
+  @apply bg-slate-100 text-slate-700 text-sm px-3 py-2 sm:px-4 sm:py-1.5 rounded-md hover:bg-slate-200;
+}
+
+/* Mobile tightening */
+@media (max-width: 640px) {
+  .form-body {
+    @apply space-y-2;
+  }
+}
+
+@keyframes progressGrow {
+  from {
+    width: 0%;
+  }
+  to {
+    width: var(--final-width);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+
+.leaflet-container {
+  z-index: 0 !important;
+}
