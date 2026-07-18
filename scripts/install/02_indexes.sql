@@ -1,0 +1,2 @@
+-- Placeholder: create indexes
+-- Purpose: add performance indexes after the base tables exist.

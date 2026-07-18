@@ -1,0 +1,2 @@
+-- Placeholder: create views
+-- Purpose: define reporting and operational views consumed by the app.

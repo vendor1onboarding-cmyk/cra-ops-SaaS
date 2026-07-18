@@ -1,0 +1,2 @@
+-- Placeholder: create triggers
+-- Purpose: define triggers for audit, automation, and workflow integrity.

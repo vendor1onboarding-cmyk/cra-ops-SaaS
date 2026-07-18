@@ -1,0 +1,2 @@
+-- Placeholder: configure storage
+-- Purpose: define required storage buckets and access policies.

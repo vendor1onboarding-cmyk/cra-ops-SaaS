@@ -1,0 +1,2 @@
+-- Placeholder: database version record
+-- Purpose: establish or update the database version marker for a vendor project.

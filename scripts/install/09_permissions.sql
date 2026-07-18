@@ -1,0 +1,2 @@
+-- Placeholder: set permissions
+-- Purpose: grant the minimum required permissions to application roles.

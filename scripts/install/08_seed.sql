@@ -1,0 +1,2 @@
+-- Placeholder: seed initial data
+-- Purpose: insert baseline data needed for a new vendor deployment.

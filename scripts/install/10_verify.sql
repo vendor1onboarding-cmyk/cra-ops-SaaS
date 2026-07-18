@@ -1,0 +1,2 @@
+-- Placeholder: verification checks
+-- Purpose: validate the installation and confirm core database objects exist.

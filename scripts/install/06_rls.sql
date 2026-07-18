@@ -1,0 +1,2 @@
+-- Placeholder: create row level security policies
+-- Purpose: enforce tenant, role, and data-access boundaries.
