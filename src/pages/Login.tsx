@@ -59,12 +59,12 @@ export default function Login() {
       <div className="w-full max-w-md bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-8 border border-slate-100">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-accent flex items-center justify-center text-sm font-bold text-primary shadow">
-            ST
+            CT
           </div>
           <div>
-            <h1 className="text-2xl font-semibold text-primary">Sruthi CRA Ops</h1>
+            <h1 className="text-2xl font-semibold text-primary">Cash Track Pro</h1>
             <p className="text-[11px] text-slate-500">
-              Cash Replenishment & Field Support Partner
+              Track, Manage, Deliver
             </p>
           </div>
         </div>

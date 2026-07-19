@@ -257,7 +257,7 @@ export default function AdminDashboard() {
             </div>
           </div>
           <p className="mt-6 text-[10px] text-slate-500">
-            This is a system-generated report from Sruthi CRA Ops. Any discrepancy must be reported within RBI-prescribed timelines.
+            This is a system-generated report from Cash Track Pro. Track, Manage, Deliver. Any discrepancy must be reported within RBI-prescribed timelines.
           </p>
         </div>
       </div>

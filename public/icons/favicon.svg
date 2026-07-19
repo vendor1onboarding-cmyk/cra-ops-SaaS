@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Cash Track Pro">
+  <defs>
+    <clipPath id="rounded-clip">
+      <rect x="0" y="0" width="192" height="192" rx="32" ry="32" />
+    </clipPath>
+
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- white background to ensure consistent appearance on all browsers -->
+  <rect width="192" height="192" fill="#ffffff" rx="32" ry="32" />
+
+  <!-- image clipped to rounded square with a subtle shadow -->
+  <g clip-path="url(#rounded-clip)" filter="url(#soft-shadow)">
+    <image href="/icons/icon-192.png" x="0" y="0" width="192" height="192" preserveAspectRatio="xMidYMid slice" />
+  </g>
+
+</svg>

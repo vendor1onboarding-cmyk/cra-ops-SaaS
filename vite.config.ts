@@ -8,9 +8,9 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       manifest: {
-        name: "Sruthi CRA Ops",
-        short_name: "CRA Ops",
-        description: "Cash Replenishment & Field Operations",
+        name: "Cash Track Pro",
+        short_name: "CashTrack",
+        description: "Track, Manage, Deliver",
         theme_color: "#0f172a",
         background_color: "#ffffff",
         display: "standalone",

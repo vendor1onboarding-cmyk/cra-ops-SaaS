@@ -122,15 +122,15 @@ const navItems = isAdmin
           </button>
 
           <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-primary shadow">
-            ST
+            CT
           </div>
 
           <div>
             <h1 className="text-base font-semibold leading-tight">
-              Sruthi CRA Ops
+              Cash Track Pro
             </h1>
             <p className="text-[11px] opacity-80">
-              Cash Replenishment & Field Support
+              Track, Manage, Deliver
             </p>
           </div>
         </div>

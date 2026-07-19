@@ -551,10 +551,10 @@ export default function AdminEODDetail() {
           <div className="flex items-center gap-3">
             <img src="/bank-logo.png" alt="Bank Logo" className="h-10 w-auto" />
             <div>
-              <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
-              <p className="text-xs text-slate-600">
-                End of Day Cash Operations Summary
-              </p>
+              <h1 className="text-xl font-bold">Cash Track Pro</h1>
+                <p className="text-xs text-slate-600">
+                  Track, Manage, Deliver
+                </p>
             </div>
           </div>
           <div className="text-right text-xs">
@@ -1092,8 +1092,8 @@ export default function AdminEODDetail() {
         </div>
         <div className="mt-4 flex flex-col sm:flex-row justify-between gap-2 sm:gap-0">
           <div>
-            <div className="font-semibold">Sruthi CRA Ops</div>
-            <div className="text-[10px] sm:text-xs">Cash Replenishment & ATM Operations</div>
+            <div className="font-semibold">Cash Track Pro</div>
+            <div className="text-[10px] sm:text-xs">Track, Manage, Deliver</div>
           </div>
           <div className="sm:text-right">
             <div className="text-[10px] sm:text-xs">Generated: {new Date().toLocaleDateString("en-IN")}</div>
@@ -1101,7 +1101,7 @@ export default function AdminEODDetail() {
           </div>
         </div>
         <p className="mt-2 text-[9px] sm:text-[10px] text-slate-500">
-          This is a system-generated report from Sruthi CRA Ops. Any discrepancy must be reported within RBI-prescribed timelines.
+          This is a system-generated report from Cash Track Pro. Track, Manage, Deliver. Any discrepancy must be reported within RBI-prescribed timelines.
         </p>
       </div>
 

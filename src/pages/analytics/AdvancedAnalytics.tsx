@@ -197,8 +197,8 @@ export default function AdvancedAnalytics() {
         <div className="flex items-start justify-between">
           <div>
             <img src="/bank-logo.png" alt="" className="h-8 mb-1" />
-            <h1 className="text-lg font-bold">Sruthi CRA Ops</h1>
-            <p className="text-xs text-slate-600">Advanced Operations Analytics</p>
+            <h1 className="text-lg font-bold">Cash Track Pro</h1>
+            <p className="text-xs text-slate-600">Track, Manage, Deliver</p>
           </div>
           <div className="text-right text-xs text-slate-600">
             <div>Period: {dateLabel}</div>
@@ -448,8 +448,8 @@ export default function AdvancedAnalytics() {
       <div className="print-only mt-10 pt-4 border-t text-xs text-slate-600">
         <div className="flex justify-between">
           <div>
-            <div className="font-semibold">Sruthi CRA Ops</div>
-            <div>Cash Replenishment & ATM Operations</div>
+            <div className="font-semibold">Cash Track Pro</div>
+            <div>Track, Manage, Deliver</div>
           </div>
           <div className="text-right">
             <div>Generated: {new Date().toLocaleDateString("en-IN")}</div>

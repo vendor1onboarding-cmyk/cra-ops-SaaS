@@ -1171,9 +1171,9 @@ export default function StatementOfAccounts() {
               />
 
               <div>
-                <h1 className="text-xl font-bold">Sruthi CRA Ops</h1>
+                <h1 className="text-xl font-bold">Cash Track Pro</h1>
                 <p className="text-xs text-slate-600">
-                  Cash Replenishment & ATM Operations
+                  Track, Manage, Deliver
                 </p>
               </div>
             </div>
@@ -2244,8 +2244,8 @@ export default function StatementOfAccounts() {
             </div>
           </div>
 
-          <p className="mt-6 text-[9px] sm:text-[10px] text-slate-500">
-            This is a system-generated report from Sruthi CRA Ops.
+            <p className="mt-6 text-[9px] sm:text-[10px] text-slate-500">
+            This is a system-generated report from Cash Track Pro. Track, Manage, Deliver.
             Any discrepancy must be reported within RBI-prescribed timelines.
           </p>
         </div>
