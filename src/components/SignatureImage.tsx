@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { toUTCISOString } from '../utils/time';
 
 interface SignatureImageProps {
   src?: string | null;
@@ -72,7 +73,7 @@ export const SignatureImage: React.FC<SignatureImageProps> = ({
       console.log('[SignatureImage] Attempting to load signature:', {
         bucket: 'eod-signatures',
         path: urlObj,
-        timestamp: new Date().toISOString(),
+        timestamp: toUTCISOString(),
       });
     } catch (e) {
       console.error('[SignatureImage] Invalid URL format:', src);
@@ -102,7 +103,7 @@ export const SignatureImage: React.FC<SignatureImageProps> = ({
       console.error('[SignatureImage] Image preload failed:', {
         src,
         error: errorMsg,
-        timestamp: new Date().toISOString(),
+        timestamp: toUTCISOString(),
       });
       setLoading(false);
       setError(errorMsg);
@@ -166,7 +167,7 @@ export const SignatureImage: React.FC<SignatureImageProps> = ({
   const handleImageError = (event: React.SyntheticEvent<HTMLImageElement, Event>) => {
     console.error('[SignatureImage] IMG tag onError fired:', {
       src: imageUrl,
-      timestamp: new Date().toISOString(),
+      timestamp: toUTCISOString(),
     });
     // Already handled in useEffect preload, but show error if not already handled
     if (loading) {

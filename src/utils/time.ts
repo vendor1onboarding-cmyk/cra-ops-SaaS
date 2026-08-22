@@ -6,8 +6,22 @@ const IST_OFFSET_HOURS = 5.5; // 5 hours 30 minutes
 const IST_OFFSET_MS = IST_OFFSET_HOURS * 60 * 60 * 1000;
 
 // =====================================
-// DATABASE LAYER (Always UTC)
+// CANONICAL TIMESTAMP STORAGE (Always UTC)
 // =====================================
+
+/**
+ * Generate current timestamp in UTC ISO format for storage in database
+ * CANONICAL FUNCTION - Use this for all new timestamp generation
+ * 
+ * Always returns a true UTC instant (ISO 8601 with Z suffix)
+ * Do NOT manually add timezone offsets - the browser/runtime handles this
+ * 
+ * @param date - Optional Date to convert (defaults to now)
+ * @returns ISO string in UTC format (e.g., "2026-01-26T10:30:00.000Z")
+ */
+export function toUTCISOString(date?: Date): string {
+  return (date || new Date()).toISOString();
+}
 
 /**
  * Get current date in IST and return as YYYY-MM-DD string for database queries
@@ -17,9 +31,14 @@ const IST_OFFSET_MS = IST_OFFSET_HOURS * 60 * 60 * 1000;
  * @returns Date string in YYYY-MM-DD format (IST timezone)
  */
 export function getISTDateString(): string {
-  const now = new Date();
-  const istDate = new Date(now.getTime() + IST_OFFSET_MS);
-  return istDate.toISOString().split("T")[0];
+  // Use Intl to get IST date without manual offset arithmetic
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: IST_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(new Date());
 }
 
 /**
@@ -27,12 +46,17 @@ export function getISTDateString(): string {
  * @returns Date string in YYYY-MM-DD format
  */
 export function getISTMonthStart(): string {
-  const istDate = new Date(new Date().getTime() + IST_OFFSET_MS);
-  const year = istDate.getUTCFullYear();
-  const month = istDate.getUTCMonth();
-  const firstDay = new Date(year, month, 1);
-  const istFirstDay = new Date(firstDay.getTime() + IST_OFFSET_MS);
-  return istFirstDay.toISOString().split("T")[0];
+  const now = new Date();
+  // Get IST year and month
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: IST_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+  });
+  const parts = formatter.formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  return `${year}-${month}-01`;
 }
 
 /**

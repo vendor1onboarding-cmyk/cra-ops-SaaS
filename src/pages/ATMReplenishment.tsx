@@ -3,7 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import AppLayout from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
-import { getISTDateString } from "../utils/time";
+import { getISTDateString, toUTCISOString } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
 
 const GPS_RADIUS_METERS = 100;
@@ -15,6 +15,11 @@ const DENOM_VALUES: Record<string, number> = {
   denom_2000: 2000,
 };
 
+/**
+ * DEPRECATED: Use toUTCISOString() from time.ts instead
+ * This function incorrectly encodes IST as UTC
+ * Kept for backward compatibility during migration
+ */
 function toIST(date = new Date()) {
   return new Date(date.getTime() + 5.5 * 60 * 60 * 1000).toISOString();
 }
@@ -981,7 +986,7 @@ export default function ATMReplenishment() {
       audit: {
         is_backdated: Boolean(isBackdated),
         original_assignment_date: selectedAssignmentDate,
-        actual_load_timestamp: new Date().toISOString(),
+        actual_load_timestamp: toUTCISOString(),
       },
     };
 
@@ -989,7 +994,7 @@ export default function ATMReplenishment() {
       assignment_id: assignmentId,
       site_id: siteId,
       time_in: timeIn,
-      time_out: toIST(),
+      time_out: toUTCISOString(),
       ...denoms,
       remarks,
       load_lat: lat,
@@ -1161,7 +1166,7 @@ export default function ATMReplenishment() {
               onChange={(e) => {
                 const id = Number(e.target.value);
                 setSiteId(id);
-                setTimeIn(id ? toIST() : null);
+                setTimeIn(id ? toUTCISOString() : null);
                 setGpsStatus("unknown");
                 setGpsMsg(null);
               }}

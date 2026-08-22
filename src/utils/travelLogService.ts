@@ -1,5 +1,6 @@
 import { supabase } from "../api/supabaseClient";
 import { calculateDistanceWithFallback } from "./roadDistance";
+import { toUTCISOString } from "./time";
 
 /**
  * TravelLogService - Safe, isolated service for travel log operations
@@ -154,7 +155,7 @@ class TravelLogService {
       // Get rate if not provided
       const rate = ratePerKm ?? (await this.getVehicleRate(vehicleType));
 
-      const nowUTC = new Date().toISOString();
+      const nowUTC = toUTCISOString();
 
       const { data, error } = await supabase
         .from("travel_logs")
@@ -330,7 +331,7 @@ class TravelLogService {
       }
 
       const allowance = Math.max(0, finalKm) * (activeTravel.rate_per_km || 0);
-      const nowUTC = new Date().toISOString();
+      const nowUTC = toUTCISOString();
 
       const { error } = await supabase
         .from("travel_logs")
