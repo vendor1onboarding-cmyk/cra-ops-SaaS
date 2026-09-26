@@ -30,6 +30,8 @@ import AdminApprovalsPage from "./pages/AdminApprovals";
 import AdminEODDetailPage from "./pages/AdminEODDetail";
 
 import RequireAdmin from "./components/RequireAdmin";
+import LocationHeartbeat from "./components/LocationHeartbeat";
+import AdminCustodianTracking from "./pages/AdminCustodianTracking";
 
 function PrivateRoute({ children }: { children: JSX.Element }) {
   const { profile, loading } = useAuth();
@@ -55,6 +57,7 @@ function PrivateRoute({ children }: { children: JSX.Element }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <LocationHeartbeat />
       <Routes>
         {/* ----------------- AUTH ----------------- */}
         <Route path="/login" element={<Login />} />
@@ -216,6 +219,8 @@ export default function App() {
             </RequireAdmin>
           }
         />
+
+        <Route path="/admin/custodian-tracking" element={<RequireAdmin><AdminCustodianTracking /></RequireAdmin>} />
 
         {/* 🔴 THIS ROUTE WAS MISSING */}
         <Route
