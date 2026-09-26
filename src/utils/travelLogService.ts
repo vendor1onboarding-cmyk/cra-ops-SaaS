@@ -67,13 +67,12 @@ class TravelLogService {
    * Check if there's an active travel session for the given custodian
    * Returns true if active, false otherwise (or on error)
    */
-  async hasActiveTravel(custodianId: string, assignmentId: number): Promise<boolean> {
+  async hasActiveTravel(custodianId: string, _assignmentId?: number): Promise<boolean> {
     try {
       const { data } = await supabase
         .from("travel_logs")
         .select("id")
         .eq("custodian_id", custodianId)
-        .eq("assignment_id", assignmentId)
         .eq("status", "in_progress")
         .maybeSingle();
       return !!data;
@@ -196,7 +195,7 @@ class TravelLogService {
     options?: { odometerEnd?: string }
   ): Promise<boolean> {
     try {
-      // Find the active travel session for this assignment (if provided), else any active
+      // Find the custodian's active travel session. Travel chains may cross assignments.
       let query = supabase
         .from("travel_logs")
         .select("*")
@@ -204,7 +203,6 @@ class TravelLogService {
         .eq("status", "in_progress")
         .order("start_time", { ascending: false })
         .limit(1);
-      if (assignmentId) query = query.eq("assignment_id", assignmentId);
       const { data: activeTravel } = await query.maybeSingle();
 
       if (!activeTravel) {
@@ -436,8 +434,12 @@ class TravelLogService {
     try {
       // Preserve current context before ending
       const currentContext = this.getTravelContext();
-      // End current travel for this assignment (if provided)
-      await this.endTravel(custodianId, newTravelOptions.assignmentId);
+      // Close the custodian's current segment before starting the next one.
+      const ended = await this.endTravel(custodianId, newTravelOptions.assignmentId);
+      if (!ended) {
+        console.warn("[TravelLog] Previous travel could not be closed; skipping new segment");
+        return null;
+      }
       // Small delay to ensure transaction completes
       await new Promise((resolve) => setTimeout(resolve, 100));
       // Start new travel with preserved context
@@ -459,7 +461,7 @@ class TravelLogService {
     options: TravelLogServiceOptions
   ): Promise<number | null> {
     try {
-      const hasActive = await this.hasActiveTravel(options.custodianId, options.assignmentId);
+      const hasActive = await this.hasActiveTravel(options.custodianId);
       if (!hasActive) {
         return await this.startTravel(options);
       }
