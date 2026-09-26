@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../api/supabaseClient";
 import AppLayout from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
+import { DenominationFields } from "../components/DenominationFields";
 import { useAuth } from "../context/AuthContext";
 import { getISTDateString, toUTCISOString } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
@@ -1505,7 +1506,17 @@ export default function ATMReplenishment() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <DenominationFields
+            values={denoms}
+            onChange={(key, value) => {
+              setDenoms({ ...denoms, [key]: value });
+              if (denomSource === "plan") {
+                setDenomSource("manual");
+              }
+            }}
+            enableBundles
+          />
+          {false && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {denomBreakup.map((d) => (
               <div key={d.key} className="form-group">
                 <label className="text-sm font-medium text-slate-700">
@@ -1532,7 +1543,7 @@ export default function ATMReplenishment() {
                 />
               </div>
             ))}
-          </div>
+          </div>}
 
           {/* Summary */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">

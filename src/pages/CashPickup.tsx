@@ -3,6 +3,7 @@ import { supabase } from "../api/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import AppLayout from "../components/Layout";
 import ConfirmationModal from "../components/ConfirmationModal";
+import { DenominationFields } from "../components/DenominationFields";
 import { getISTDateString } from "../utils/time";
 import { travelLogService, TravelContext } from "../utils/travelLogService";
 
@@ -1086,7 +1087,18 @@ export default function CashPickup() {
                     </div>
                   ) : null}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <DenominationFields
+                    values={form}
+                    onChange={(key, value) =>
+                      setForm({
+                        ...form,
+                        [key]: value,
+                      })
+                    }
+                    enableBundles
+                  />
+                  {/* Legacy denomination grid replaced by the shared notes/bundles control. */}
+                  {false && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {[
                       ["denom_100", 100],
                       ["denom_200", 200],
@@ -1112,7 +1124,7 @@ export default function CashPickup() {
                         />
                       </div>
                     ))}
-                  </div>
+                  </div>}
 
                   {/* Summary Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
