@@ -12,7 +12,7 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { formatIST } from "../utils/time";
+import { formatIST, isTodayIST } from "../utils/time";
 import { calculateDistanceWithFallback } from "../utils/roadDistance";
 import "leaflet-polylinedecorator";
 
@@ -24,13 +24,7 @@ function isValidCoord(v: any) {
 }
 
 function isToday(utc: string) {
-  const d = new Date(utc);
-  const now = new Date();
-  return (
-    d.getUTCFullYear() === now.getUTCFullYear() &&
-    d.getUTCMonth() === now.getUTCMonth() &&
-    d.getUTCDate() === now.getUTCDate()
-  );
+  return isTodayIST(utc);
 }
 
 /**
