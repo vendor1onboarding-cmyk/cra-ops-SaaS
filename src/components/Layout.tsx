@@ -20,6 +20,7 @@ const ICONS: Record<string, string> = {
   "Tech Issues": "⚠️",
   EOD: "🧾",
   "Route Assignment": "🗺️",
+  "Custodian Tracking": "📍",
   "EOD Approvals": "✅",
   "SOA Adjustments": "🧮",
   "Advanced Analytics": "📈",
